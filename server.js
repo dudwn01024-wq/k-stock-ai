@@ -15,6 +15,9 @@ const NAVER_HEADERS = {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 };
 
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+
 const parseNumber = (val) => {
   if (val === null || val === undefined || val === '') return null;
 
@@ -32,6 +35,21 @@ const parseNumber = (val) => {
   }
 
   return null;
+};
+
+const average = (numbers) => {
+  if (!Array.isArray(numbers) || numbers.length === 0) {
+    return null;
+  }
+
+  if (numbers.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return Math.round(
+    numbers.reduce((sum, value) => sum + value, 0) /
+      numbers.length
+  );
 };
 
 const getIntegrationInfoValue = (integrationData, code) => {
@@ -86,7 +104,9 @@ const findMatchingStock = (data, queryName) => {
 
     const code = String(value).trim();
 
-    return /^\d{6}$/.test(code) ? code : null;
+    return /^\d{6}$/.test(code)
+      ? code
+      : null;
   };
 
   const inspectNode = (node) => {
@@ -98,11 +118,16 @@ const findMatchingStock = (data, queryName) => {
         .map((value) => value.trim());
 
       const exactName = strings.find(
-        (value) => value.toLowerCase() === targetName
+        (value) =>
+          value.toLowerCase() === targetName
       );
 
-      const codeValue = node.find((value) => normalizeCode(value));
-      const code = normalizeCode(codeValue);
+      const codeValue = node.find((value) =>
+        normalizeCode(value)
+      );
+
+      const code =
+        normalizeCode(codeValue);
 
       if (exactName && code) {
         return {
@@ -130,7 +155,8 @@ const findMatchingStock = (data, queryName) => {
 
       if (
         typeof name === 'string' &&
-        name.trim().toLowerCase() === targetName &&
+        name.trim().toLowerCase() ===
+          targetName &&
         code
       ) {
         return {
@@ -146,7 +172,8 @@ const findMatchingStock = (data, queryName) => {
   const traverse = (node) => {
     if (!node) return null;
 
-    const direct = inspectNode(node);
+    const direct =
+      inspectNode(node);
 
     if (direct) {
       return direct;
@@ -154,15 +181,19 @@ const findMatchingStock = (data, queryName) => {
 
     if (Array.isArray(node)) {
       for (const child of node) {
-        const result = traverse(child);
+        const result =
+          traverse(child);
 
         if (result) {
           return result;
         }
       }
-    } else if (typeof node === 'object') {
+    } else if (
+      typeof node === 'object'
+    ) {
       for (const key of Object.keys(node)) {
-        const result = traverse(node[key]);
+        const result =
+          traverse(node[key]);
 
         if (result) {
           return result;
@@ -176,607 +207,1335 @@ const findMatchingStock = (data, queryName) => {
   return traverse(data);
 };
 
-const average = (numbers) => {
-  if (!Array.isArray(numbers) || numbers.length === 0) {
-    return null;
-  }
+const validateSymbol = (symbol) =>
+  /^\d{6}$/.test(String(symbol || ''));
 
-  if (numbers.some((value) => !Number.isFinite(value))) {
-    return null;
-  }
+// ========================================
+// 실제 현재가 데이터
+// ========================================
 
-  return Math.round(
-    numbers.reduce((sum, value) => sum + value, 0) /
-      numbers.length
+const fetchStockQuoteData = async (symbol) => {
+  const basicResponse = await fetch(
+    `https://m.stock.naver.com/api/stock/${symbol}/basic`,
+    {
+      headers: NAVER_HEADERS
+    }
   );
-};
 
-// ========================================
-// HEALTH
-// ========================================
-
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    status: 'ok'
-  });
-});
-
-// ========================================
-// STOCK SEARCH
-// ========================================
-
-app.get('/api/stock/search', async (req, res) => {
-  const query = req.query.query;
-
-  if (!query || !query.trim()) {
-    return res.status(400).json({
-      symbol: null,
-      name: null,
-      error: 'Query parameter is required'
-    });
+  if (!basicResponse.ok) {
+    throw new Error(
+      `Failed to fetch stock basic data: HTTP ${basicResponse.status}`
+    );
   }
 
-  const cleanQuery = query.trim();
+  const basicData =
+    await basicResponse.json();
 
-  try {
-    if (/^\d{6}$/.test(cleanQuery)) {
-      const basicResponse = await fetch(
-        `https://m.stock.naver.com/api/stock/${cleanQuery}/basic`,
-        {
-          headers: NAVER_HEADERS
-        }
-      );
-
-      if (!basicResponse.ok) {
-        return res.status(200).json({
-          symbol: null,
-          name: null
-        });
-      }
-
-      const basicData = await basicResponse.json();
-
-      return res.status(200).json({
-        symbol: cleanQuery,
-        name: basicData.stockName || cleanQuery
-      });
-    }
-
-    const response = await fetch(
-      `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
-        cleanQuery
-      )}&q_enc=utf-8&target=stock`,
-      {
-        headers: {
-          ...NAVER_HEADERS,
-          Referer: 'https://finance.naver.com'
-        }
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to search stock: HTTP ${response.status}`
-      );
-    }
-
-    const data = await response.json();
-
-    const matched = findMatchingStock(
-      data,
-      cleanQuery
-    );
-
-    if (!matched) {
-      return res.status(200).json({
-        symbol: null,
-        name: null
-      });
-    }
-
-    return res.status(200).json(matched);
-  } catch (error) {
-    console.error(
-      `[K-Stock AI] Error searching stock for ${cleanQuery}:`,
-      error.message
-    );
-
-    return res.status(500).json({
-      symbol: null,
-      name: null,
-      error: 'Failed to search stock'
-    });
-  }
-});
-
-// ========================================
-// STOCK QUOTE
-// ========================================
-
-app.get('/api/stock/quote', async (req, res) => {
-  const symbol = req.query.symbol;
-
-  if (!symbol) {
-    return res.status(400).json({
-      symbol: null,
-      stockName: null,
-      currentPrice: null,
-      priceChange: null,
-      changeRate: null,
-      volume: null,
-      tradingValue: null,
-      highPrice: null,
-      lowPrice: null,
-      foreignerNet: null,
-      institutionNet: null,
-      foreignerBuy: null,
-      foreignerSell: null,
-      institutionBuy: null,
-      institutionSell: null,
-      supplyDate: null,
-      error: 'Symbol query parameter is required'
-    });
-  }
-
-  if (!/^\d{6}$/.test(symbol)) {
-    return res.status(400).json({
-      symbol,
-      stockName: null,
-      currentPrice: null,
-      priceChange: null,
-      changeRate: null,
-      volume: null,
-      tradingValue: null,
-      highPrice: null,
-      lowPrice: null,
-      foreignerNet: null,
-      institutionNet: null,
-      foreignerBuy: null,
-      foreignerSell: null,
-      institutionBuy: null,
-      institutionSell: null,
-      supplyDate: null,
-      error: 'Symbol must be a 6-digit Korean stock code'
-    });
-  }
-
-  try {
-    const basicResponse = await fetch(
-      `https://m.stock.naver.com/api/stock/${symbol}/basic`,
-      {
-        headers: NAVER_HEADERS
-      }
-    );
-
-    if (!basicResponse.ok) {
-      throw new Error(
-        `Failed to fetch stock basic data: HTTP ${basicResponse.status}`
-      );
-    }
-
-    const basicData = await basicResponse.json();
-
-    const currentPrice = parseNumber(
+  const currentPrice =
+    parseNumber(
       basicData.closePrice ||
         basicData.nowPrice
     );
 
-    const priceChange = parseNumber(
+  const priceChange =
+    parseNumber(
       basicData.compareToPreviousClosePrice
     );
 
-    const changeRate = parseNumber(
+  const changeRate =
+    parseNumber(
       basicData.fluctuationsRatio
     );
 
-    const stockName =
-      basicData.stockName ||
-      null;
+  const stockName =
+    basicData.stockName ||
+    null;
 
-    let volume = parseNumber(
+  let volume =
+    parseNumber(
       basicData.accumulatedTradingVolume ||
         basicData.volume ||
         basicData.tradingVolume ||
         basicData.executedVolume
     );
 
-    let tradingValue = parseNumber(
+  let tradingValue =
+    parseNumber(
       basicData.accumulatedTradingValue ||
         basicData.tradingValue
     );
 
-    let highPrice = parseNumber(
+  let highPrice =
+    parseNumber(
       basicData.highPrice ||
         basicData.maxPrice
     );
 
-    let lowPrice = parseNumber(
+  let lowPrice =
+    parseNumber(
       basicData.lowPrice ||
         basicData.minPrice
     );
 
-    if (
-      volume === null ||
-      tradingValue === null ||
-      highPrice === null ||
-      lowPrice === null
-    ) {
-      try {
-        const priceResponse = await fetch(
+  if (
+    volume === null ||
+    tradingValue === null ||
+    highPrice === null ||
+    lowPrice === null
+  ) {
+    try {
+      const priceResponse =
+        await fetch(
           `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=1&page=1`,
           {
-            headers: NAVER_HEADERS
+            headers:
+              NAVER_HEADERS
           }
         );
 
-        if (priceResponse.ok) {
-          const priceData =
-            await priceResponse.json();
+      if (
+        priceResponse.ok
+      ) {
+        const priceData =
+          await priceResponse.json();
+
+        if (
+          Array.isArray(
+            priceData
+          ) &&
+          priceData.length >
+            0
+        ) {
+          const latest =
+            priceData[0];
 
           if (
-            Array.isArray(priceData) &&
-            priceData.length > 0
+            highPrice ===
+            null
           ) {
-            const latest = priceData[0];
-
-            if (highPrice === null) {
-              highPrice = parseNumber(
+            highPrice =
+              parseNumber(
                 latest.highPrice
               );
-            }
+          }
 
-            if (lowPrice === null) {
-              lowPrice = parseNumber(
+          if (
+            lowPrice ===
+            null
+          ) {
+            lowPrice =
+              parseNumber(
                 latest.lowPrice
               );
-            }
+          }
 
-            if (volume === null) {
-              volume = parseNumber(
+          if (
+            volume ===
+            null
+          ) {
+            volume =
+              parseNumber(
                 latest.accumulatedTradingVolume ||
                   latest.volume
               );
-            }
+          }
 
-            if (tradingValue === null) {
-              tradingValue = parseNumber(
+          if (
+            tradingValue ===
+            null
+          ) {
+            tradingValue =
+              parseNumber(
                 latest.accumulatedTradingValue ||
                   latest.tradingValue
               );
-            }
           }
         }
-      } catch (priceErr) {
-        console.warn(
-          `[K-Stock AI] Latest price fallback failed for ${symbol}:`,
-          priceErr.message
-        );
       }
+    } catch (error) {
+      console.warn(
+        `[K-Stock AI] Latest price fallback failed for ${symbol}:`,
+        error.message
+      );
     }
+  }
 
-    if (tradingValue === null) {
-      try {
-        const realtimeResponse = await fetch(
+  if (
+    tradingValue === null
+  ) {
+    try {
+      const realtimeResponse =
+        await fetch(
           `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${symbol}`,
           {
-            headers: NAVER_HEADERS
+            headers:
+              NAVER_HEADERS
           }
         );
 
-        if (realtimeResponse.ok) {
-          const realtimeData =
-            await realtimeResponse.json();
+      if (
+        realtimeResponse.ok
+      ) {
+        const realtimeData =
+          await realtimeResponse.json();
 
-          const realtimeItem =
-            realtimeData &&
-            realtimeData.result &&
-            Array.isArray(
-              realtimeData.result.areas
-            ) &&
-            realtimeData.result.areas[0] &&
-            Array.isArray(
-              realtimeData.result.areas[0].datas
-            )
-              ? realtimeData.result.areas[0]
-                  .datas[0]
-              : null;
+        const realtimeItem =
+          realtimeData &&
+          realtimeData.result &&
+          Array.isArray(
+            realtimeData.result
+              .areas
+          ) &&
+          realtimeData.result
+            .areas[0] &&
+          Array.isArray(
+            realtimeData.result
+              .areas[0].datas
+          )
+            ? realtimeData
+                .result
+                .areas[0]
+                .datas[0]
+            : null;
 
-          if (realtimeItem) {
-            tradingValue = parseNumber(
+        if (
+          realtimeItem
+        ) {
+          tradingValue =
+            parseNumber(
               realtimeItem.aa ||
                 realtimeItem.accumulatedTradingValue
             );
-          }
         }
-      } catch (realtimeErr) {
-        console.warn(
-          `[K-Stock AI] Realtime trading value fetch failed for ${symbol}:`,
-          realtimeErr.message
-        );
       }
+    } catch (error) {
+      console.warn(
+        `[K-Stock AI] Realtime trading value fetch failed for ${symbol}:`,
+        error.message
+      );
     }
+  }
 
-    let foreignerNet = null;
-    let institutionNet = null;
-    let supplyDate = null;
+  let foreignerNet =
+    null;
 
-    try {
-      const integrationResponse =
-        await fetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/integration`,
-          {
-            headers: NAVER_HEADERS
-          }
-        );
+  let institutionNet =
+    null;
 
-      if (integrationResponse.ok) {
-        const integrationData =
-          await integrationResponse.json();
+  let supplyDate =
+    null;
 
-        if (tradingValue === null) {
-          tradingValue = parseNumber(
+  try {
+    const integrationResponse =
+      await fetch(
+        `https://m.stock.naver.com/api/stock/${symbol}/integration`,
+        {
+          headers:
+            NAVER_HEADERS
+        }
+      );
+
+    if (
+      integrationResponse.ok
+    ) {
+      const integrationData =
+        await integrationResponse.json();
+
+      if (
+        tradingValue ===
+        null
+      ) {
+        tradingValue =
+          parseNumber(
             getIntegrationInfoValue(
               integrationData,
               'accumulatedTradingValue'
             )
           );
-        }
+      }
 
-        const latestTrend =
-          getLatestDealTrend(
-            integrationData
-          );
+      const latestTrend =
+        getLatestDealTrend(
+          integrationData
+        );
 
-        if (latestTrend) {
-          foreignerNet = parseNumber(
+      if (
+        latestTrend
+      ) {
+        foreignerNet =
+          parseNumber(
             latestTrend.foreignerPureBuyQuant
           );
 
-          institutionNet = parseNumber(
+        institutionNet =
+          parseNumber(
             latestTrend.organPureBuyQuant
           );
 
-          supplyDate =
-            latestTrend.localTradedAt ||
-            latestTrend.tradeDate ||
-            latestTrend.bizdate ||
-            latestTrend.date ||
-            latestTrend.localDate ||
-            null;
-        }
+        supplyDate =
+          latestTrend.localTradedAt ||
+          latestTrend.tradeDate ||
+          latestTrend.bizdate ||
+          latestTrend.date ||
+          latestTrend.localDate ||
+          null;
       }
-    } catch (integrationErr) {
-      console.warn(
-        `[K-Stock AI] Integration fetch failed for ${symbol}:`,
-        integrationErr.message
-      );
     }
-
-    return res.status(200).json({
-      symbol,
-      stockName,
-      currentPrice,
-      priceChange,
-      changeRate,
-      volume,
-      tradingValue,
-      highPrice,
-      lowPrice,
-      foreignerNet,
-      institutionNet,
-
-      foreignerBuy: null,
-      foreignerSell: null,
-      institutionBuy: null,
-      institutionSell: null,
-
-      supplyDate
-    });
   } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching stock quote for ${symbol}:`,
+    console.warn(
+      `[K-Stock AI] Integration fetch failed for ${symbol}:`,
       error.message
     );
-
-    return res.status(500).json({
-      symbol,
-      stockName: null,
-      currentPrice: null,
-      priceChange: null,
-      changeRate: null,
-      volume: null,
-      tradingValue: null,
-      highPrice: null,
-      lowPrice: null,
-      foreignerNet: null,
-      institutionNet: null,
-      foreignerBuy: null,
-      foreignerSell: null,
-      institutionBuy: null,
-      institutionSell: null,
-      supplyDate: null,
-      error: 'Failed to fetch real stock quote'
-    });
   }
-});
+
+  return {
+    symbol,
+    stockName,
+    currentPrice,
+    priceChange,
+    changeRate,
+    volume,
+    tradingValue,
+    highPrice,
+    lowPrice,
+    foreignerNet,
+    institutionNet,
+
+    foreignerBuy: null,
+    foreignerSell: null,
+    institutionBuy: null,
+    institutionSell: null,
+
+    supplyDate
+  };
+};
 
 // ========================================
-// STOCK CHART
+// 뉴스 데이터
 // ========================================
 
-app.get('/api/stock/chart', async (req, res) => {
-  const symbol = req.query.symbol;
+const fetchStockNewsBySymbol = async (symbol) => {
+  const response = await fetch(
+    `https://m.stock.naver.com/api/news/stock/${symbol}?pageSize=10&page=1`,
+    {
+      headers: NAVER_HEADERS
+    }
+  );
 
-  const timeframe = (
-    req.query.timeframe ||
-    '1M'
-  ).toUpperCase();
-
-  if (!symbol) {
-    return res.status(400).json({
-      symbol: null,
-      timeframe,
-      supported: false,
-      chart: [],
-      error: 'Symbol query parameter is required'
-    });
-  }
-
-  if (!/^\d{6}$/.test(symbol)) {
-    return res.status(400).json({
-      symbol,
-      timeframe,
-      supported: false,
-      chart: [],
-      error: 'Symbol must be a 6-digit Korean stock code'
-    });
-  }
-
-  if (timeframe === '1D') {
-    return res.status(200).json({
-      symbol,
-      timeframe,
-      supported: false,
-      chart: []
-    });
-  }
-
-  let pageSize = 30;
-
-  switch (timeframe) {
-    case '1W':
-      pageSize = 7;
-      break;
-
-    case '1M':
-      pageSize = 30;
-      break;
-
-    case '3M':
-      pageSize = 90;
-      break;
-
-    case '1Y':
-      pageSize = 365;
-      break;
-
-    case '5Y':
-      pageSize = 1825;
-      break;
-
-    default:
-      pageSize = 30;
-  }
-
-  try {
-    const response = await fetch(
-      `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${pageSize}&page=1`,
-      {
-        headers: NAVER_HEADERS
-      }
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch stock news: HTTP ${response.status}`
     );
+  }
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch stock chart data: HTTP ${response.status}`
+  const data =
+    await response.json();
+
+  let rawList = [];
+
+  if (
+    Array.isArray(data)
+  ) {
+    rawList =
+      data.flatMap(
+        (group) =>
+          group &&
+          Array.isArray(
+            group.items
+          )
+            ? group.items
+            : []
       );
+  } else if (
+    data &&
+    Array.isArray(
+      data.items
+    )
+  ) {
+    rawList =
+      data.items;
+  }
+
+  return rawList.map(
+    (item) => {
+      const rawTitle =
+        item.tit ||
+        item.title ||
+        null;
+
+      const cleanTitle =
+        rawTitle
+          ? rawTitle.replace(
+              /<[^>]+>/g,
+              ''
+            )
+          : null;
+
+      const rawSummary =
+        item.subtit ||
+        item.body ||
+        item.summary ||
+        null;
+
+      const cleanSummary =
+        rawSummary
+          ? rawSummary.replace(
+              /<[^>]+>/g,
+              ''
+            )
+          : null;
+
+      const articleId =
+        item.articleId ||
+        item.id ||
+        null;
+
+      const officeId =
+        item.officeId ||
+        null;
+
+      let articleUrl =
+        item.url ||
+        null;
+
+      if (
+        officeId &&
+        articleId
+      ) {
+        articleUrl =
+          `https://n.news.naver.com/mnews/article/${officeId}/${articleId}`;
+      }
+
+      return {
+        id: articleId,
+        title: cleanTitle,
+
+        publisher:
+          item.officeName ||
+          item.publisher ||
+          null,
+
+        date:
+          item.datetime ||
+          item.createdAt ||
+          item.date ||
+          null,
+
+        summary:
+          cleanSummary,
+
+        url:
+          articleUrl
+      };
     }
+  );
+};
 
-    const data =
-      await response.json();
+// ========================================
+// 전략 계산
+// ========================================
 
-    if (!Array.isArray(data)) {
-      return res.status(200).json({
-        symbol,
-        timeframe,
-        supported: true,
-        chart: []
-      });
-    }
+const calculateStrategy = async (symbol) => {
+  const emptyResult = () => ({
+    symbol,
 
-    const chartData = data.map(
-      (item) => ({
+    currentPrice: null,
+
+    ma5: null,
+
+    ma20: null,
+
+    recentHigh20: null,
+
+    recentLow20: null,
+
+    nearestSupport: null,
+
+    nearestResistance: null,
+
+    currentVolume: null,
+
+    averageVolume20: null,
+
+    volumeRatio: null,
+
+    foreignerNet: null,
+
+    institutionNet: null,
+
+    netSupplyTotal: null,
+
+    trendPassed: null,
+
+    volumePassed: null,
+
+    supplyPassed: null,
+
+    signal:
+      'INSUFFICIENT_DATA',
+
+    entryPrice: null,
+
+    takeProfitPrice: null,
+
+    stopLossPrice: null,
+
+    dataPoints: 0
+  });
+
+  const [
+    priceResponse,
+    integrationResponse
+  ] =
+    await Promise.all([
+      fetch(
+        `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
+        {
+          headers:
+            NAVER_HEADERS
+        }
+      ),
+
+      fetch(
+        `https://m.stock.naver.com/api/stock/${symbol}/integration`,
+        {
+          headers:
+            NAVER_HEADERS
+        }
+      )
+    ]);
+
+  if (
+    !priceResponse.ok
+  ) {
+    throw new Error(
+      `Failed to fetch strategy source data: HTTP ${priceResponse.status}`
+    );
+  }
+
+  const data =
+    await priceResponse.json();
+
+  if (
+    !Array.isArray(data) ||
+    data.length === 0
+  ) {
+    return emptyResult();
+  }
+
+  const rows =
+    data
+      .map((item) => ({
         date:
           item.localTradedAt ||
           item.bizdate ||
           null,
 
-        open: parseNumber(
-          item.openPrice
-        ),
+        close:
+          parseNumber(
+            item.closePrice
+          ),
 
-        high: parseNumber(
-          item.highPrice
-        ),
+        high:
+          parseNumber(
+            item.highPrice
+          ),
 
-        low: parseNumber(
-          item.lowPrice
-        ),
+        low:
+          parseNumber(
+            item.lowPrice
+          ),
 
-        close: parseNumber(
-          item.closePrice
-        ),
-
-        volume: parseNumber(
-          item.accumulatedTradingVolume ||
+        volume:
+          parseNumber(
+            item.accumulatedTradingVolume ||
+              item.volume
+          )
+      }))
+      .filter(
+        (item) =>
+          Number.isFinite(
+            item.close
+          ) &&
+          Number.isFinite(
+            item.high
+          ) &&
+          Number.isFinite(
+            item.low
+          ) &&
+          Number.isFinite(
             item.volume
+          )
+      );
+
+  if (
+    rows.length === 0
+  ) {
+    return emptyResult();
+  }
+
+  const currentPrice =
+    rows[0]?.close ??
+    null;
+
+  const currentVolume =
+    rows[0]?.volume ??
+    null;
+
+  const ma5 =
+    rows.length >= 5
+      ? average(
+          rows
+            .slice(0, 5)
+            .map(
+              (item) =>
+                item.close
+            )
         )
-      })
-    );
+      : null;
 
-    chartData.reverse();
+  const has20 =
+    rows.length >= 20;
 
-    return res.status(200).json({
-      symbol,
-      timeframe,
-      supported: true,
-      chart: chartData
-    });
-  } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching stock chart for ${symbol}:`,
-      error.message
-    );
+  const recent20 =
+    has20
+      ? rows.slice(
+          0,
+          20
+        )
+      : [];
 
-    return res.status(500).json({
-      symbol,
-      timeframe,
-      supported: false,
-      chart: [],
-      error: 'Failed to fetch real stock chart data'
-    });
+  const ma20 =
+    has20
+      ? average(
+          recent20.map(
+            (item) =>
+              item.close
+          )
+        )
+      : null;
+
+  const recentHigh20 =
+    has20
+      ? Math.max(
+          ...recent20.map(
+            (item) =>
+              item.high
+          )
+        )
+      : null;
+
+  const recentLow20 =
+    has20
+      ? Math.min(
+          ...recent20.map(
+            (item) =>
+              item.low
+          )
+        )
+      : null;
+
+  const hasVolume20 =
+    rows.length >= 21;
+
+  const previous20ForVolume =
+    hasVolume20
+      ? rows.slice(
+          1,
+          21
+        )
+      : [];
+
+  const averageVolume20 =
+    hasVolume20
+      ? average(
+          previous20ForVolume.map(
+            (item) =>
+              item.volume
+          )
+        )
+      : null;
+
+  const volumeRatio =
+    Number.isFinite(
+      currentVolume
+    ) &&
+    Number.isFinite(
+      averageVolume20
+    ) &&
+    averageVolume20 >
+      0
+      ? Number(
+          (
+            currentVolume /
+            averageVolume20
+          ).toFixed(2)
+        )
+      : null;
+
+  let foreignerNet =
+    null;
+
+  let institutionNet =
+    null;
+
+  if (
+    integrationResponse.ok
+  ) {
+    try {
+      const integrationData =
+        await integrationResponse.json();
+
+      const latestTrend =
+        getLatestDealTrend(
+          integrationData
+        );
+
+      if (
+        latestTrend
+      ) {
+        foreignerNet =
+          parseNumber(
+            latestTrend.foreignerPureBuyQuant
+          );
+
+        institutionNet =
+          parseNumber(
+            latestTrend.organPureBuyQuant
+          );
+      }
+    } catch (error) {
+      console.warn(
+        `[K-Stock AI] Strategy supply parse failed for ${symbol}:`,
+        error.message
+      );
+    }
   }
-});
+
+  const netSupplyTotal =
+    Number.isFinite(
+      foreignerNet
+    ) &&
+    Number.isFinite(
+      institutionNet
+    )
+      ? foreignerNet +
+        institutionNet
+      : null;
+
+  if (
+    !Number.isFinite(
+      currentPrice
+    ) ||
+    !Number.isFinite(
+      ma5
+    ) ||
+    !Number.isFinite(
+      ma20
+    ) ||
+    !Number.isFinite(
+      recentHigh20
+    ) ||
+    !Number.isFinite(
+      recentLow20
+    )
+  ) {
+    return {
+      ...emptyResult(),
+
+      currentPrice,
+
+      ma5,
+
+      ma20,
+
+      recentHigh20,
+
+      recentLow20,
+
+      currentVolume,
+
+      averageVolume20,
+
+      volumeRatio,
+
+      foreignerNet,
+
+      institutionNet,
+
+      netSupplyTotal,
+
+      dataPoints:
+        Math.min(
+          rows.length,
+          20
+        )
+    };
+  }
+
+  const supportCandidates =
+    [
+      ma5,
+      ma20,
+      recentLow20
+    ]
+      .filter(
+        (value) =>
+          Number.isFinite(
+            value
+          ) &&
+          value <=
+            currentPrice
+      )
+      .sort(
+        (a, b) =>
+          b - a
+      );
+
+  const nearestSupport =
+    supportCandidates[0] ??
+    null;
+
+  const resistanceCandidates =
+    [
+      ma5,
+      ma20,
+      recentHigh20
+    ]
+      .filter(
+        (value) =>
+          Number.isFinite(
+            value
+          ) &&
+          value >
+            currentPrice
+      )
+      .sort(
+        (a, b) =>
+          a - b
+      );
+
+  const nearestResistance =
+    resistanceCandidates[0] ??
+    null;
+
+  const trendPassed =
+    currentPrice >=
+      ma5 &&
+    ma5 >=
+      ma20;
+
+  const volumePassed =
+    Number.isFinite(
+      currentVolume
+    ) &&
+    Number.isFinite(
+      averageVolume20
+    )
+      ? currentVolume >=
+        averageVolume20
+      : null;
+
+  const supplyPassed =
+    Number.isFinite(
+      netSupplyTotal
+    )
+      ? netSupplyTotal >
+        0
+      : null;
+
+  const allConditionsPassed =
+    trendPassed ===
+      true &&
+    volumePassed ===
+      true &&
+    supplyPassed ===
+      true;
+
+  let signal =
+    'WAIT';
+
+  let entryPrice =
+    null;
+
+  let takeProfitPrice =
+    null;
+
+  let stopLossPrice =
+    null;
+
+  if (
+    allConditionsPassed
+  ) {
+    signal =
+      'BUY_CANDIDATE';
+
+    entryPrice =
+      nearestSupport;
+
+    if (
+      Number.isFinite(
+        entryPrice
+      ) &&
+      recentHigh20 >
+        entryPrice
+    ) {
+      takeProfitPrice =
+        recentHigh20;
+    }
+
+    const stopCandidates =
+      [
+        ma20,
+        recentLow20
+      ]
+        .filter(
+          (value) =>
+            Number.isFinite(
+              value
+            ) &&
+            Number.isFinite(
+              entryPrice
+            ) &&
+            value <
+              entryPrice
+        )
+        .sort(
+          (a, b) =>
+            b - a
+        );
+
+    stopLossPrice =
+      stopCandidates[0] ??
+      null;
+
+    if (
+      !Number.isFinite(
+        entryPrice
+      ) ||
+      !Number.isFinite(
+        takeProfitPrice
+      ) ||
+      !Number.isFinite(
+        stopLossPrice
+      ) ||
+      !(
+        stopLossPrice <
+          entryPrice &&
+        entryPrice <
+          takeProfitPrice
+      )
+    ) {
+      signal =
+        'WAIT';
+
+      entryPrice =
+        null;
+
+      takeProfitPrice =
+        null;
+
+      stopLossPrice =
+        null;
+    }
+  }
+
+  return {
+    symbol,
+
+    currentPrice,
+
+    ma5,
+
+    ma20,
+
+    recentHigh20,
+
+    recentLow20,
+
+    nearestSupport,
+
+    nearestResistance,
+
+    currentVolume,
+
+    averageVolume20,
+
+    volumeRatio,
+
+    foreignerNet,
+
+    institutionNet,
+
+    netSupplyTotal,
+
+    trendPassed,
+
+    volumePassed,
+
+    supplyPassed,
+
+    signal,
+
+    entryPrice,
+
+    takeProfitPrice,
+
+    stopLossPrice,
+
+    dataPoints:
+      Math.min(
+        rows.length,
+        20
+      )
+  };
+};
 
 // ========================================
-// STOCK NEWS
+// Gemini 응답 처리
 // ========================================
 
-app.get('/api/stock/news', async (req, res) => {
-  const query =
-    req.query.query ||
-    req.query.symbol;
+const extractGeminiText = (payload) => {
+  const parts =
+    payload?.candidates?.[0]
+      ?.content?.parts;
 
-  if (!query || !query.trim()) {
-    return res.status(400).json({
-      query: null,
-      news: [],
-      error:
-        'Query or symbol parameter is required'
-    });
+  if (
+    !Array.isArray(parts)
+  ) {
+    return '';
   }
 
-  const cleanQuery =
-    query.trim();
+  return parts
+    .map((part) =>
+      typeof part?.text ===
+      'string'
+        ? part.text
+        : ''
+    )
+    .join('')
+    .trim();
+};
+
+const parseGeminiJson = (text) => {
+  if (!text) return null;
 
   try {
-    let targetSymbol = null;
+    return JSON.parse(text);
+  } catch (_) {
+    const cleaned =
+      text
+        .replace(
+          /^```json\s*/i,
+          ''
+        )
+        .replace(
+          /^```\s*/i,
+          ''
+        )
+        .replace(
+          /```$/i,
+          ''
+        )
+        .trim();
 
-    if (/^\d{6}$/.test(cleanQuery)) {
-      targetSymbol =
-        cleanQuery;
-    } else {
-      const acResponse =
+    try {
+      return JSON.parse(
+        cleaned
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+};
+
+// ========================================
+// Gemini AI 분석
+// ========================================
+
+const callGeminiForAnalysis = async ({
+  quote,
+  strategy,
+  news
+}) => {
+  if (!GEMINI_API_KEY) {
+    throw new Error(
+      'GEMINI_API_KEY is not configured'
+    );
+  }
+
+  const newsInput =
+    news
+      .slice(0, 10)
+      .map((item) => ({
+        title:
+          item.title,
+
+        publisher:
+          item.publisher,
+
+        date:
+          item.date,
+
+        summary:
+          item.summary
+      }));
+
+  const factualInput = {
+    quote: {
+      symbol:
+        quote.symbol,
+
+      stockName:
+        quote.stockName,
+
+      currentPrice:
+        quote.currentPrice,
+
+      priceChange:
+        quote.priceChange,
+
+      changeRate:
+        quote.changeRate,
+
+      volume:
+        quote.volume,
+
+      tradingValue:
+        quote.tradingValue,
+
+      highPrice:
+        quote.highPrice,
+
+      lowPrice:
+        quote.lowPrice,
+
+      foreignerNet:
+        quote.foreignerNet,
+
+      institutionNet:
+        quote.institutionNet,
+
+      supplyDate:
+        quote.supplyDate
+    },
+
+    strategy,
+
+    news:
+      newsInput
+  };
+
+  const prompt = `
+너는 K-Stock AI의 설명 전용 분석 모듈이다.
+
+아래 JSON 데이터만 사실로 사용해라.
+JSON에 없는 가격, 수치, 뉴스 내용, 기업 정보, 전망을 절대 만들어내지 마라.
+
+중요 규칙:
+
+1. 백엔드가 계산한 signal을 절대 변경하지 마라.
+
+2. entryPrice, takeProfitPrice, stopLossPrice가 null이면 새로운 가격을 만들지 마라.
+
+3. "매수하세요", "매도하세요"처럼 직접적인 투자 지시를 하지 마라.
+
+4. 뉴스는 제공된 제목과 요약 범위에서만 설명하고 기사에 없는 사실을 추론해서 단정하지 마라.
+
+5. 데이터가 부족하면 "데이터 부족"이라고 명확하게 말해라.
+
+6. 숫자를 언급할 때는 입력 JSON에 존재하는 숫자만 사용해라.
+
+7. 결과는 반드시 한국어로 작성해라.
+
+8. 마크다운 없이 JSON만 반환해라.
+
+다음 JSON 형식으로만 반환해라:
+
+{
+  "summary": "현재 상태를 2~3문장으로 요약",
+  "marketCondition": "긍정 또는 중립 또는 주의",
+  "positiveFactors": [
+    "실제 데이터에 근거한 긍정 요소"
+  ],
+  "riskFactors": [
+    "실제 데이터에 근거한 위험 요소"
+  ],
+  "strategyExplanation": "trendPassed, volumePassed, supplyPassed와 signal이 왜 이렇게 나왔는지 설명",
+  "newsExplanation": "제공된 최신 뉴스에서 확인되는 핵심 내용. 뉴스가 없으면 데이터 부족",
+  "caution": "현재 데이터만으로 판단할 때 주의할 점"
+}
+
+분석 대상 실제 데이터:
+
+${JSON.stringify(
+  factualInput
+)}
+`.trim();
+
+  const response =
+    await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        GEMINI_MODEL
+      )}:generateContent`,
+      {
+        method:
+          'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json',
+
+          'x-goog-api-key':
+            GEMINI_API_KEY
+        },
+
+        body:
+          JSON.stringify({
+            contents: [
+              {
+                role:
+                  'user',
+
+                parts: [
+                  {
+                    text:
+                      prompt
+                  }
+                ]
+              }
+            ],
+
+            generationConfig: {
+              temperature:
+                0.2,
+
+              maxOutputTokens:
+                1200,
+
+              responseMimeType:
+                'application/json'
+            }
+          })
+      }
+    );
+
+  if (!response.ok) {
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Gemini API error HTTP ${response.status}: ${errorText.slice(
+        0,
+        300
+      )}`
+    );
+  }
+
+  const payload =
+    await response.json();
+
+  const text =
+    extractGeminiText(
+      payload
+    );
+
+  const parsed =
+    parseGeminiJson(
+      text
+    );
+
+  if (!parsed) {
+    throw new Error(
+      'Gemini returned an invalid JSON response'
+    );
+  }
+
+  return parsed;
+};
+
+// ========================================
+// HEALTH
+// ========================================
+
+app.get(
+  '/api/health',
+  (req, res) => {
+    res.status(200).json({
+      status: 'ok'
+    });
+  }
+);
+
+// ========================================
+// STOCK SEARCH
+// ========================================
+
+app.get(
+  '/api/stock/search',
+  async (req, res) => {
+    const query =
+      req.query.query;
+
+    if (
+      !query ||
+      !query.trim()
+    ) {
+      return res
+        .status(400)
+        .json({
+          symbol: null,
+          name: null,
+          error:
+            'Query parameter is required'
+        });
+    }
+
+    const cleanQuery =
+      query.trim();
+
+    try {
+      if (
+        validateSymbol(
+          cleanQuery
+        )
+      ) {
+        const basicResponse =
+          await fetch(
+            `https://m.stock.naver.com/api/stock/${cleanQuery}/basic`,
+            {
+              headers:
+                NAVER_HEADERS
+            }
+          );
+
+        if (
+          !basicResponse.ok
+        ) {
+          return res
+            .status(200)
+            .json({
+              symbol: null,
+              name: null
+            });
+        }
+
+        const basicData =
+          await basicResponse.json();
+
+        return res
+          .status(200)
+          .json({
+            symbol:
+              cleanQuery,
+
+            name:
+              basicData.stockName ||
+              cleanQuery
+          });
+      }
+
+      const response =
         await fetch(
           `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
             cleanQuery
@@ -784,178 +1543,489 @@ app.get('/api/stock/news', async (req, res) => {
           {
             headers: {
               ...NAVER_HEADERS,
+
               Referer:
                 'https://finance.naver.com'
             }
           }
         );
 
-      if (acResponse.ok) {
-        const acData =
-          await acResponse.json();
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          `Failed to search stock: HTTP ${response.status}`
+        );
+      }
 
-        const matched =
-          findMatchingStock(
-            acData,
-            cleanQuery
+      const data =
+        await response.json();
+
+      const matched =
+        findMatchingStock(
+          data,
+          cleanQuery
+        );
+
+      if (!matched) {
+        return res
+          .status(200)
+          .json({
+            symbol: null,
+            name: null
+          });
+      }
+
+      return res
+        .status(200)
+        .json(matched);
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] Error searching stock for ${cleanQuery}:`,
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json({
+          symbol: null,
+          name: null,
+          error:
+            'Failed to search stock'
+        });
+    }
+  }
+);
+
+// ========================================
+// STOCK QUOTE
+// ========================================
+
+app.get(
+  '/api/stock/quote',
+  async (req, res) => {
+    const symbol =
+      req.query.symbol;
+
+    if (!symbol) {
+      return res
+        .status(400)
+        .json({
+          symbol: null,
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
+          error:
+            'Symbol query parameter is required'
+        });
+    }
+
+    if (
+      !validateSymbol(
+        symbol
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          symbol,
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
+          error:
+            'Symbol must be a 6-digit Korean stock code'
+        });
+    }
+
+    try {
+      const quote =
+        await fetchStockQuoteData(
+          symbol
+        );
+
+      return res
+        .status(200)
+        .json(quote);
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] Error fetching stock quote for ${symbol}:`,
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json({
+          symbol,
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
+          error:
+            'Failed to fetch real stock quote'
+        });
+    }
+  }
+);
+
+// ========================================
+// STOCK CHART
+// ========================================
+
+app.get(
+  '/api/stock/chart',
+  async (req, res) => {
+    const symbol =
+      req.query.symbol;
+
+    const timeframe =
+      (
+        req.query.timeframe ||
+        '1M'
+      ).toUpperCase();
+
+    if (!symbol) {
+      return res
+        .status(400)
+        .json({
+          symbol: null,
+          timeframe,
+          supported:
+            false,
+          chart: [],
+          error:
+            'Symbol query parameter is required'
+        });
+    }
+
+    if (
+      !validateSymbol(
+        symbol
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          symbol,
+          timeframe,
+          supported:
+            false,
+          chart: [],
+          error:
+            'Symbol must be a 6-digit Korean stock code'
+        });
+    }
+
+    if (
+      timeframe ===
+      '1D'
+    ) {
+      return res
+        .status(200)
+        .json({
+          symbol,
+          timeframe,
+          supported:
+            false,
+          chart: []
+        });
+    }
+
+    let pageSize =
+      30;
+
+    switch (
+      timeframe
+    ) {
+      case '1W':
+        pageSize = 7;
+        break;
+
+      case '1M':
+        pageSize = 30;
+        break;
+
+      case '3M':
+        pageSize = 90;
+        break;
+
+      case '1Y':
+        pageSize = 365;
+        break;
+
+      case '5Y':
+        pageSize = 1825;
+        break;
+
+      default:
+        pageSize = 30;
+    }
+
+    try {
+      const response =
+        await fetch(
+          `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${pageSize}&page=1`,
+          {
+            headers:
+              NAVER_HEADERS
+          }
+        );
+
+      if (
+        !response.ok
+      ) {
+        throw new Error(
+          `Failed to fetch stock chart data: HTTP ${response.status}`
+        );
+      }
+
+      const data =
+        await response.json();
+
+      if (
+        !Array.isArray(
+          data
+        )
+      ) {
+        return res
+          .status(200)
+          .json({
+            symbol,
+            timeframe,
+            supported:
+              true,
+            chart: []
+          });
+      }
+
+      const chartData =
+        data.map(
+          (item) => ({
+            date:
+              item.localTradedAt ||
+              item.bizdate ||
+              null,
+
+            open:
+              parseNumber(
+                item.openPrice
+              ),
+
+            high:
+              parseNumber(
+                item.highPrice
+              ),
+
+            low:
+              parseNumber(
+                item.lowPrice
+              ),
+
+            close:
+              parseNumber(
+                item.closePrice
+              ),
+
+            volume:
+              parseNumber(
+                item.accumulatedTradingVolume ||
+                  item.volume
+              )
+          })
+        );
+
+      chartData.reverse();
+
+      return res
+        .status(200)
+        .json({
+          symbol,
+          timeframe,
+          supported:
+            true,
+          chart:
+            chartData
+        });
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] Error fetching stock chart for ${symbol}:`,
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json({
+          symbol,
+          timeframe,
+          supported:
+            false,
+          chart: [],
+          error:
+            'Failed to fetch real stock chart data'
+        });
+    }
+  }
+);
+
+// ========================================
+// STOCK NEWS
+// ========================================
+
+app.get(
+  '/api/stock/news',
+  async (req, res) => {
+    const query =
+      req.query.query ||
+      req.query.symbol;
+
+    if (
+      !query ||
+      !query.trim()
+    ) {
+      return res
+        .status(400)
+        .json({
+          query: null,
+          news: [],
+          error:
+            'Query or symbol parameter is required'
+        });
+    }
+
+    const cleanQuery =
+      query.trim();
+
+    try {
+      let targetSymbol =
+        null;
+
+      if (
+        validateSymbol(
+          cleanQuery
+        )
+      ) {
+        targetSymbol =
+          cleanQuery;
+      } else {
+        const acResponse =
+          await fetch(
+            `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
+              cleanQuery
+            )}&q_enc=utf-8&target=stock`,
+            {
+              headers: {
+                ...NAVER_HEADERS,
+
+                Referer:
+                  'https://finance.naver.com'
+              }
+            }
           );
 
-        if (matched) {
-          targetSymbol =
-            matched.symbol;
-        }
-      }
-    }
-
-    if (!targetSymbol) {
-      return res.status(200).json({
-        query: cleanQuery,
-        news: []
-      });
-    }
-
-    const response = await fetch(
-      `https://m.stock.naver.com/api/news/stock/${targetSymbol}?pageSize=10&page=1`,
-      {
-        headers: NAVER_HEADERS
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch stock news: HTTP ${response.status}`
-      );
-    }
-
-    const data =
-      await response.json();
-
-    let rawList = [];
-
-    if (Array.isArray(data)) {
-      rawList = data.flatMap(
-        (group) =>
-          group &&
-          Array.isArray(group.items)
-            ? group.items
-            : []
-      );
-    } else if (
-      data &&
-      Array.isArray(data.items)
-    ) {
-      rawList = data.items;
-    }
-
-    const newsList =
-      rawList.map((item) => {
-        const rawTitle =
-          item.tit ||
-          item.title ||
-          null;
-
-        const cleanTitle =
-          rawTitle
-            ? rawTitle.replace(
-                /<[^>]+>/g,
-                ''
-              )
-            : null;
-
-        const rawSummary =
-          item.subtit ||
-          item.body ||
-          item.summary ||
-          null;
-
-        const cleanSummary =
-          rawSummary
-            ? rawSummary.replace(
-                /<[^>]+>/g,
-                ''
-              )
-            : null;
-
-        const articleId =
-          item.articleId ||
-          item.id ||
-          null;
-
-        const officeId =
-          item.officeId ||
-          null;
-
-        let articleUrl =
-          item.url ||
-          null;
-
         if (
-          officeId &&
-          articleId
+          acResponse.ok
         ) {
-          articleUrl =
-            `https://n.news.naver.com/mnews/article/${officeId}/${articleId}`;
+          const acData =
+            await acResponse.json();
+
+          const matched =
+            findMatchingStock(
+              acData,
+              cleanQuery
+            );
+
+          if (
+            matched
+          ) {
+            targetSymbol =
+              matched.symbol;
+          }
         }
+      }
 
-        return {
-          id: articleId,
-          title: cleanTitle,
+      if (
+        !targetSymbol
+      ) {
+        return res
+          .status(200)
+          .json({
+            query:
+              cleanQuery,
+            news: []
+          });
+      }
 
-          publisher:
-            item.officeName ||
-            item.publisher ||
-            null,
+      const newsList =
+        await fetchStockNewsBySymbol(
+          targetSymbol
+        );
 
-          date:
-            item.datetime ||
-            item.createdAt ||
-            item.date ||
-            null,
+      return res
+        .status(200)
+        .json({
+          query:
+            cleanQuery,
 
-          summary:
-            cleanSummary,
+          news:
+            newsList
+        });
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] Error fetching news for ${query}:`,
+        error.message
+      );
 
-          url:
-            articleUrl
-        };
-      });
+      return res
+        .status(500)
+        .json({
+          query:
+            cleanQuery,
 
-    return res.status(200).json({
-      query: cleanQuery,
-      news: newsList
-    });
-  } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching news for ${query}:`,
-      error.message
-    );
+          news: [],
 
-    return res.status(500).json({
-      query: cleanQuery,
-      news: [],
-      error:
-        'Failed to fetch real stock news'
-    });
+          error:
+            'Failed to fetch real stock news'
+        });
+    }
   }
-});
+);
 
 // ========================================
 // STRATEGY
-//
-// 추세 + 거래량 + 수급을 모두 확인한다.
-//
-// 1. 추세
-//    현재가 >= MA5 >= MA20
-//
-// 2. 거래량
-//    오늘 거래량 >= 이전 20거래일 평균 거래량
-//
-// 3. 수급
-//    외국인 순매수 + 기관 순매수 > 0
-//
-// 세 조건을 모두 만족해야 BUY_CANDIDATE.
-//
-// 임의 +8%, -5% 같은 가격 계산은 하지 않는다.
 // ========================================
 
 app.get(
@@ -964,8 +2034,8 @@ app.get(
     const symbol =
       req.query.symbol;
 
-    const emptyResult = (
-      error = null
+    const errorResult = (
+      message
     ) => ({
       symbol:
         symbol || null,
@@ -1013,8 +2083,11 @@ app.get(
 
       dataPoints: 0,
 
-      ...(error
-        ? { error }
+      ...(message
+        ? {
+            error:
+              message
+          }
         : {})
     });
 
@@ -1022,636 +2095,37 @@ app.get(
       return res
         .status(400)
         .json(
-          emptyResult(
+          errorResult(
             'Symbol query parameter is required'
           )
         );
     }
 
     if (
-      !/^\d{6}$/.test(symbol)
+      !validateSymbol(
+        symbol
+      )
     ) {
       return res
         .status(400)
         .json(
-          emptyResult(
+          errorResult(
             'Symbol must be a 6-digit Korean stock code'
           )
         );
     }
 
     try {
-      const [
-        priceResponse,
-        integrationResponse
-      ] = await Promise.all([
-        fetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
-          {
-            headers:
-              NAVER_HEADERS
-          }
-        ),
-
-        fetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/integration`,
-          {
-            headers:
-              NAVER_HEADERS
-          }
-        )
-      ]);
-
-      if (
-        !priceResponse.ok
-      ) {
-        throw new Error(
-          `Failed to fetch strategy source data: HTTP ${priceResponse.status}`
+      const strategy =
+        await calculateStrategy(
+          symbol
         );
-      }
-
-      const data =
-        await priceResponse.json();
-
-      if (
-        !Array.isArray(data) ||
-        data.length === 0
-      ) {
-        return res
-          .status(200)
-          .json(
-            emptyResult()
-          );
-      }
-
-      // Naver /price 응답은 최신 날짜부터 내려온다.
-      const rows =
-        data
-          .map((item) => ({
-            date:
-              item.localTradedAt ||
-              item.bizdate ||
-              null,
-
-            close:
-              parseNumber(
-                item.closePrice
-              ),
-
-            high:
-              parseNumber(
-                item.highPrice
-              ),
-
-            low:
-              parseNumber(
-                item.lowPrice
-              ),
-
-            volume:
-              parseNumber(
-                item.accumulatedTradingVolume ||
-                  item.volume
-              )
-          }))
-          .filter(
-            (item) =>
-              Number.isFinite(
-                item.close
-              ) &&
-              Number.isFinite(
-                item.high
-              ) &&
-              Number.isFinite(
-                item.low
-              ) &&
-              Number.isFinite(
-                item.volume
-              )
-          );
-
-      if (
-        rows.length === 0
-      ) {
-        return res
-          .status(200)
-          .json(
-            emptyResult()
-          );
-      }
-
-      // ========================================
-      // 현재가 / 거래량
-      // ========================================
-
-      const currentPrice =
-        rows[0]?.close ??
-        null;
-
-      const currentVolume =
-        rows[0]?.volume ??
-        null;
-
-      // ========================================
-      // MA5
-      // ========================================
-
-      const ma5 =
-        rows.length >= 5
-          ? average(
-              rows
-                .slice(0, 5)
-                .map(
-                  (item) =>
-                    item.close
-                )
-            )
-          : null;
-
-      // ========================================
-      // 최근 20일
-      // ========================================
-
-      const has20 =
-        rows.length >= 20;
-
-      const recent20 =
-        has20
-          ? rows.slice(
-              0,
-              20
-            )
-          : [];
-
-      const ma20 =
-        has20
-          ? average(
-              recent20.map(
-                (item) =>
-                  item.close
-              )
-            )
-          : null;
-
-      const recentHigh20 =
-        has20
-          ? Math.max(
-              ...recent20.map(
-                (item) =>
-                  item.high
-              )
-            )
-          : null;
-
-      const recentLow20 =
-        has20
-          ? Math.min(
-              ...recent20.map(
-                (item) =>
-                  item.low
-              )
-            )
-          : null;
-
-      // ========================================
-      // 이전 20일 평균 거래량
-      //
-      // 오늘 거래량은 제외한다.
-      // 따라서 최소 21거래일 데이터가 필요하다.
-      // ========================================
-
-      const hasVolume20 =
-        rows.length >= 21;
-
-      const previous20ForVolume =
-        hasVolume20
-          ? rows.slice(
-              1,
-              21
-            )
-          : [];
-
-      const averageVolume20 =
-        hasVolume20
-          ? average(
-              previous20ForVolume.map(
-                (item) =>
-                  item.volume
-              )
-            )
-          : null;
-
-      const volumeRatio =
-        Number.isFinite(
-          currentVolume
-        ) &&
-        Number.isFinite(
-          averageVolume20
-        ) &&
-        averageVolume20 > 0
-          ? Number(
-              (
-                currentVolume /
-                averageVolume20
-              ).toFixed(2)
-            )
-          : null;
-
-      // ========================================
-      // 외국인 / 기관 수급
-      // ========================================
-
-      let foreignerNet =
-        null;
-
-      let institutionNet =
-        null;
-
-      if (
-        integrationResponse.ok
-      ) {
-        try {
-          const integrationData =
-            await integrationResponse.json();
-
-          const latestTrend =
-            getLatestDealTrend(
-              integrationData
-            );
-
-          if (latestTrend) {
-            foreignerNet =
-              parseNumber(
-                latestTrend.foreignerPureBuyQuant
-              );
-
-            institutionNet =
-              parseNumber(
-                latestTrend.organPureBuyQuant
-              );
-          }
-        } catch (
-          integrationError
-        ) {
-          console.warn(
-            `[K-Stock AI] Strategy supply parse failed for ${symbol}:`,
-            integrationError.message
-          );
-        }
-      }
-
-      // 외국인 + 기관 합산 순매수
-      const netSupplyTotal =
-        Number.isFinite(
-          foreignerNet
-        ) &&
-        Number.isFinite(
-          institutionNet
-        )
-          ? foreignerNet +
-            institutionNet
-          : null;
-
-      // ========================================
-      // 필수 기술 데이터 부족 확인
-      // ========================================
-
-      if (
-        !Number.isFinite(
-          currentPrice
-        ) ||
-        !Number.isFinite(
-          ma5
-        ) ||
-        !Number.isFinite(
-          ma20
-        ) ||
-        !Number.isFinite(
-          recentHigh20
-        ) ||
-        !Number.isFinite(
-          recentLow20
-        )
-      ) {
-        return res
-          .status(200)
-          .json({
-            ...emptyResult(),
-
-            symbol,
-
-            currentPrice,
-
-            ma5,
-
-            ma20,
-
-            recentHigh20,
-
-            recentLow20,
-
-            currentVolume,
-
-            averageVolume20,
-
-            volumeRatio,
-
-            foreignerNet,
-
-            institutionNet,
-
-            netSupplyTotal,
-
-            dataPoints:
-              Math.min(
-                rows.length,
-                20
-              )
-          });
-      }
-
-      // ========================================
-      // 지지선 후보
-      // ========================================
-
-      const supportCandidates =
-        [
-          ma5,
-          ma20,
-          recentLow20
-        ]
-          .filter(
-            (value) =>
-              Number.isFinite(
-                value
-              ) &&
-              value <=
-                currentPrice
-          )
-          .sort(
-            (a, b) =>
-              b - a
-          );
-
-      const nearestSupport =
-        supportCandidates[0] ??
-        null;
-
-      // ========================================
-      // 저항선 후보
-      // ========================================
-
-      const resistanceCandidates =
-        [
-          ma5,
-          ma20,
-          recentHigh20
-        ]
-          .filter(
-            (value) =>
-              Number.isFinite(
-                value
-              ) &&
-              value >
-                currentPrice
-          )
-          .sort(
-            (a, b) =>
-              a - b
-          );
-
-      const nearestResistance =
-        resistanceCandidates[0] ??
-        null;
-
-      // ========================================
-      // 조건 1
-      // 추세
-      //
-      // 현재가 >= MA5 >= MA20
-      // ========================================
-
-      const trendPassed =
-        currentPrice >=
-          ma5 &&
-        ma5 >=
-          ma20;
-
-      // ========================================
-      // 조건 2
-      // 거래량
-      //
-      // 오늘 거래량 >= 이전 20일 평균
-      // ========================================
-
-      const volumePassed =
-        Number.isFinite(
-          currentVolume
-        ) &&
-        Number.isFinite(
-          averageVolume20
-        )
-          ? currentVolume >=
-            averageVolume20
-          : null;
-
-      // ========================================
-      // 조건 3
-      // 수급
-      //
-      // 외국인 + 기관 합산 순매수 > 0
-      // ========================================
-
-      const supplyPassed =
-        Number.isFinite(
-          netSupplyTotal
-        )
-          ? netSupplyTotal >
-            0
-          : null;
-
-      // ========================================
-      // 세 조건 모두 통과해야 매수 후보
-      // ========================================
-
-      const allConditionsPassed =
-        trendPassed ===
-          true &&
-        volumePassed ===
-          true &&
-        supplyPassed ===
-          true;
-
-      let signal =
-        'WAIT';
-
-      let entryPrice =
-        null;
-
-      let takeProfitPrice =
-        null;
-
-      let stopLossPrice =
-        null;
-
-      if (
-        allConditionsPassed
-      ) {
-        signal =
-          'BUY_CANDIDATE';
-
-        // ========================================
-        // 진입가
-        //
-        // 현재가 아래 가장 가까운 실제 지지 레벨
-        // ========================================
-
-        entryPrice =
-          nearestSupport;
-
-        // ========================================
-        // 익절가
-        //
-        // 실제 최근 20일 고점
-        // ========================================
-
-        if (
-          Number.isFinite(
-            entryPrice
-          ) &&
-          recentHigh20 >
-            entryPrice
-        ) {
-          takeProfitPrice =
-            recentHigh20;
-        }
-
-        // ========================================
-        // 손절가
-        //
-        // 진입가 아래의 MA20 또는 20일 저점 중
-        // 가장 가까운 실제 레벨
-        // ========================================
-
-        const stopCandidates =
-          [
-            ma20,
-            recentLow20
-          ]
-            .filter(
-              (value) =>
-                Number.isFinite(
-                  value
-                ) &&
-                Number.isFinite(
-                  entryPrice
-                ) &&
-                value <
-                  entryPrice
-            )
-            .sort(
-              (a, b) =>
-                b - a
-            );
-
-        stopLossPrice =
-          stopCandidates[0] ??
-          null;
-
-        // ========================================
-        // 가격 관계 검증
-        //
-        // 손절 < 진입 < 익절
-        //
-        // 성립하지 않으면 매수 후보 취소
-        // ========================================
-
-        if (
-          !Number.isFinite(
-            entryPrice
-          ) ||
-          !Number.isFinite(
-            takeProfitPrice
-          ) ||
-          !Number.isFinite(
-            stopLossPrice
-          ) ||
-          !(
-            stopLossPrice <
-              entryPrice &&
-            entryPrice <
-              takeProfitPrice
-          )
-        ) {
-          signal =
-            'WAIT';
-
-          entryPrice =
-            null;
-
-          takeProfitPrice =
-            null;
-
-          stopLossPrice =
-            null;
-        }
-      }
-
-      // ========================================
-      // RESULT
-      // ========================================
 
       return res
         .status(200)
-        .json({
-          symbol,
-
-          currentPrice,
-
-          ma5,
-
-          ma20,
-
-          recentHigh20,
-
-          recentLow20,
-
-          nearestSupport,
-
-          nearestResistance,
-
-          currentVolume,
-
-          averageVolume20,
-
-          volumeRatio,
-
-          foreignerNet,
-
-          institutionNet,
-
-          netSupplyTotal,
-
-          trendPassed,
-
-          volumePassed,
-
-          supplyPassed,
-
-          signal,
-
-          entryPrice,
-
-          takeProfitPrice,
-
-          stopLossPrice,
-
-          dataPoints:
-            Math.min(
-              rows.length,
-              20
-            )
-        });
+        .json(
+          strategy
+        );
     } catch (error) {
       console.error(
         `[K-Stock AI] Error calculating strategy for ${symbol}:`,
@@ -1661,10 +2135,156 @@ app.get(
       return res
         .status(500)
         .json(
-          emptyResult(
+          errorResult(
             'Failed to calculate strategy'
           )
         );
+    }
+  }
+);
+
+// ========================================
+// AI ANALYSIS
+//
+// Gemini는 가격을 만들지 않는다.
+// 실제 데이터와 뉴스 설명만 담당한다.
+// ========================================
+
+app.get(
+  '/api/stock/ai-analysis',
+  async (req, res) => {
+    const symbol =
+      req.query.symbol;
+
+    if (!symbol) {
+      return res
+        .status(400)
+        .json({
+          symbol: null,
+
+          aiAvailable:
+            false,
+
+          analysis:
+            null,
+
+          error:
+            'Symbol query parameter is required'
+        });
+    }
+
+    if (
+      !validateSymbol(
+        symbol
+      )
+    ) {
+      return res
+        .status(400)
+        .json({
+          symbol,
+
+          aiAvailable:
+            false,
+
+          analysis:
+            null,
+
+          error:
+            'Symbol must be a 6-digit Korean stock code'
+        });
+    }
+
+    if (
+      !GEMINI_API_KEY
+    ) {
+      return res
+        .status(503)
+        .json({
+          symbol,
+
+          aiAvailable:
+            false,
+
+          analysis:
+            null,
+
+          error:
+            'GEMINI_API_KEY is not configured on the server'
+        });
+    }
+
+    try {
+      const [
+        quote,
+        strategy,
+        news
+      ] =
+        await Promise.all([
+          fetchStockQuoteData(
+            symbol
+          ),
+
+          calculateStrategy(
+            symbol
+          ),
+
+          fetchStockNewsBySymbol(
+            symbol
+          )
+        ]);
+
+      const analysis =
+        await callGeminiForAnalysis({
+          quote,
+          strategy,
+          news
+        });
+
+      return res
+        .status(200)
+        .json({
+          symbol,
+
+          stockName:
+            quote.stockName,
+
+          aiAvailable:
+            true,
+
+          model:
+            GEMINI_MODEL,
+
+          source: {
+            quote,
+
+            strategy,
+
+            newsCount:
+              news.length
+          },
+
+          analysis
+        });
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] AI analysis failed for ${symbol}:`,
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json({
+          symbol,
+
+          aiAvailable:
+            false,
+
+          analysis:
+            null,
+
+          error:
+            'Failed to generate AI analysis'
+        });
     }
   }
 );
