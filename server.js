@@ -148,19 +148,25 @@ const findMatchingStock = (data, queryName) => {
 
     const direct = inspectNode(node);
 
-    if (direct) return direct;
+    if (direct) {
+      return direct;
+    }
 
     if (Array.isArray(node)) {
       for (const child of node) {
         const result = traverse(child);
 
-        if (result) return result;
+        if (result) {
+          return result;
+        }
       }
     } else if (typeof node === 'object') {
       for (const key of Object.keys(node)) {
         const result = traverse(node[key]);
 
-        if (result) return result;
+        if (result) {
+          return result;
+        }
       }
     }
 
@@ -170,10 +176,24 @@ const findMatchingStock = (data, queryName) => {
   return traverse(data);
 };
 
+const average = (numbers) => {
+  if (!Array.isArray(numbers) || numbers.length === 0) {
+    return null;
+  }
 
-// ============================================================
+  if (numbers.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return Math.round(
+    numbers.reduce((sum, value) => sum + value, 0) /
+      numbers.length
+  );
+};
+
+// ========================================
 // HEALTH
-// ============================================================
+// ========================================
 
 app.get('/api/health', (req, res) => {
   res.status(200).json({
@@ -181,10 +201,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-
-// ============================================================
+// ========================================
 // STOCK SEARCH
-// ============================================================
+// ========================================
 
 app.get('/api/stock/search', async (req, res) => {
   const query = req.query.query;
@@ -270,10 +289,9 @@ app.get('/api/stock/search', async (req, res) => {
   }
 });
 
-
-// ============================================================
+// ========================================
 // STOCK QUOTE
-// ============================================================
+// ========================================
 
 app.get('/api/stock/quote', async (req, res) => {
   const symbol = req.query.symbol;
@@ -352,7 +370,8 @@ app.get('/api/stock/quote', async (req, res) => {
     );
 
     const stockName =
-      basicData.stockName || null;
+      basicData.stockName ||
+      null;
 
     let volume = parseNumber(
       basicData.accumulatedTradingVolume ||
@@ -376,6 +395,7 @@ app.get('/api/stock/quote', async (req, res) => {
         basicData.minPrice
     );
 
+    // 부족한 값은 일봉 데이터에서 보완
     if (
       volume === null ||
       tradingValue === null ||
@@ -398,37 +418,32 @@ app.get('/api/stock/quote', async (req, res) => {
             Array.isArray(priceData) &&
             priceData.length > 0
           ) {
-            const latest =
-              priceData[0];
+            const latest = priceData[0];
 
             if (highPrice === null) {
-              highPrice =
-                parseNumber(
-                  latest.highPrice
-                );
+              highPrice = parseNumber(
+                latest.highPrice
+              );
             }
 
             if (lowPrice === null) {
-              lowPrice =
-                parseNumber(
-                  latest.lowPrice
-                );
+              lowPrice = parseNumber(
+                latest.lowPrice
+              );
             }
 
             if (volume === null) {
-              volume =
-                parseNumber(
-                  latest.accumulatedTradingVolume ||
-                    latest.volume
-                );
+              volume = parseNumber(
+                latest.accumulatedTradingVolume ||
+                  latest.volume
+              );
             }
 
             if (tradingValue === null) {
-              tradingValue =
-                parseNumber(
-                  latest.accumulatedTradingValue ||
-                    latest.tradingValue
-                );
+              tradingValue = parseNumber(
+                latest.accumulatedTradingValue ||
+                  latest.tradingValue
+              );
             }
           }
         }
@@ -440,15 +455,15 @@ app.get('/api/stock/quote', async (req, res) => {
       }
     }
 
+    // 거래대금 실시간 조회 보완
     if (tradingValue === null) {
       try {
-        const realtimeResponse =
-          await fetch(
-            `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${symbol}`,
-            {
-              headers: NAVER_HEADERS
-            }
-          );
+        const realtimeResponse = await fetch(
+          `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${symbol}`,
+          {
+            headers: NAVER_HEADERS
+          }
+        );
 
         if (realtimeResponse.ok) {
           const realtimeData =
@@ -469,11 +484,10 @@ app.get('/api/stock/quote', async (req, res) => {
               : null;
 
           if (realtimeItem) {
-            tradingValue =
-              parseNumber(
-                realtimeItem.aa ||
-                  realtimeItem.accumulatedTradingValue
-              );
+            tradingValue = parseNumber(
+              realtimeItem.aa ||
+                realtimeItem.accumulatedTradingValue
+            );
           }
         }
       } catch (realtimeErr) {
@@ -488,6 +502,7 @@ app.get('/api/stock/quote', async (req, res) => {
     let institutionNet = null;
     let supplyDate = null;
 
+    // 외국인 / 기관 순매수
     try {
       const integrationResponse =
         await fetch(
@@ -502,13 +517,12 @@ app.get('/api/stock/quote', async (req, res) => {
           await integrationResponse.json();
 
         if (tradingValue === null) {
-          tradingValue =
-            parseNumber(
-              getIntegrationInfoValue(
-                integrationData,
-                'accumulatedTradingValue'
-              )
-            );
+          tradingValue = parseNumber(
+            getIntegrationInfoValue(
+              integrationData,
+              'accumulatedTradingValue'
+            )
+          );
         }
 
         const latestTrend =
@@ -517,15 +531,13 @@ app.get('/api/stock/quote', async (req, res) => {
           );
 
         if (latestTrend) {
-          foreignerNet =
-            parseNumber(
-              latestTrend.foreignerPureBuyQuant
-            );
+          foreignerNet = parseNumber(
+            latestTrend.foreignerPureBuyQuant
+          );
 
-          institutionNet =
-            parseNumber(
-              latestTrend.organPureBuyQuant
-            );
+          institutionNet = parseNumber(
+            latestTrend.organPureBuyQuant
+          );
 
           supplyDate =
             latestTrend.localTradedAt ||
@@ -556,9 +568,7 @@ app.get('/api/stock/quote', async (req, res) => {
       foreignerNet,
       institutionNet,
 
-      // 현재 확인된 데이터 소스에서는
-      // 개별 총매수/총매도 수량을 확정할 수 없으므로
-      // 임의 값을 생성하지 않는다.
+      // 현재 검증되지 않은 총 매수/매도는 만들지 않는다.
       foreignerBuy: null,
       foreignerSell: null,
       institutionBuy: null,
@@ -594,16 +604,16 @@ app.get('/api/stock/quote', async (req, res) => {
   }
 });
 
-
-// ============================================================
+// ========================================
 // STOCK CHART
-// ============================================================
+// ========================================
 
 app.get('/api/stock/chart', async (req, res) => {
   const symbol = req.query.symbol;
 
   const timeframe = (
-    req.query.timeframe || '1M'
+    req.query.timeframe ||
+    '1M'
   ).toUpperCase();
 
   if (!symbol) {
@@ -612,8 +622,7 @@ app.get('/api/stock/chart', async (req, res) => {
       timeframe,
       supported: false,
       chart: [],
-      error:
-        'Symbol query parameter is required'
+      error: 'Symbol query parameter is required'
     });
   }
 
@@ -623,11 +632,11 @@ app.get('/api/stock/chart', async (req, res) => {
       timeframe,
       supported: false,
       chart: [],
-      error:
-        'Symbol must be a 6-digit Korean stock code'
+      error: 'Symbol must be a 6-digit Korean stock code'
     });
   }
 
+  // 일중 데이터는 현재 미지원
   if (timeframe === '1D') {
     return res.status(200).json({
       symbol,
@@ -697,34 +706,31 @@ app.get('/api/stock/chart', async (req, res) => {
           item.bizdate ||
           null,
 
-        open:
-          parseNumber(
-            item.openPrice
-          ),
+        open: parseNumber(
+          item.openPrice
+        ),
 
-        high:
-          parseNumber(
-            item.highPrice
-          ),
+        high: parseNumber(
+          item.highPrice
+        ),
 
-        low:
-          parseNumber(
-            item.lowPrice
-          ),
+        low: parseNumber(
+          item.lowPrice
+        ),
 
-        close:
-          parseNumber(
-            item.closePrice
-          ),
+        close: parseNumber(
+          item.closePrice
+        ),
 
-        volume:
-          parseNumber(
-            item.accumulatedTradingVolume ||
-              item.volume
-          )
+        volume: parseNumber(
+          item.accumulatedTradingVolume ||
+            item.volume
+        )
       })
     );
 
+    // Naver는 최신 날짜부터 내려오므로
+    // 차트에서는 과거 -> 최신 순서로 변경
     chartData.reverse();
 
     return res.status(200).json({
@@ -744,16 +750,14 @@ app.get('/api/stock/chart', async (req, res) => {
       timeframe,
       supported: false,
       chart: [],
-      error:
-        'Failed to fetch real stock chart data'
+      error: 'Failed to fetch real stock chart data'
     });
   }
 });
 
-
-// ============================================================
+// ========================================
 // STOCK NEWS
-// ============================================================
+// ========================================
 
 app.get('/api/stock/news', async (req, res) => {
   const query =
@@ -836,19 +840,18 @@ app.get('/api/stock/news', async (req, res) => {
     let rawList = [];
 
     if (Array.isArray(data)) {
-      rawList =
-        data.flatMap((group) =>
+      rawList = data.flatMap(
+        (group) =>
           group &&
           Array.isArray(group.items)
             ? group.items
             : []
-        );
+      );
     } else if (
       data &&
       Array.isArray(data.items)
     ) {
-      rawList =
-        data.items;
+      rawList = data.items;
     }
 
     const newsList =
@@ -904,17 +907,21 @@ app.get('/api/stock/news', async (req, res) => {
         return {
           id: articleId,
           title: cleanTitle,
+
           publisher:
             item.officeName ||
             item.publisher ||
             null,
+
           date:
             item.datetime ||
             item.createdAt ||
             item.date ||
             null,
+
           summary:
             cleanSummary,
+
           url:
             articleUrl
         };
@@ -939,225 +946,506 @@ app.get('/api/stock/news', async (req, res) => {
   }
 });
 
+// ========================================
+// STRATEGY
+//
+// 실제 일봉 데이터를 사용하여
+// MA5, MA20, 20일 고점/저점,
+// 지지선/저항선,
+// 진입/익절/손절 후보를 계산한다.
+//
+// 임의 +8%, -5% 등의 퍼센트 값은 사용하지 않는다.
+// ========================================
 
-// ============================================================
-// STOCK STRATEGY INDICATORS
-// 실제 일봉 데이터로만 계산한다.
-// AI 생성값 / 임의 목표가 / 고정 퍼센트는 사용하지 않는다.
-// ============================================================
+app.get(
+  '/api/stock/strategy',
+  async (req, res) => {
+    const symbol =
+      req.query.symbol;
 
-app.get('/api/stock/strategy', async (req, res) => {
-  const symbol = req.query.symbol;
+    const emptyResult = (
+      error = null
+    ) => ({
+      symbol:
+        symbol || null,
 
-  if (!symbol) {
-    return res.status(400).json({
-      symbol: null,
       currentPrice: null,
-      ma5: null,
-      ma20: null,
-      recentHigh20: null,
-      recentLow20: null,
-      dataPoints: 0,
-      error:
-        'Symbol query parameter is required'
-    });
-  }
 
-  if (!/^\d{6}$/.test(symbol)) {
-    return res.status(400).json({
-      symbol,
-      currentPrice: null,
       ma5: null,
-      ma20: null,
-      recentHigh20: null,
-      recentLow20: null,
-      dataPoints: 0,
-      error:
-        'Symbol must be a 6-digit Korean stock code'
-    });
-  }
 
-  try {
-    // 30개의 실제 일봉을 요청한다.
-    // MA20 및 최근 20거래일 범위를 계산하기 위한 여유분이다.
-    const response = await fetch(
-      `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
-      {
-        headers: NAVER_HEADERS
+      ma20: null,
+
+      recentHigh20: null,
+
+      recentLow20: null,
+
+      nearestSupport: null,
+
+      nearestResistance: null,
+
+      signal:
+        'INSUFFICIENT_DATA',
+
+      entryPrice: null,
+
+      takeProfitPrice: null,
+
+      stopLossPrice: null,
+
+      dataPoints: 0,
+
+      ...(error
+        ? { error }
+        : {})
+    });
+
+    if (!symbol) {
+      return res
+        .status(400)
+        .json(
+          emptyResult(
+            'Symbol query parameter is required'
+          )
+        );
+    }
+
+    if (
+      !/^\d{6}$/.test(symbol)
+    ) {
+      return res
+        .status(400)
+        .json(
+          emptyResult(
+            'Symbol must be a 6-digit Korean stock code'
+          )
+        );
+    }
+
+    try {
+      const response =
+        await fetch(
+          `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
+          {
+            headers:
+              NAVER_HEADERS
+          }
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch strategy source data: HTTP ${response.status}`
+        );
       }
-    );
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch strategy chart data: HTTP ${response.status}`
-      );
-    }
+      const data =
+        await response.json();
 
-    const data =
-      await response.json();
+      if (
+        !Array.isArray(data) ||
+        data.length === 0
+      ) {
+        return res
+          .status(200)
+          .json(
+            emptyResult()
+          );
+      }
 
-    if (!Array.isArray(data)) {
-      return res.status(200).json({
-        symbol,
-        currentPrice: null,
-        ma5: null,
-        ma20: null,
-        recentHigh20: null,
-        recentLow20: null,
-        dataPoints: 0
-      });
-    }
+      // Naver /price 데이터는
+      // 최신 일자가 앞쪽에 위치한다.
+      const rows =
+        data
+          .map((item) => ({
+            date:
+              item.localTradedAt ||
+              item.bizdate ||
+              null,
 
-    const dailyData =
-      data
-        .map((item) => ({
-          date:
-            item.localTradedAt ||
-            item.bizdate ||
-            null,
+            close:
+              parseNumber(
+                item.closePrice
+              ),
 
-          close:
-            parseNumber(
-              item.closePrice
-            ),
+            high:
+              parseNumber(
+                item.highPrice
+              ),
 
-          high:
-            parseNumber(
-              item.highPrice
-            ),
+            low:
+              parseNumber(
+                item.lowPrice
+              )
+          }))
+          .filter(
+            (item) =>
+              Number.isFinite(
+                item.close
+              ) &&
+              Number.isFinite(
+                item.high
+              ) &&
+              Number.isFinite(
+                item.low
+              )
+          );
 
-          low:
-            parseNumber(
-              item.lowPrice
+      if (
+        rows.length === 0
+      ) {
+        return res
+          .status(200)
+          .json(
+            emptyResult()
+          );
+      }
+
+      // 최신 종가
+      const currentPrice =
+        rows[0]?.close ??
+        null;
+
+      // 최근 5거래일 이동평균
+      const ma5 =
+        rows.length >= 5
+          ? average(
+              rows
+                .slice(0, 5)
+                .map(
+                  (item) =>
+                    item.close
+                )
             )
-        }))
-        .filter(
-          (item) =>
-            item.close !== null &&
-            item.high !== null &&
-            item.low !== null
-        );
+          : null;
 
-    // Naver price 응답은 최신 날짜가 앞쪽에 있으므로
-    // 날짜 오름차순으로 정렬한다.
-    dailyData.sort((a, b) =>
-      String(a.date || '').localeCompare(
-        String(b.date || '')
-      )
-    );
+      const has20 =
+        rows.length >= 20;
 
-    const dataPoints =
-      dailyData.length;
+      const recent20 =
+        has20
+          ? rows.slice(
+              0,
+              20
+            )
+          : [];
 
-    if (dataPoints === 0) {
-      return res.status(200).json({
-        symbol,
-        currentPrice: null,
-        ma5: null,
-        ma20: null,
-        recentHigh20: null,
-        recentLow20: null,
-        dataPoints: 0
-      });
-    }
+      // 최근 20거래일 이동평균
+      const ma20 =
+        has20
+          ? average(
+              recent20.map(
+                (item) =>
+                  item.close
+              )
+            )
+          : null;
 
-    const latest =
-      dailyData[
-        dailyData.length - 1
-      ];
+      // 최근 20일 최고가
+      const recentHigh20 =
+        has20
+          ? Math.max(
+              ...recent20.map(
+                (item) =>
+                  item.high
+              )
+            )
+          : null;
 
-    const currentPrice =
-      latest.close;
+      // 최근 20일 최저가
+      const recentLow20 =
+        has20
+          ? Math.min(
+              ...recent20.map(
+                (item) =>
+                  item.low
+              )
+            )
+          : null;
 
-    let ma5 = null;
-    let ma20 = null;
-    let recentHigh20 = null;
-    let recentLow20 = null;
+      // 데이터 부족 시
+      // 임의 가격을 만들지 않는다.
+      if (
+        !Number.isFinite(
+          currentPrice
+        ) ||
+        !Number.isFinite(
+          ma5
+        ) ||
+        !Number.isFinite(
+          ma20
+        ) ||
+        !Number.isFinite(
+          recentHigh20
+        ) ||
+        !Number.isFinite(
+          recentLow20
+        )
+      ) {
+        return res
+          .status(200)
+          .json({
+            ...emptyResult(),
 
-    // MA5는 최소 5거래일이 있을 때만 계산한다.
-    if (dataPoints >= 5) {
-      const last5 =
-        dailyData.slice(-5);
+            symbol,
 
-      const total5 =
-        last5.reduce(
-          (sum, item) =>
-            sum + item.close,
-          0
-        );
+            currentPrice,
 
-      ma5 =
-        Math.round(
-          total5 / 5
-        );
-    }
+            ma5,
 
-    // MA20 / 20일 최고가 / 20일 최저가는
-    // 반드시 실제 20거래일 이상 있을 때만 계산한다.
-    if (dataPoints >= 20) {
-      const last20 =
-        dailyData.slice(-20);
+            ma20,
 
-      const total20 =
-        last20.reduce(
-          (sum, item) =>
-            sum + item.close,
-          0
-        );
+            recentHigh20,
 
-      ma20 =
-        Math.round(
-          total20 / 20
-        );
+            recentLow20,
 
-      recentHigh20 =
-        Math.max(
-          ...last20.map(
-            (item) => item.high
+            dataPoints:
+              Math.min(
+                rows.length,
+                20
+              )
+          });
+      }
+
+      // ========================================
+      // 실제 계산된 지지 레벨
+      // ========================================
+
+      const supportCandidates =
+        [
+          ma5,
+          ma20,
+          recentLow20
+        ]
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              ) &&
+              value <=
+                currentPrice
+          )
+          .sort(
+            (a, b) =>
+              b - a
+          );
+
+      // 현재가 아래에서
+      // 가장 가까운 지지 레벨
+      const nearestSupport =
+        supportCandidates[0] ??
+        null;
+
+      // ========================================
+      // 실제 계산된 저항 레벨
+      // ========================================
+
+      const resistanceCandidates =
+        [
+          ma5,
+          ma20,
+          recentHigh20
+        ]
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              ) &&
+              value >
+                currentPrice
+          )
+          .sort(
+            (a, b) =>
+              a - b
+          );
+
+      // 현재가 위에서
+      // 가장 가까운 저항 레벨
+      const nearestResistance =
+        resistanceCandidates[0] ??
+        null;
+
+      // ========================================
+      // 매수 후보 조건
+      //
+      // 현재가 >= MA5 >= MA20
+      //
+      // 단순하고 검증 가능한 추세 규칙
+      // ========================================
+
+      const bullishTrend =
+        currentPrice >=
+          ma5 &&
+        ma5 >=
+          ma20;
+
+      let signal =
+        'WAIT';
+
+      let entryPrice =
+        null;
+
+      let takeProfitPrice =
+        null;
+
+      let stopLossPrice =
+        null;
+
+      if (bullishTrend) {
+        signal =
+          'BUY_CANDIDATE';
+
+        // --------------------------------
+        // 진입가
+        //
+        // 현재가 아래 실제 지지선 중
+        // 가장 가까운 가격
+        // --------------------------------
+
+        entryPrice =
+          nearestSupport;
+
+        // --------------------------------
+        // 익절가
+        //
+        // 실제 최근 20일 최고가
+        // --------------------------------
+
+        if (
+          Number.isFinite(
+            entryPrice
+          ) &&
+          recentHigh20 >
+            entryPrice
+        ) {
+          takeProfitPrice =
+            recentHigh20;
+        }
+
+        // --------------------------------
+        // 손절가
+        //
+        // 진입가 아래에 존재하는
+        // MA20 또는 최근 20일 저점 중
+        // 가장 가까운 레벨
+        // --------------------------------
+
+        const stopCandidates =
+          [
+            ma20,
+            recentLow20
+          ]
+            .filter(
+              (value) =>
+                Number.isFinite(
+                  value
+                ) &&
+                Number.isFinite(
+                  entryPrice
+                ) &&
+                value <
+                  entryPrice
+            )
+            .sort(
+              (a, b) =>
+                b - a
+            );
+
+        stopLossPrice =
+          stopCandidates[0] ??
+          null;
+
+        // --------------------------------
+        // 가격 관계 검증
+        //
+        // 손절 < 진입 < 익절
+        //
+        // 성립하지 않으면
+        // 억지 추천을 하지 않는다.
+        // --------------------------------
+
+        if (
+          !Number.isFinite(
+            entryPrice
+          ) ||
+          !Number.isFinite(
+            takeProfitPrice
+          ) ||
+          !Number.isFinite(
+            stopLossPrice
+          ) ||
+          !(
+            stopLossPrice <
+              entryPrice &&
+            entryPrice <
+              takeProfitPrice
+          )
+        ) {
+          signal =
+            'WAIT';
+
+          entryPrice =
+            null;
+
+          takeProfitPrice =
+            null;
+
+          stopLossPrice =
+            null;
+        }
+      }
+
+      return res
+        .status(200)
+        .json({
+          symbol,
+
+          currentPrice,
+
+          ma5,
+
+          ma20,
+
+          recentHigh20,
+
+          recentLow20,
+
+          nearestSupport,
+
+          nearestResistance,
+
+          signal,
+
+          entryPrice,
+
+          takeProfitPrice,
+
+          stopLossPrice,
+
+          dataPoints:
+            Math.min(
+              rows.length,
+              20
+            )
+        });
+    } catch (error) {
+      console.error(
+        `[K-Stock AI] Error calculating strategy for ${symbol}:`,
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json(
+          emptyResult(
+            'Failed to calculate strategy'
           )
         );
-
-      recentLow20 =
-        Math.min(
-          ...last20.map(
-            (item) => item.low
-          )
-        );
     }
-
-    return res.status(200).json({
-      symbol,
-      currentPrice,
-      ma5,
-      ma20,
-      recentHigh20,
-      recentLow20,
-      dataPoints
-    });
-  } catch (error) {
-    console.error(
-      `[K-Stock AI] Error calculating strategy indicators for ${symbol}:`,
-      error.message
-    );
-
-    return res.status(500).json({
-      symbol,
-      currentPrice: null,
-      ma5: null,
-      ma20: null,
-      recentHigh20: null,
-      recentLow20: null,
-      dataPoints: 0,
-      error:
-        'Failed to calculate strategy indicators'
-    });
   }
-});
+);
 
-
-// ============================================================
+// ========================================
 // SERVER START
-// ============================================================
+// ========================================
 
 app.listen(PORT, () => {
   console.log(
