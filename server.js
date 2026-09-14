@@ -221,6 +221,40 @@ app.get('/api/stock/quote', async (req, res) => {
       }
     }
 
+    if (tradingValue === null) {
+      try {
+        const realtimeResponse = await fetch(
+          `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${symbol}`,
+          { headers: NAVER_HEADERS }
+        );
+
+        if (realtimeResponse.ok) {
+          const realtimeData = await realtimeResponse.json();
+
+          const realtimeItem =
+            realtimeData &&
+            realtimeData.result &&
+            Array.isArray(realtimeData.result.areas) &&
+            realtimeData.result.areas[0] &&
+            Array.isArray(realtimeData.result.areas[0].datas)
+              ? realtimeData.result.areas[0].datas[0]
+              : null;
+
+          if (realtimeItem) {
+            tradingValue = parseNumber(
+              realtimeItem.aa ||
+                realtimeItem.accumulatedTradingValue
+            );
+          }
+        }
+      } catch (realtimeErr) {
+        console.warn(
+          `[K-Stock AI] Realtime trading value fetch failed for ${symbol}:`,
+          realtimeErr.message
+        );
+      }
+    }
+
     let foreignerNet = null;
     let institutionNet = null;
     let supplyDate = null;
@@ -282,12 +316,10 @@ app.get('/api/stock/quote', async (req, res) => {
       lowPrice,
       foreignerNet,
       institutionNet,
-
       foreignerBuy: null,
       foreignerSell: null,
       institutionBuy: null,
       institutionSell: null,
-
       supplyDate
     });
   } catch (error) {
@@ -466,9 +498,7 @@ app.get('/api/stock/news', async (req, res) => {
         const acData = await acResponse.json();
 
         const findMatchingStockCode = (data, queryName) => {
-          const targetName = queryName
-            .trim()
-            .toLowerCase();
+          const targetName = queryName.trim().toLowerCase();
 
           const processItem = (item) => {
             if (!item) return null;
@@ -561,12 +591,7 @@ app.get('/api/stock/news', async (req, res) => {
           return traverse(data);
         };
 
-        if (acData) {
-          targetSymbol = findMatchingStockCode(
-            acData,
-            cleanQuery
-          );
-        }
+        targetSymbol = findMatchingStockCode(acData, cleanQuery);
       }
     }
 
@@ -619,18 +644,10 @@ app.get('/api/stock/news', async (req, res) => {
         ? rawSummary.replace(/<[^>]+>/g, '')
         : null;
 
-      const articleId =
-        item.articleId ||
-        item.id ||
-        null;
+      const articleId = item.articleId || item.id || null;
+      const officeId = item.officeId || null;
 
-      const officeId =
-        item.officeId ||
-        null;
-
-      let articleUrl =
-        item.url ||
-        null;
+      let articleUrl = item.url || null;
 
       if (officeId && articleId) {
         articleUrl =
