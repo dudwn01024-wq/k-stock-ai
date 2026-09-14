@@ -395,7 +395,6 @@ app.get('/api/stock/quote', async (req, res) => {
         basicData.minPrice
     );
 
-    // 부족한 값은 일봉 데이터에서 보완
     if (
       volume === null ||
       tradingValue === null ||
@@ -455,7 +454,6 @@ app.get('/api/stock/quote', async (req, res) => {
       }
     }
 
-    // 거래대금 실시간 조회 보완
     if (tradingValue === null) {
       try {
         const realtimeResponse = await fetch(
@@ -502,7 +500,6 @@ app.get('/api/stock/quote', async (req, res) => {
     let institutionNet = null;
     let supplyDate = null;
 
-    // 외국인 / 기관 순매수
     try {
       const integrationResponse =
         await fetch(
@@ -568,7 +565,6 @@ app.get('/api/stock/quote', async (req, res) => {
       foreignerNet,
       institutionNet,
 
-      // 현재 검증되지 않은 총 매수/매도는 만들지 않는다.
       foreignerBuy: null,
       foreignerSell: null,
       institutionBuy: null,
@@ -636,7 +632,6 @@ app.get('/api/stock/chart', async (req, res) => {
     });
   }
 
-  // 일중 데이터는 현재 미지원
   if (timeframe === '1D') {
     return res.status(200).json({
       symbol,
@@ -729,8 +724,6 @@ app.get('/api/stock/chart', async (req, res) => {
       })
     );
 
-    // Naver는 최신 날짜부터 내려오므로
-    // 차트에서는 과거 -> 최신 순서로 변경
     chartData.reverse();
 
     return res.status(200).json({
@@ -949,12 +942,20 @@ app.get('/api/stock/news', async (req, res) => {
 // ========================================
 // STRATEGY
 //
-// 실제 일봉 데이터를 사용하여
-// MA5, MA20, 20일 고점/저점,
-// 지지선/저항선,
-// 진입/익절/손절 후보를 계산한다.
+// 추세 + 거래량 + 수급을 모두 확인한다.
 //
-// 임의 +8%, -5% 등의 퍼센트 값은 사용하지 않는다.
+// 1. 추세
+//    현재가 >= MA5 >= MA20
+//
+// 2. 거래량
+//    오늘 거래량 >= 이전 20거래일 평균 거래량
+//
+// 3. 수급
+//    외국인 순매수 + 기관 순매수 > 0
+//
+// 세 조건을 모두 만족해야 BUY_CANDIDATE.
+//
+// 임의 +8%, -5% 같은 가격 계산은 하지 않는다.
 // ========================================
 
 app.get(
@@ -982,6 +983,24 @@ app.get(
       nearestSupport: null,
 
       nearestResistance: null,
+
+      currentVolume: null,
+
+      averageVolume20: null,
+
+      volumeRatio: null,
+
+      foreignerNet: null,
+
+      institutionNet: null,
+
+      netSupplyTotal: null,
+
+      trendPassed: null,
+
+      volumePassed: null,
+
+      supplyPassed: null,
 
       signal:
         'INSUFFICIENT_DATA',
@@ -1022,23 +1041,37 @@ app.get(
     }
 
     try {
-      const response =
-        await fetch(
+      const [
+        priceResponse,
+        integrationResponse
+      ] = await Promise.all([
+        fetch(
           `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
           {
             headers:
               NAVER_HEADERS
           }
-        );
+        ),
 
-      if (!response.ok) {
+        fetch(
+          `https://m.stock.naver.com/api/stock/${symbol}/integration`,
+          {
+            headers:
+              NAVER_HEADERS
+          }
+        )
+      ]);
+
+      if (
+        !priceResponse.ok
+      ) {
         throw new Error(
-          `Failed to fetch strategy source data: HTTP ${response.status}`
+          `Failed to fetch strategy source data: HTTP ${priceResponse.status}`
         );
       }
 
       const data =
-        await response.json();
+        await priceResponse.json();
 
       if (
         !Array.isArray(data) ||
@@ -1051,8 +1084,7 @@ app.get(
           );
       }
 
-      // Naver /price 데이터는
-      // 최신 일자가 앞쪽에 위치한다.
+      // Naver /price 응답은 최신 날짜부터 내려온다.
       const rows =
         data
           .map((item) => ({
@@ -1074,6 +1106,12 @@ app.get(
             low:
               parseNumber(
                 item.lowPrice
+              ),
+
+            volume:
+              parseNumber(
+                item.accumulatedTradingVolume ||
+                  item.volume
               )
           }))
           .filter(
@@ -1086,6 +1124,9 @@ app.get(
               ) &&
               Number.isFinite(
                 item.low
+              ) &&
+              Number.isFinite(
+                item.volume
               )
           );
 
@@ -1099,12 +1140,22 @@ app.get(
           );
       }
 
-      // 최신 종가
+      // ========================================
+      // 현재가 / 거래량
+      // ========================================
+
       const currentPrice =
         rows[0]?.close ??
         null;
 
-      // 최근 5거래일 이동평균
+      const currentVolume =
+        rows[0]?.volume ??
+        null;
+
+      // ========================================
+      // MA5
+      // ========================================
+
       const ma5 =
         rows.length >= 5
           ? average(
@@ -1117,6 +1168,10 @@ app.get(
             )
           : null;
 
+      // ========================================
+      // 최근 20일
+      // ========================================
+
       const has20 =
         rows.length >= 20;
 
@@ -1128,7 +1183,6 @@ app.get(
             )
           : [];
 
-      // 최근 20거래일 이동평균
       const ma20 =
         has20
           ? average(
@@ -1139,7 +1193,6 @@ app.get(
             )
           : null;
 
-      // 최근 20일 최고가
       const recentHigh20 =
         has20
           ? Math.max(
@@ -1150,7 +1203,6 @@ app.get(
             )
           : null;
 
-      // 최근 20일 최저가
       const recentLow20 =
         has20
           ? Math.min(
@@ -1161,8 +1213,109 @@ app.get(
             )
           : null;
 
-      // 데이터 부족 시
-      // 임의 가격을 만들지 않는다.
+      // ========================================
+      // 이전 20일 평균 거래량
+      //
+      // 오늘 거래량은 제외한다.
+      // 따라서 최소 21거래일 데이터가 필요하다.
+      // ========================================
+
+      const hasVolume20 =
+        rows.length >= 21;
+
+      const previous20ForVolume =
+        hasVolume20
+          ? rows.slice(
+              1,
+              21
+            )
+          : [];
+
+      const averageVolume20 =
+        hasVolume20
+          ? average(
+              previous20ForVolume.map(
+                (item) =>
+                  item.volume
+              )
+            )
+          : null;
+
+      const volumeRatio =
+        Number.isFinite(
+          currentVolume
+        ) &&
+        Number.isFinite(
+          averageVolume20
+        ) &&
+        averageVolume20 > 0
+          ? Number(
+              (
+                currentVolume /
+                averageVolume20
+              ).toFixed(2)
+            )
+          : null;
+
+      // ========================================
+      // 외국인 / 기관 수급
+      // ========================================
+
+      let foreignerNet =
+        null;
+
+      let institutionNet =
+        null;
+
+      if (
+        integrationResponse.ok
+      ) {
+        try {
+          const integrationData =
+            await integrationResponse.json();
+
+          const latestTrend =
+            getLatestDealTrend(
+              integrationData
+            );
+
+          if (latestTrend) {
+            foreignerNet =
+              parseNumber(
+                latestTrend.foreignerPureBuyQuant
+              );
+
+            institutionNet =
+              parseNumber(
+                latestTrend.organPureBuyQuant
+              );
+          }
+        } catch (
+          integrationError
+        ) {
+          console.warn(
+            `[K-Stock AI] Strategy supply parse failed for ${symbol}:`,
+            integrationError.message
+          );
+        }
+      }
+
+      // 외국인 + 기관 합산 순매수
+      const netSupplyTotal =
+        Number.isFinite(
+          foreignerNet
+        ) &&
+        Number.isFinite(
+          institutionNet
+        )
+          ? foreignerNet +
+            institutionNet
+          : null;
+
+      // ========================================
+      // 필수 기술 데이터 부족 확인
+      // ========================================
+
       if (
         !Number.isFinite(
           currentPrice
@@ -1197,6 +1350,18 @@ app.get(
 
             recentLow20,
 
+            currentVolume,
+
+            averageVolume20,
+
+            volumeRatio,
+
+            foreignerNet,
+
+            institutionNet,
+
+            netSupplyTotal,
+
             dataPoints:
               Math.min(
                 rows.length,
@@ -1206,7 +1371,7 @@ app.get(
       }
 
       // ========================================
-      // 실제 계산된 지지 레벨
+      // 지지선 후보
       // ========================================
 
       const supportCandidates =
@@ -1228,14 +1393,12 @@ app.get(
               b - a
           );
 
-      // 현재가 아래에서
-      // 가장 가까운 지지 레벨
       const nearestSupport =
         supportCandidates[0] ??
         null;
 
       // ========================================
-      // 실제 계산된 저항 레벨
+      // 저항선 후보
       // ========================================
 
       const resistanceCandidates =
@@ -1257,25 +1420,67 @@ app.get(
               a - b
           );
 
-      // 현재가 위에서
-      // 가장 가까운 저항 레벨
       const nearestResistance =
         resistanceCandidates[0] ??
         null;
 
       // ========================================
-      // 매수 후보 조건
+      // 조건 1
+      // 추세
       //
       // 현재가 >= MA5 >= MA20
-      //
-      // 단순하고 검증 가능한 추세 규칙
       // ========================================
 
-      const bullishTrend =
+      const trendPassed =
         currentPrice >=
           ma5 &&
         ma5 >=
           ma20;
+
+      // ========================================
+      // 조건 2
+      // 거래량
+      //
+      // 오늘 거래량 >= 이전 20일 평균
+      // ========================================
+
+      const volumePassed =
+        Number.isFinite(
+          currentVolume
+        ) &&
+        Number.isFinite(
+          averageVolume20
+        )
+          ? currentVolume >=
+            averageVolume20
+          : null;
+
+      // ========================================
+      // 조건 3
+      // 수급
+      //
+      // 외국인 + 기관 합산 순매수 > 0
+      // ========================================
+
+      const supplyPassed =
+        Number.isFinite(
+          netSupplyTotal
+        )
+          ? netSupplyTotal >
+            0
+          : null;
+
+      // ========================================
+      // 세 조건 모두 통과해야 매수 후보
+      // ========================================
+
+      const allConditionsPassed =
+        trendPassed ===
+          true &&
+        volumePassed ===
+          true &&
+        supplyPassed ===
+          true;
 
       let signal =
         'WAIT';
@@ -1289,25 +1494,26 @@ app.get(
       let stopLossPrice =
         null;
 
-      if (bullishTrend) {
+      if (
+        allConditionsPassed
+      ) {
         signal =
           'BUY_CANDIDATE';
 
-        // --------------------------------
+        // ========================================
         // 진입가
         //
-        // 현재가 아래 실제 지지선 중
-        // 가장 가까운 가격
-        // --------------------------------
+        // 현재가 아래 가장 가까운 실제 지지 레벨
+        // ========================================
 
         entryPrice =
           nearestSupport;
 
-        // --------------------------------
+        // ========================================
         // 익절가
         //
-        // 실제 최근 20일 최고가
-        // --------------------------------
+        // 실제 최근 20일 고점
+        // ========================================
 
         if (
           Number.isFinite(
@@ -1320,13 +1526,12 @@ app.get(
             recentHigh20;
         }
 
-        // --------------------------------
+        // ========================================
         // 손절가
         //
-        // 진입가 아래에 존재하는
-        // MA20 또는 최근 20일 저점 중
-        // 가장 가까운 레벨
-        // --------------------------------
+        // 진입가 아래의 MA20 또는 20일 저점 중
+        // 가장 가까운 실제 레벨
+        // ========================================
 
         const stopCandidates =
           [
@@ -1353,14 +1558,13 @@ app.get(
           stopCandidates[0] ??
           null;
 
-        // --------------------------------
+        // ========================================
         // 가격 관계 검증
         //
         // 손절 < 진입 < 익절
         //
-        // 성립하지 않으면
-        // 억지 추천을 하지 않는다.
-        // --------------------------------
+        // 성립하지 않으면 매수 후보 취소
+        // ========================================
 
         if (
           !Number.isFinite(
@@ -1393,6 +1597,10 @@ app.get(
         }
       }
 
+      // ========================================
+      // RESULT
+      // ========================================
+
       return res
         .status(200)
         .json({
@@ -1411,6 +1619,24 @@ app.get(
           nearestSupport,
 
           nearestResistance,
+
+          currentVolume,
+
+          averageVolume20,
+
+          volumeRatio,
+
+          foreignerNet,
+
+          institutionNet,
+
+          netSupplyTotal,
+
+          trendPassed,
+
+          volumePassed,
+
+          supplyPassed,
 
           signal,
 
