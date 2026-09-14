@@ -84,52 +84,30 @@ app.get('/api/stock/quote', async (req, res) => {
     const changeRate = parseNumber(data.fluctuationsRatio);
     const stockName = data.stockName || null;
 
-    let volume = parseNumber(
-      data.accumulatedTradingVolume ||
-      data.volume ||
-      data.tradingVolume ||
-      data.executedVolume
-    );
-
+    let volume = parseNumber(data.accumulatedTradingVolume || data.volume || data.tradingVolume || data.executedVolume);
     let highPrice = parseNumber(data.highPrice || data.maxPrice);
     let lowPrice = parseNumber(data.lowPrice || data.minPrice);
 
-    // Fallback: fetch real values from latest price history endpoint
-    // if volume, highPrice, or lowPrice are missing.
+    // Fallback: If volume, highPrice, or lowPrice are missing in basic API response, fetch real values from latest price history endpoint
     if (volume === null || highPrice === null || lowPrice === null) {
       try {
-        const priceRes = await fetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=1&page=1`,
-          {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        const priceRes = await fetch(`https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=1&page=1`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
           }
-        );
+        });
 
         if (priceRes.ok) {
           const priceData = await priceRes.json();
-
           if (Array.isArray(priceData) && priceData.length > 0) {
             const latest = priceData[0];
-
-            if (highPrice === null) {
-              highPrice = parseNumber(latest.highPrice);
-            }
-
-            if (lowPrice === null) {
-              lowPrice = parseNumber(latest.lowPrice);
-            }
-
-            if (volume === null) {
-              volume = parseNumber(
-                latest.accumulatedTradingVolume || latest.volume
-              );
-            }
+            if (highPrice === null) highPrice = parseNumber(latest.highPrice);
+            if (lowPrice === null) lowPrice = parseNumber(latest.lowPrice);
+            if (volume === null) volume = parseNumber(latest.accumulatedTradingVolume || latest.volume);
           }
         }
       } catch (priceErr) {
-        // Keep null if extra fetch fails.
+        // Keep null if extra fetch fails, maintaining real-data principle
       }
     }
 
@@ -144,13 +122,9 @@ app.get('/api/stock/quote', async (req, res) => {
       highPrice: highPrice,
       lowPrice: lowPrice
     });
-
   } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching stock quote for ${symbol}:`,
-      error.message
-    );
-
+    console.error(`[K-Stock AI] Error fetching stock quote for ${symbol}:`, error.message);
+    // Return null for values upon fetch failure
     return res.status(500).json({
       symbol: symbol,
       stockName: null,
@@ -168,8 +142,7 @@ app.get('/api/stock/quote', async (req, res) => {
 /**
  * GET /api/stock/chart?symbol=005930&timeframe=1M
  * Fetches real stock price chart historical data.
- * 1D returns supported: false since intraday minute data
- * is not generated synthetically.
+ * 1D returns supported: false since intraday minute data is not generated synthetically.
  */
 app.get('/api/stock/chart', async (req, res) => {
   const symbol = req.query.symbol;
@@ -185,7 +158,7 @@ app.get('/api/stock/chart', async (req, res) => {
     });
   }
 
-  // Do not generate fake 1-day minute chart data
+  // Handle 1D timeframe by returning supported: false without generating fake minute data
   if (timeframe === '1D') {
     return res.status(200).json({
       symbol: symbol,
@@ -195,48 +168,37 @@ app.get('/api/stock/chart', async (req, res) => {
     });
   }
 
-  // Approximate number of daily records requested
+  // Calculate approximate daily page size based on requested timeframe
   let pageSize = 30;
-
   switch (timeframe) {
     case '1W':
       pageSize = 7;
       break;
-
     case '1M':
       pageSize = 30;
       break;
-
     case '3M':
       pageSize = 90;
       break;
-
     case '1Y':
       pageSize = 365;
       break;
-
     case '5Y':
       pageSize = 1825;
       break;
-
     default:
       pageSize = 30;
   }
 
   try {
-    const response = await fetch(
-      `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${pageSize}&page=1`,
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
+    const response = await fetch(`https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${pageSize}&page=1`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
-    );
+    });
 
     if (!response.ok) {
-      throw new Error(
-        `Failed to fetch stock chart data: HTTP ${response.status}`
-      );
+      throw new Error(`Failed to fetch stock chart data: HTTP ${response.status}`);
     }
 
     const data = await response.json();
@@ -250,18 +212,17 @@ app.get('/api/stock/chart', async (req, res) => {
       });
     }
 
+    // Map fetched items into clean chart objects
     const chartData = data.map((item) => ({
       date: item.localTradedAt || item.bizdate || null,
       open: parseNumber(item.openPrice),
       high: parseNumber(item.highPrice),
       low: parseNumber(item.lowPrice),
       close: parseNumber(item.closePrice),
-      volume: parseNumber(
-        item.accumulatedTradingVolume || item.volume
-      )
+      volume: parseNumber(item.accumulatedTradingVolume || item.volume)
     }));
 
-    // Oldest -> newest
+    // Reverse to output chronological order (oldest -> newest) for charting
     chartData.reverse();
 
     return res.status(200).json({
@@ -270,13 +231,8 @@ app.get('/api/stock/chart', async (req, res) => {
       supported: true,
       chart: chartData
     });
-
   } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching stock chart for ${symbol}:`,
-      error.message
-    );
-
+    console.error(`[K-Stock AI] Error fetching stock chart for ${symbol}:`, error.message);
     return res.status(500).json({
       symbol: symbol,
       timeframe: timeframe,
@@ -288,12 +244,9 @@ app.get('/api/stock/chart', async (req, res) => {
 });
 
 /**
- * GET /api/stock/news?query=삼성전자
- * or
- * GET /api/stock/news?symbol=005930
- *
- * Fetches real stock-related news specific to the requested stock.
- * No fallback to unrelated generic main news.
+ * GET /api/stock/news?query=삼성전자 or GET /api/stock/news?symbol=005930
+ * Fetches real stock-related news articles specific to the requested stock/keyword.
+ * Returns empty array [] if no specific stock news is found (no fallback to generic main news).
  */
 app.get('/api/stock/news', async (req, res) => {
   const query = req.query.query || req.query.symbol;
@@ -311,48 +264,45 @@ app.get('/api/stock/news', async (req, res) => {
   try {
     let targetSymbol = null;
 
-    // Query is already a 6-digit Korean stock code
+    // Check if query is directly a 6-digit stock symbol
     if (/^\d{6}$/.test(cleanQuery)) {
       targetSymbol = cleanQuery;
-
     } else {
-      // Resolve Korean stock name -> stock code
-      const acResponse = await fetch(
-        `https://ac.stock.naver.com/ac?q=${encodeURIComponent(cleanQuery)}&q_enc=utf-8&target=stock`,
-        {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://finance.naver.com'
-          }
+      // Resolve stock name to 6-digit stock code using official Naver autocomplete
+      const acResponse = await fetch(`https://ac.stock.naver.com/ac?q=${encodeURIComponent(cleanQuery)}&q_enc=utf-8&target=stock`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://finance.naver.com'
         }
-      );
+      });
 
       if (acResponse.ok) {
         const acData = await acResponse.json();
-
-        if (
-          acData &&
-          Array.isArray(acData.items) &&
-          acData.items.length > 0
-        ) {
-          const stockItems = acData.items[0];
-
-          if (Array.isArray(stockItems) && stockItems.length > 0) {
-            const match = stockItems.find(
-              (item) =>
-                Array.isArray(item) &&
-                /^\d{6}$/.test(item[1])
-            );
-
-            if (match) {
-              targetSymbol = match[1];
+        
+        // Recursive search helper to find a 6-digit stock symbol inside deeply nested arrays
+        const findStockCode = (arr) => {
+          if (!Array.isArray(arr)) return null;
+          for (const item of arr) {
+            if (Array.isArray(item)) {
+              // Check if current array item is a tuple containing a 6-digit stock code
+              const matchedCode = item.find(val => typeof val === 'string' && /^\d{6}$/.test(val));
+              if (matchedCode) return matchedCode;
+              
+              // Search recursively inside nested arrays
+              const nestedResult = findStockCode(item);
+              if (nestedResult) return nestedResult;
             }
           }
+          return null;
+        };
+
+        if (acData && acData.items) {
+          targetSymbol = findStockCode(acData.items);
         }
       }
     }
 
-    // Do not return unrelated main news
+    // If stock code could not be resolved or found, return empty news array directly without mainnews fallback
     if (!targetSymbol) {
       return res.status(200).json({
         query: cleanQuery,
@@ -360,9 +310,8 @@ app.get('/api/stock/news', async (req, res) => {
       });
     }
 
-    const targetUrl =
-      `https://m.stock.naver.com/api/news/stock/${targetSymbol}?pageSize=10&page=1`;
-
+    // Fetch news specifically belonging to target stock symbol
+    const targetUrl = `https://m.stock.naver.com/api/news/stock/${targetSymbol}?pageSize=10&page=1`;
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -370,56 +319,33 @@ app.get('/api/stock/news', async (req, res) => {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Failed to fetch stock news: HTTP ${response.status}`
-      );
+      throw new Error(`Failed to fetch stock news: HTTP ${response.status}`);
     }
 
     const data = await response.json();
+    const rawList = Array.isArray(data) ? data : (data.items || data.newsList || []);
 
-    const rawList = Array.isArray(data)
-      ? data
-      : (data.items || data.newsList || []);
-
+    // Format news items safely using actual Naver stock news response keys (tit, subtit, officeName, articleId, officeId, datetime)
     const newsList = rawList.map((item) => {
-      const cleanTitle = item.title
-        ? item.title.replace(/<[^>]+>/g, '')
-        : null;
+      const rawTitle = item.tit || item.title || null;
+      const cleanTitle = rawTitle ? rawTitle.replace(/<[^>]+>/g, '') : null;
 
-      const cleanSummary = item.body
-        ? item.body.replace(/<[^>]+>/g, '')
-        : (item.summary || null);
-
-      const articleId =
-        item.articleId ||
-        item.id ||
-        null;
-
-      const officeId =
-        item.officeId ||
-        null;
-
-      let articleUrl =
-        item.url ||
-        null;
-
+      const rawSummary = item.subtit || item.body || item.summary || null;
+      const cleanSummary = rawSummary ? rawSummary.replace(/<[^>]+>/g, '') : null;
+      
+      const articleId = item.articleId || item.id || null;
+      const officeId = item.officeId || null;
+      
+      let articleUrl = item.url || null;
       if (officeId && articleId) {
-        articleUrl =
-          `https://n.news.naver.com/mnews/article/${officeId}/${articleId}`;
+        articleUrl = `https://n.news.naver.com/mnews/article/${officeId}/${articleId}`;
       }
 
       return {
         id: articleId,
         title: cleanTitle,
-        publisher:
-          item.officeName ||
-          item.publisher ||
-          null,
-        date:
-          item.datetime ||
-          item.createdAt ||
-          item.date ||
-          null,
+        publisher: item.officeName || item.publisher || null,
+        date: item.datetime || item.createdAt || item.date || null,
         summary: cleanSummary,
         url: articleUrl
       };
@@ -429,13 +355,8 @@ app.get('/api/stock/news', async (req, res) => {
       query: cleanQuery,
       news: newsList
     });
-
   } catch (error) {
-    console.error(
-      `[K-Stock AI] Error fetching news for ${query}:`,
-      error.message
-    );
-
+    console.error(`[K-Stock AI] Error fetching news for ${query}:`, error.message);
     return res.status(500).json({
       query: cleanQuery,
       news: [],
@@ -444,9 +365,7 @@ app.get('/api/stock/news', async (req, res) => {
   }
 });
 
-// Start the HTTP server
+// Start the HTTP server listening on the configured port
 app.listen(PORT, () => {
-  console.log(
-    `[K-Stock AI] Backend server is running on port ${PORT}`
-  );
+  console.log(`[K-Stock AI] Backend server is running on port ${PORT}`);
 });
