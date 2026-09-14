@@ -788,7 +788,6 @@ const fetchStockNewsBySymbol =
       }
     );
   };
-
 // ========================================
 // STRATEGY CALCULATION
 // ========================================
@@ -949,7 +948,8 @@ const calculateStrategy =
               item.volume
             )
         );
-        if (
+
+    if (
       rows.length === 0
     ) {
       return emptyResult();
@@ -1405,7 +1405,255 @@ const parseGeminiJson = (
 };
 
 // ========================================
-// GEMINI PROMPT
+// GEMINI SINGLE MODEL CALL
+// ========================================
+
+const callGeminiModelOnce =
+  async ({
+    model,
+    prompt
+  }) => {
+    const response =
+      await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+          model
+        )}:generateContent`,
+        {
+          method:
+            'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json',
+
+            'x-goog-api-key':
+              GEMINI_API_KEY
+          },
+
+          body:
+            JSON.stringify({
+              contents: [
+                {
+                  role:
+                    'user',
+
+                  parts: [
+                    {
+                      text:
+                        prompt
+                    }
+                  ]
+                }
+              ],
+
+              generationConfig: {
+                temperature:
+                  0.2,
+
+                maxOutputTokens:
+                  1400,
+
+                responseMimeType:
+                  'application/json'
+              }
+            })
+        }
+      );
+
+    const rawText =
+      await response.text();
+
+    if (
+      !response.ok
+    ) {
+      const error =
+        new Error(
+          `Gemini API error HTTP ${response.status}: ${rawText.slice(
+            0,
+            500
+          )}`
+        );
+
+      error.status =
+        response.status;
+
+      error.model =
+        model;
+
+      throw error;
+    }
+
+    let payload;
+
+    try {
+      payload =
+        JSON.parse(
+          rawText
+        );
+    } catch (_) {
+      throw new Error(
+        `Gemini returned non-JSON HTTP response for ${model}`
+      );
+    }
+
+    const text =
+      extractGeminiText(
+        payload
+      );
+
+    const parsed =
+      parseGeminiJson(
+        text
+      );
+
+    if (!parsed) {
+      const error =
+        new Error(
+          `Gemini returned invalid analysis JSON for ${model}`
+        );
+
+      error.status =
+        200;
+
+      error.model =
+        model;
+
+      throw error;
+    }
+
+    return parsed;
+  };
+
+// ========================================
+// GEMINI RETRY + FALLBACK
+// ========================================
+
+const callGeminiPromptWithRetry =
+  async (prompt) => {
+    if (
+      !GEMINI_API_KEY
+    ) {
+      throw new Error(
+        'GEMINI_API_KEY is not configured'
+      );
+    }
+
+    const models =
+      [
+        PRIMARY_GEMINI_MODEL,
+        ...GEMINI_FALLBACK_MODELS
+      ].filter(
+        (
+          model,
+          index,
+          array
+        ) =>
+          model &&
+          array.indexOf(
+            model
+          ) === index
+      );
+
+    const retryableStatuses =
+      new Set([
+        500,
+        502,
+        503,
+        504
+      ]);
+
+    const errors = [];
+
+    for (
+      const model of models
+    ) {
+      const maxAttempts =
+        model ===
+        PRIMARY_GEMINI_MODEL
+          ? 3
+          : 2;
+
+      for (
+        let attempt = 1;
+        attempt <=
+        maxAttempts;
+        attempt += 1
+      ) {
+        try {
+          console.log(
+            `[K-Stock AI] Gemini request model=${model} attempt=${attempt}/${maxAttempts}`
+          );
+
+          const analysis =
+            await callGeminiModelOnce({
+              model,
+              prompt
+            });
+
+          return {
+            analysis,
+            modelUsed:
+              model,
+            attemptUsed:
+              attempt
+          };
+        } catch (error) {
+          errors.push({
+            model,
+            attempt,
+
+            status:
+              error.status ||
+              null,
+
+            message:
+              error.message
+          });
+
+          console.warn(
+            `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
+            error.message
+          );
+
+          const shouldRetrySameModel =
+            retryableStatuses.has(
+              error.status
+            ) &&
+            attempt <
+              maxAttempts;
+
+          if (
+            shouldRetrySameModel
+          ) {
+            const delayMs =
+              attempt === 1
+                ? 800
+                : 1600;
+
+            await sleep(
+              delayMs
+            );
+
+            continue;
+          }
+
+          break;
+        }
+      }
+    }
+
+    const finalError =
+      new Error(
+        'All Gemini models failed'
+      );
+
+    finalError.details =
+      errors;
+
+    throw finalError;
+  };
+// ========================================
+// INDIVIDUAL STOCK AI PROMPT
 // ========================================
 
 const buildGeminiPrompt = ({
@@ -1556,53 +1804,63 @@ const buildGeminiPrompt = ({
   return `
 너는 K-Stock AI의 설명 전용 분석 모듈이다.
 
-아래에 제공되는 실제 데이터만 사용해서 투자 초보자도 이해하기 쉬운 자연스러운 한국어로 설명해라.
+아래에 제공되는 실제 데이터만 사용해서
+투자 초보자도 이해하기 쉬운 자연스러운 한국어로 설명해라.
 
 [절대 규칙]
 
 1. 입력 데이터에 없는 가격, 수치, 뉴스, 기업 정보, 전망을 절대 만들어내지 마라.
 
 2. 백엔드가 내린 종합 판정을 절대 변경하지 마라.
-- "매수 후보 조건 충족"이면 그 사실을 설명만 한다.
-- "관망"이면 왜 관망인지 설명한다.
-- "데이터 부족"이면 데이터가 부족하다고 설명한다.
 
 3. 진입 고려 가격, 목표 가격, 손절 기준 가격이 제공되지 않았다면 임의의 가격을 만들지 마라.
 
 4. "매수하세요", "매도하세요", "반드시 상승합니다" 같은 직접적인 투자 지시나 확정적 표현을 사용하지 마라.
 
-5. 뉴스는 제공된 제목과 요약에서 확인되는 내용만 설명한다. 기사에 없는 원인, 결과, 전망을 추측해서 사실처럼 말하지 마라.
+5. 뉴스는 제공된 제목과 요약에서 확인되는 내용만 설명한다.
 
-6. 숫자를 사용할 때는 입력 데이터에 실제로 존재하는 숫자만 사용한다.
+6. 기사에 없는 원인이나 전망을 사실처럼 추측하지 마라.
 
-7. 개발자용 변수명이나 프로그래밍 표현을 사용자에게 절대 보여주지 마라.
-특히 다음 표현은 최종 문장에 절대 쓰지 마라:
-trendPassed, volumePassed, supplyPassed, currentPrice, ma5, ma20,
-entryPrice, takeProfitPrice, stopLossPrice, signal,
-BUY_CANDIDATE, WAIT, true, false, null
+7. 숫자는 입력 데이터에 실제로 존재하는 숫자만 사용한다.
 
-8. 위 표현 대신 반드시 자연스러운 한국어를 사용한다.
-예:
-- "추세 조건이 충족되었습니다."
-- "거래량 조건은 충족되었습니다."
-- "수급 조건은 아직 충족되지 않았습니다."
-- "현재는 관망 구간입니다."
-- "진입 고려 가격은 아직 제시되지 않았습니다."
+8. 개발자용 변수명이나 코드 표현을 사용자에게 절대 보여주지 마라.
 
-9. 긍정 요인에는 실제로 긍정적인 데이터만 적는다. 조건이 미충족인데 긍정적인 것처럼 표현하지 마라.
+다음 표현은 최종 문장에 절대 사용하지 마라:
 
-10. 위험 요인에는 실제 데이터에서 확인되는 위험 또는 미충족 조건만 적는다.
+trendPassed
+volumePassed
+supplyPassed
+currentPrice
+ma5
+ma20
+entryPrice
+takeProfitPrice
+stopLossPrice
+signal
+BUY_CANDIDATE
+WAIT
+true
+false
+null
 
-11. 시장 상태는 반드시 "긍정", "중립", "주의" 중 하나만 반환한다.
+9. 위 개발자 표현 대신 자연스러운 한국어를 사용한다.
 
-12. 모든 설명은 자연스러운 한국어 문장으로 작성한다. 영어 변수명이나 코드 표현을 섞지 마라.
+10. 긍정 요인에는 실제로 확인되는 긍정적인 데이터만 적는다.
 
-13. 마크다운을 사용하지 말고 JSON만 반환한다.
+11. 위험 요인에는 실제 데이터에서 확인되는 위험 또는 미충족 조건만 적는다.
+
+12. 시장 상태는 반드시
+"긍정", "중립", "주의"
+중 하나만 반환한다.
+
+13. 모든 설명은 한국어로 작성한다.
+
+14. 마크다운을 사용하지 말고 JSON만 반환한다.
 
 [출력 형식]
 
 {
-  "summary": "현재 상태를 초보자가 이해하기 쉽게 2~3문장으로 요약",
+  "summary": "현재 상태를 2~3문장으로 요약",
   "marketCondition": "긍정 또는 중립 또는 주의",
   "positiveFactors": [
     "실제 데이터로 확인되는 긍정 요소"
@@ -1610,9 +1868,9 @@ BUY_CANDIDATE, WAIT, true, false, null
   "riskFactors": [
     "실제 데이터로 확인되는 위험 또는 주의 요소"
   ],
-  "strategyExplanation": "추세, 거래량, 수급 조건과 최종 판정을 자연스러운 한국어로 설명",
-  "newsExplanation": "제공된 최신 뉴스에서 확인되는 핵심 내용만 설명. 뉴스가 없으면 데이터 부족이라고 설명",
-  "caution": "현재 데이터 기준으로 주의할 점을 자연스러운 한국어로 설명"
+  "strategyExplanation": "추세, 거래량, 수급 조건과 최종 판정을 설명",
+  "newsExplanation": "제공된 최신 뉴스의 핵심 내용만 설명",
+  "caution": "현재 데이터 기준으로 주의할 점"
 }
 
 [분석 대상 실제 데이터]
@@ -1622,127 +1880,7 @@ ${JSON.stringify(factualInput)}
 };
 
 // ========================================
-// SINGLE GEMINI CALL
-// ========================================
-
-const callGeminiModelOnce =
-  async ({
-    model,
-    prompt
-  }) => {
-    const response =
-      await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          model
-        )}:generateContent`,
-        {
-          method:
-            'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json',
-
-            'x-goog-api-key':
-              GEMINI_API_KEY
-          },
-
-          body:
-            JSON.stringify({
-              contents: [
-                {
-                  role:
-                    'user',
-
-                  parts: [
-                    {
-                      text:
-                        prompt
-                    }
-                  ]
-                }
-              ],
-
-              generationConfig: {
-                temperature:
-                  0.2,
-
-                maxOutputTokens:
-                  1200,
-
-                responseMimeType:
-                  'application/json'
-              }
-            })
-        }
-      );
-
-    const rawText =
-      await response.text();
-
-    if (
-      !response.ok
-    ) {
-      const error =
-        new Error(
-          `Gemini API error HTTP ${response.status}: ${rawText.slice(
-            0,
-            500
-          )}`
-        );
-
-      error.status =
-        response.status;
-
-      error.model =
-        model;
-
-      throw error;
-    }
-
-    let payload;
-
-    try {
-      payload =
-        JSON.parse(
-          rawText
-        );
-    } catch (_) {
-      throw new Error(
-        `Gemini returned non-JSON HTTP response for ${model}`
-      );
-    }
-
-    const text =
-      extractGeminiText(
-        payload
-      );
-
-    const parsed =
-      parseGeminiJson(
-        text
-      );
-
-    if (!parsed) {
-      const error =
-        new Error(
-          `Gemini returned invalid analysis JSON for ${model}`
-        );
-
-      error.status =
-        200;
-
-      error.model =
-        model;
-
-      throw error;
-    }
-
-    return parsed;
-  };
-
-// ========================================
-// GEMINI RETRY + FALLBACK
+// INDIVIDUAL STOCK AI CALL
 // ========================================
 
 const callGeminiWithRetryAndFallback =
@@ -1751,14 +1889,6 @@ const callGeminiWithRetryAndFallback =
     strategy,
     news
   }) => {
-    if (
-      !GEMINI_API_KEY
-    ) {
-      throw new Error(
-        'GEMINI_API_KEY is not configured'
-      );
-    }
-
     const prompt =
       buildGeminiPrompt({
         quote,
@@ -1766,119 +1896,189 @@ const callGeminiWithRetryAndFallback =
         news
       });
 
-    const models =
-      [
-        PRIMARY_GEMINI_MODEL,
-        ...GEMINI_FALLBACK_MODELS
-      ].filter(
-        (
-          model,
-          index,
-          array
-        ) =>
-          model &&
-          array.indexOf(
-            model
-          ) === index
-      );
+    return callGeminiPromptWithRetry(
+      prompt
+    );
+  };
 
-    const retryableStatuses =
-      new Set([
-        500,
-        502,
-        503,
-        504
-      ]);
+// ========================================
+// RECOMMENDATION AI PROMPT
+// ========================================
 
-    const errors = [];
+const buildRecommendationGeminiPrompt =
+  ({
+    stock,
+    news
+  }) => {
+    const newsInput =
+      news
+        .slice(0, 10)
+        .map((item) => ({
+          제목:
+            item.title,
 
-    for (
-      const model of models
-    ) {
-      const maxAttempts =
-        model ===
-        PRIMARY_GEMINI_MODEL
-          ? 3
-          : 2;
+          언론사:
+            item.publisher,
 
-      for (
-        let attempt = 1;
-        attempt <=
-        maxAttempts;
-        attempt += 1
-      ) {
-        try {
-          console.log(
-            `[K-Stock AI] Gemini request model=${model} attempt=${attempt}/${maxAttempts}`
-          );
+          날짜:
+            item.date,
 
-          const analysis =
-            await callGeminiModelOnce({
-              model,
-              prompt
-            });
+          요약:
+            item.summary
+        }));
 
-          return {
-            analysis,
-            modelUsed:
-              model,
-            attemptUsed:
-              attempt
-          };
-        } catch (error) {
-          errors.push({
-            model,
-            attempt,
+    const factualInput = {
+      종목정보: {
+        종목코드:
+          stock.symbol,
 
-            status:
-              error.status ||
-              null,
+        종목명:
+          stock.stockName,
 
-            message:
-              error.message
-          });
+        현재가:
+          stock.currentPrice,
 
-          console.warn(
-            `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
-            error.message
-          );
+        전일대비:
+          stock.priceChange,
 
-          const shouldRetrySameModel =
-            retryableStatuses.has(
-              error.status
-            ) &&
-            attempt <
-              maxAttempts;
+        등락률:
+          stock.changeRate
+      },
 
-          if (
-            shouldRetrySameModel
-          ) {
-            const delayMs =
-              attempt === 1
-                ? 800
-                : 1600;
+      후보조건: {
+        조건충족개수:
+          stock.score,
 
-            await sleep(
-              delayMs
-            );
+        전체조건개수:
+          stock.maxScore,
 
-            continue;
-          }
+        충족조건:
+          stock.passedConditions,
 
-          break;
-        }
-      }
-    }
+        미충족조건:
+          stock.failedConditions
+      },
 
-    const finalError =
-      new Error(
-        'All Gemini models failed'
-      );
+      기술및수급: {
+        '5일이동평균선':
+          stock.strategy?.ma5,
 
-    finalError.details =
-      errors;
+        '20일이동평균선':
+          stock.strategy?.ma20,
 
-    throw finalError;
+        '최근20일최고가':
+          stock.strategy?.recentHigh20,
+
+        '최근20일최저가':
+          stock.strategy?.recentLow20,
+
+        거래량비율:
+          stock.strategy?.volumeRatio,
+
+        외국인순매수:
+          stock.strategy?.foreignerNet,
+
+        기관순매수:
+          stock.strategy?.institutionNet,
+
+        외국인기관합산순매수:
+          stock.strategy?.netSupplyTotal,
+
+        진입고려가격:
+          stock.strategy?.entryPrice,
+
+        목표가격:
+          stock.strategy?.takeProfitPrice,
+
+        손절기준가격:
+          stock.strategy?.stopLossPrice
+      },
+
+      최신뉴스:
+        newsInput
+    };
+
+    return `
+너는 K-Stock AI의 추천 후보 설명 전용 AI다.
+
+이 종목은 이미 백엔드의 실제 데이터 규칙으로
+추세, 거래량, 수급 조건을 모두 검사한 뒤 선정된 후보이다.
+
+너의 역할은 종목을 새로 추천하는 것이 아니다.
+
+오직 아래에 제공된 실제 데이터와 뉴스만 읽고,
+왜 이 종목이 현재 후보로 선정되었는지와
+어떤 위험을 확인해야 하는지 설명한다.
+
+[절대 규칙]
+
+1. 입력 데이터에 없는 사실을 절대 만들어내지 마라.
+
+2. 새로운 목표가, 진입가, 손절가를 계산하지 마라.
+
+3. 제공된 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 마라.
+
+4. 후보 조건 점수를 변경하지 마라.
+
+5. 추세, 거래량, 수급의 충족 여부를 변경하지 마라.
+
+6. 뉴스에 없는 내용을 추측해서 사실처럼 말하지 마라.
+
+7. 미래 주가 상승 또는 하락을 확정적으로 예측하지 마라.
+
+8. "무조건 매수", "강력 매수", "지금 사야 한다" 같은 투자 지시를 하지 마라.
+
+9. 제공된 최신 뉴스에 부정적 내용이 있다면 반드시 위험 요인에 반영한다.
+
+10. 뉴스가 부족하거나 종목과 직접 관련 없는 뉴스뿐이면
+"뉴스만으로 추가 판단하기 어렵습니다."
+라고 명확하게 설명한다.
+
+11. 숫자를 언급할 때는 제공된 숫자만 사용한다.
+
+12. 개발자용 변수명과 코드 표현을 절대 보여주지 마라.
+
+다음 단어는 최종 결과에서 사용하지 마라:
+
+trendPassed
+volumePassed
+supplyPassed
+signal
+BUY_CANDIDATE
+WAIT
+true
+false
+null
+entryPrice
+takeProfitPrice
+stopLossPrice
+ma5
+ma20
+
+13. 모든 설명은 자연스러운 한국어로 작성한다.
+
+14. 마크다운 없이 JSON만 반환한다.
+
+[출력 형식]
+
+{
+  "candidateSummary": "이 종목이 후보로 선정된 이유를 2~3문장으로 설명",
+  "newsSentiment": "긍정 또는 중립 또는 주의",
+  "positiveFactors": [
+    "실제 데이터 또는 뉴스에서 확인되는 긍정 요인"
+  ],
+  "riskFactors": [
+    "실제 데이터 또는 뉴스에서 확인되는 위험 요인"
+  ],
+  "newsSummary": "최신 뉴스에서 확인되는 핵심 내용을 설명",
+  "strategyComment": "진입 고려 가격, 목표 가격, 손절 기준 가격이 있으면 그 의미를 설명하되 값을 변경하지 말 것",
+  "finalComment": "현재 후보를 볼 때 가장 중요하게 확인할 내용을 짧게 설명"
+}
+
+[실제 입력 데이터]
+
+${JSON.stringify(factualInput)}
+    `.trim();
   };
 
 // ========================================
@@ -1886,40 +2086,137 @@ const callGeminiWithRetryAndFallback =
 // ========================================
 
 const RECOMMENDATION_WATCHLIST = [
-  { symbol: '005930', name: '삼성전자' },
-  { symbol: '000660', name: 'SK하이닉스' },
-  { symbol: '373220', name: 'LG에너지솔루션' },
-  { symbol: '207940', name: '삼성바이오로직스' },
-  { symbol: '005380', name: '현대차' },
-  { symbol: '000270', name: '기아' },
-  { symbol: '068270', name: '셀트리온' },
-  { symbol: '035420', name: 'NAVER' },
-  { symbol: '035720', name: '카카오' },
-  { symbol: '005490', name: 'POSCO홀딩스' },
-  { symbol: '105560', name: 'KB금융' },
-  { symbol: '055550', name: '신한지주' },
-  { symbol: '086790', name: '하나금융지주' },
-  { symbol: '316140', name: '우리금융지주' },
-  { symbol: '028260', name: '삼성물산' },
-  { symbol: '006400', name: '삼성SDI' },
-  { symbol: '051910', name: 'LG화학' },
-  { symbol: '012450', name: '한화에어로스페이스' },
-  { symbol: '329180', name: 'HD현대중공업' },
-  { symbol: '042660', name: '한화오션' },
-  { symbol: '034020', name: '두산에너빌리티' },
-  { symbol: '064350', name: '현대로템' },
-  { symbol: '015760', name: '한국전력' },
-  { symbol: '033780', name: 'KT&G' },
-  { symbol: '017670', name: 'SK텔레콤' },
-  { symbol: '066570', name: 'LG전자' },
-  { symbol: '009150', name: '삼성전기' },
-  { symbol: '003490', name: '대한항공' },
-  { symbol: '090430', name: '아모레퍼시픽' },
-  { symbol: '352820', name: '하이브' }
+  {
+    symbol: '005930',
+    name: '삼성전자'
+  },
+  {
+    symbol: '000660',
+    name: 'SK하이닉스'
+  },
+  {
+    symbol: '373220',
+    name: 'LG에너지솔루션'
+  },
+  {
+    symbol: '207940',
+    name: '삼성바이오로직스'
+  },
+  {
+    symbol: '005380',
+    name: '현대차'
+  },
+  {
+    symbol: '000270',
+    name: '기아'
+  },
+  {
+    symbol: '068270',
+    name: '셀트리온'
+  },
+  {
+    symbol: '035420',
+    name: 'NAVER'
+  },
+  {
+    symbol: '035720',
+    name: '카카오'
+  },
+  {
+    symbol: '005490',
+    name: 'POSCO홀딩스'
+  },
+  {
+    symbol: '105560',
+    name: 'KB금융'
+  },
+  {
+    symbol: '055550',
+    name: '신한지주'
+  },
+  {
+    symbol: '086790',
+    name: '하나금융지주'
+  },
+  {
+    symbol: '316140',
+    name: '우리금융지주'
+  },
+  {
+    symbol: '028260',
+    name: '삼성물산'
+  },
+  {
+    symbol: '006400',
+    name: '삼성SDI'
+  },
+  {
+    symbol: '051910',
+    name: 'LG화학'
+  },
+  {
+    symbol: '012450',
+    name: '한화에어로스페이스'
+  },
+  {
+    symbol: '329180',
+    name: 'HD현대중공업'
+  },
+  {
+    symbol: '042660',
+    name: '한화오션'
+  },
+  {
+    symbol: '034020',
+    name: '두산에너빌리티'
+  },
+  {
+    symbol: '064350',
+    name: '현대로템'
+  },
+  {
+    symbol: '015760',
+    name: '한국전력'
+  },
+  {
+    symbol: '033780',
+    name: 'KT&G'
+  },
+  {
+    symbol: '017670',
+    name: 'SK텔레콤'
+  },
+  {
+    symbol: '066570',
+    name: 'LG전자'
+  },
+  {
+    symbol: '009150',
+    name: '삼성전기'
+  },
+  {
+    symbol: '003490',
+    name: '대한항공'
+  },
+  {
+    symbol: '090430',
+    name: '아모레퍼시픽'
+  },
+  {
+    symbol: '352820',
+    name: '하이브'
+  }
 ];
 
 const RECOMMENDATION_CONCURRENCY =
   5;
+
+const RECOMMENDATION_AI_LIMIT =
+  3;
+
+// ========================================
+// CONCURRENCY HELPER
+// ========================================
 
 const mapWithConcurrency =
   async (
@@ -1980,6 +2277,10 @@ const mapWithConcurrency =
     return results;
   };
 
+// ========================================
+// RECOMMENDATION SCORE
+// ========================================
+
 const getRecommendationScore =
   (strategy) => {
     if (
@@ -1999,6 +2300,10 @@ const getRecommendationScore =
         value === true
     ).length;
   };
+
+// ========================================
+// RECOMMENDATION CONDITION LABELS
+// ========================================
 
 const buildRecommendationReason =
   (strategy) => {
@@ -2059,6 +2364,259 @@ const buildRecommendationReason =
 
       failedConditions:
         failed
+    };
+  };
+
+// ========================================
+// BUILD ONE RECOMMENDATION RESULT
+// ========================================
+
+const buildRecommendationResult =
+  async (stock) => {
+    const [
+      quote,
+      strategy
+    ] =
+      await Promise.all([
+        fetchStockQuoteData(
+          stock.symbol
+        ),
+
+        calculateStrategy(
+          stock.symbol
+        )
+      ]);
+
+    const score =
+      getRecommendationScore(
+        strategy
+      );
+
+    const reason =
+      buildRecommendationReason(
+        strategy
+      );
+
+    return {
+      symbol:
+        stock.symbol,
+
+      stockName:
+        quote.stockName ||
+        stock.name,
+
+      currentPrice:
+        quote.currentPrice,
+
+      priceChange:
+        quote.priceChange,
+
+      changeRate:
+        quote.changeRate,
+
+      score,
+
+      maxScore:
+        3,
+
+      grade:
+        score === 3
+          ? 'STRONG_CANDIDATE'
+          : score === 2
+            ? 'WATCH_CANDIDATE'
+            : 'EXCLUDED',
+
+      passedConditions:
+        reason.passedConditions,
+
+      failedConditions:
+        reason.failedConditions,
+
+      strategy: {
+        ma5:
+          strategy.ma5,
+
+        ma20:
+          strategy.ma20,
+
+        recentHigh20:
+          strategy.recentHigh20,
+
+        recentLow20:
+          strategy.recentLow20,
+
+        nearestSupport:
+          strategy.nearestSupport,
+
+        nearestResistance:
+          strategy.nearestResistance,
+
+        currentVolume:
+          strategy.currentVolume,
+
+        averageVolume20:
+          strategy.averageVolume20,
+
+        volumeRatio:
+          strategy.volumeRatio,
+
+        foreignerNet:
+          strategy.foreignerNet,
+
+        institutionNet:
+          strategy.institutionNet,
+
+        netSupplyTotal:
+          strategy.netSupplyTotal,
+
+        trendPassed:
+          strategy.trendPassed,
+
+        volumePassed:
+          strategy.volumePassed,
+
+        supplyPassed:
+          strategy.supplyPassed,
+
+        signal:
+          strategy.signal,
+
+        entryPrice:
+          strategy.entryPrice,
+
+        takeProfitPrice:
+          strategy.takeProfitPrice,
+
+        stopLossPrice:
+          strategy.stopLossPrice
+      }
+    };
+  };
+
+// ========================================
+// RANK RECOMMENDATION RESULTS
+// ========================================
+
+const rankRecommendationResults =
+  (results) =>
+    [...results].sort(
+      (a, b) => {
+        if (
+          b.score !==
+          a.score
+        ) {
+          return (
+            b.score -
+            a.score
+          );
+        }
+
+        const aVolume =
+          Number.isFinite(
+            a.strategy
+              ?.volumeRatio
+          )
+            ? a.strategy
+                .volumeRatio
+            : -Infinity;
+
+        const bVolume =
+          Number.isFinite(
+            b.strategy
+              ?.volumeRatio
+          )
+            ? b.strategy
+                .volumeRatio
+            : -Infinity;
+
+        if (
+          bVolume !==
+          aVolume
+        ) {
+          return (
+            bVolume -
+            aVolume
+          );
+        }
+
+        const aSupply =
+          Number.isFinite(
+            a.strategy
+              ?.netSupplyTotal
+          )
+            ? a.strategy
+                .netSupplyTotal
+            : -Infinity;
+
+        const bSupply =
+          Number.isFinite(
+            b.strategy
+              ?.netSupplyTotal
+          )
+            ? b.strategy
+                .netSupplyTotal
+            : -Infinity;
+
+        return (
+          bSupply -
+          aSupply
+        );
+      }
+    );
+
+// ========================================
+// SCAN ALL 30 STOCKS
+// ========================================
+
+const scanRecommendationUniverse =
+  async () => {
+    const results =
+      await mapWithConcurrency(
+        RECOMMENDATION_WATCHLIST,
+        RECOMMENDATION_CONCURRENCY,
+        async (stock) => {
+          try {
+            return await buildRecommendationResult(
+              stock
+            );
+          } catch (error) {
+            console.warn(
+              `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
+              error.message
+            );
+
+            return {
+              symbol:
+                stock.symbol,
+
+              stockName:
+                stock.name,
+
+              error:
+                'Failed to load recommendation data'
+            };
+          }
+        }
+      );
+
+    const validResults =
+      results.filter(
+        (item) =>
+          item &&
+          !item.error &&
+          Number.isFinite(
+            item.score
+          )
+      );
+
+    const ranked =
+      rankRecommendationResults(
+        validResults
+      );
+
+    return {
+      validResults,
+      ranked
     };
   };
 // ========================================
@@ -2922,232 +3480,18 @@ app.get(
 );
 
 // ========================================
-// STOCK RECOMMENDATIONS
+// 30 STOCK RECOMMENDATION API
 // ========================================
 
 app.get(
   '/api/stock/recommendations',
   async (req, res) => {
     try {
-      const results =
-        await mapWithConcurrency(
-          RECOMMENDATION_WATCHLIST,
-          RECOMMENDATION_CONCURRENCY,
-          async (stock) => {
-            try {
-              const [
-                quote,
-                strategy
-              ] =
-                await Promise.all([
-                  fetchStockQuoteData(
-                    stock.symbol
-                  ),
-
-                  calculateStrategy(
-                    stock.symbol
-                  )
-                ]);
-
-              const score =
-                getRecommendationScore(
-                  strategy
-                );
-
-              const reason =
-                buildRecommendationReason(
-                  strategy
-                );
-
-              return {
-                symbol:
-                  stock.symbol,
-
-                stockName:
-                  quote.stockName ||
-                  stock.name,
-
-                currentPrice:
-                  quote.currentPrice,
-
-                priceChange:
-                  quote.priceChange,
-
-                changeRate:
-                  quote.changeRate,
-
-                score,
-
-                maxScore:
-                  3,
-
-                grade:
-                  score === 3
-                    ? 'STRONG_CANDIDATE'
-                    : score === 2
-                      ? 'WATCH_CANDIDATE'
-                      : 'EXCLUDED',
-
-                passedConditions:
-                  reason.passedConditions,
-
-                failedConditions:
-                  reason.failedConditions,
-
-                strategy: {
-                  ma5:
-                    strategy.ma5,
-
-                  ma20:
-                    strategy.ma20,
-
-                  recentHigh20:
-                    strategy.recentHigh20,
-
-                  recentLow20:
-                    strategy.recentLow20,
-
-                  nearestSupport:
-                    strategy.nearestSupport,
-
-                  nearestResistance:
-                    strategy.nearestResistance,
-
-                  currentVolume:
-                    strategy.currentVolume,
-
-                  averageVolume20:
-                    strategy.averageVolume20,
-
-                  volumeRatio:
-                    strategy.volumeRatio,
-
-                  foreignerNet:
-                    strategy.foreignerNet,
-
-                  institutionNet:
-                    strategy.institutionNet,
-
-                  netSupplyTotal:
-                    strategy.netSupplyTotal,
-
-                  trendPassed:
-                    strategy.trendPassed,
-
-                  volumePassed:
-                    strategy.volumePassed,
-
-                  supplyPassed:
-                    strategy.supplyPassed,
-
-                  signal:
-                    strategy.signal,
-
-                  entryPrice:
-                    strategy.entryPrice,
-
-                  takeProfitPrice:
-                    strategy.takeProfitPrice,
-
-                  stopLossPrice:
-                    strategy.stopLossPrice
-                }
-              };
-            } catch (error) {
-              console.warn(
-                `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
-                error.message
-              );
-
-              return {
-                symbol:
-                  stock.symbol,
-
-                stockName:
-                  stock.name,
-
-                error:
-                  'Failed to load recommendation data'
-              };
-            }
-          }
-        );
-
-      const validResults =
-        results.filter(
-          (item) =>
-            item &&
-            !item.error &&
-            Number.isFinite(
-              item.score
-            )
-        );
-
-      const ranked =
-        [...validResults].sort(
-          (a, b) => {
-            if (
-              b.score !==
-              a.score
-            ) {
-              return (
-                b.score -
-                a.score
-              );
-            }
-
-            const aVolume =
-              Number.isFinite(
-                a.strategy
-                  ?.volumeRatio
-              )
-                ? a.strategy
-                    .volumeRatio
-                : -Infinity;
-
-            const bVolume =
-              Number.isFinite(
-                b.strategy
-                  ?.volumeRatio
-              )
-                ? b.strategy
-                    .volumeRatio
-                : -Infinity;
-
-            if (
-              bVolume !==
-              aVolume
-            ) {
-              return (
-                bVolume -
-                aVolume
-              );
-            }
-
-            const aSupply =
-              Number.isFinite(
-                a.strategy
-                  ?.netSupplyTotal
-              )
-                ? a.strategy
-                    .netSupplyTotal
-                : -Infinity;
-
-            const bSupply =
-              Number.isFinite(
-                b.strategy
-                  ?.netSupplyTotal
-              )
-                ? b.strategy
-                    .netSupplyTotal
-                : -Infinity;
-
-            return (
-              bSupply -
-              aSupply
-            );
-          }
-        );
+      const {
+        validResults,
+        ranked
+      } =
+        await scanRecommendationUniverse();
 
       const recommendations =
         ranked.filter(
@@ -3216,7 +3560,249 @@ app.get(
   }
 );
 // ========================================
-// AI ANALYSIS API
+// AI RECOMMENDATION ANALYSIS
+// ========================================
+
+app.get(
+  '/api/stock/recommendations-ai',
+  async (req, res) => {
+    if (
+      !GEMINI_API_KEY
+    ) {
+      return res
+        .status(503)
+        .json({
+          generatedAt:
+            new Date()
+              .toISOString(),
+
+          aiAvailable:
+            false,
+
+          universeSize:
+            RECOMMENDATION_WATCHLIST
+              .length,
+
+          strongCandidateCount:
+            0,
+
+          analyzedCount:
+            0,
+
+          recommendations:
+            [],
+
+          error:
+            'GEMINI_API_KEY is not configured on the server'
+        });
+    }
+
+    try {
+      // --------------------------------
+      // 1. 30개 종목 실제 데이터 검사
+      // --------------------------------
+
+      const {
+        validResults,
+        ranked
+      } =
+        await scanRecommendationUniverse();
+
+      // --------------------------------
+      // 2. 추세 + 거래량 + 수급
+      //    3개 모두 통과한 종목만 선택
+      // --------------------------------
+
+      const strongCandidates =
+        ranked.filter(
+          (item) =>
+            item.score === 3 &&
+            item.grade ===
+              'STRONG_CANDIDATE' &&
+            item.strategy
+              ?.signal ===
+              'BUY_CANDIDATE'
+        );
+
+      // --------------------------------
+      // 3. 상위 최대 3종목만
+      //    뉴스 + Gemini 분석
+      // --------------------------------
+
+      const targets =
+        strongCandidates.slice(
+          0,
+          RECOMMENDATION_AI_LIMIT
+        );
+
+      const analyzed =
+        await mapWithConcurrency(
+          targets,
+          2,
+          async (stock) => {
+            let news = [];
+
+            try {
+              news =
+                await fetchStockNewsBySymbol(
+                  stock.symbol
+                );
+            } catch (error) {
+              console.warn(
+                `[K-Stock AI] Recommendation news failed for ${stock.symbol}:`,
+                error.message
+              );
+            }
+
+            try {
+              const prompt =
+                buildRecommendationGeminiPrompt({
+                  stock,
+                  news
+                });
+
+              const aiResult =
+                await callGeminiPromptWithRetry(
+                  prompt
+                );
+
+              return {
+                ...stock,
+
+                newsCount:
+                  news.length,
+
+                news:
+                  news.slice(
+                    0,
+                    10
+                  ),
+
+                aiAvailable:
+                  true,
+
+                modelUsed:
+                  aiResult.modelUsed,
+
+                attemptUsed:
+                  aiResult.attemptUsed,
+
+                aiAnalysis:
+                  aiResult.analysis
+              };
+            } catch (error) {
+              console.warn(
+                `[K-Stock AI] Recommendation AI analysis failed for ${stock.symbol}:`,
+                error.message
+              );
+
+              return {
+                ...stock,
+
+                newsCount:
+                  news.length,
+
+                news:
+                  news.slice(
+                    0,
+                    10
+                  ),
+
+                aiAvailable:
+                  false,
+
+                modelUsed:
+                  null,
+
+                attemptUsed:
+                  null,
+
+                aiAnalysis:
+                  null,
+
+                aiError:
+                  'AI analysis is temporarily unavailable'
+              };
+            }
+          }
+        );
+
+      return res
+        .status(200)
+        .json({
+          generatedAt:
+            new Date()
+              .toISOString(),
+
+          aiAvailable:
+            true,
+
+          universeSize:
+            RECOMMENDATION_WATCHLIST
+              .length,
+
+          successfulCount:
+            validResults.length,
+
+          strongCandidateCount:
+            strongCandidates.length,
+
+          analyzedCount:
+            analyzed.length,
+
+          aiAnalysisLimit:
+            RECOMMENDATION_AI_LIMIT,
+
+          selectionRule:
+            '추세·거래량·수급 3개 조건을 모두 충족하고 백엔드 전략 판정이 매수 후보인 종목만 AI 뉴스 분석 대상으로 사용합니다.',
+
+          important:
+            'Gemini는 종목 선정, 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 않고 제공된 실제 데이터와 뉴스만 설명합니다.',
+
+          recommendations:
+            analyzed
+        });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] Recommendation AI API failed:',
+        error.message
+      );
+
+      return res
+        .status(500)
+        .json({
+          generatedAt:
+            new Date()
+              .toISOString(),
+
+          aiAvailable:
+            false,
+
+          universeSize:
+            RECOMMENDATION_WATCHLIST
+              .length,
+
+          successfulCount:
+            0,
+
+          strongCandidateCount:
+            0,
+
+          analyzedCount:
+            0,
+
+          recommendations:
+            [],
+
+          error:
+            'Failed to build AI recommendation analysis'
+        });
+    }
+  }
+);
+
+// ========================================
+// INDIVIDUAL STOCK AI ANALYSIS
 // ========================================
 
 app.get(
@@ -3377,6 +3963,22 @@ app.get(
 );
 
 // ========================================
+// 404 API FALLBACK
+// ========================================
+
+app.use(
+  '/api',
+  (req, res) => {
+    return res
+      .status(404)
+      .json({
+        error:
+          'API endpoint not found'
+      });
+  }
+);
+
+// ========================================
 // SERVER START
 // ========================================
 
@@ -3385,6 +3987,22 @@ app.listen(
   () => {
     console.log(
       `[K-Stock AI] Backend server is running on port ${PORT}`
+    );
+
+    console.log(
+      `[K-Stock AI] Recommendation universe: ${RECOMMENDATION_WATCHLIST.length} stocks`
+    );
+
+    console.log(
+      `[K-Stock AI] Recommendation concurrency: ${RECOMMENDATION_CONCURRENCY}`
+    );
+
+    console.log(
+      `[K-Stock AI] AI recommendation analysis limit: ${RECOMMENDATION_AI_LIMIT}`
+    );
+
+    console.log(
+      `[K-Stock AI] Gemini primary model: ${PRIMARY_GEMINI_MODEL}`
     );
   }
 );
