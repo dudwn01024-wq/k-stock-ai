@@ -268,7 +268,7 @@ app.get('/api/stock/news', async (req, res) => {
     if (/^\d{6}$/.test(cleanQuery)) {
       targetSymbol = cleanQuery;
     } else {
-      // Resolve stock name to 6-digit stock code using official Naver autocomplete
+      // Resolve stock name to 6-digit stock code using official Naver autocomplete with Exact Match
       const acResponse = await fetch(`https://ac.stock.naver.com/ac?q=${encodeURIComponent(cleanQuery)}&q_enc=utf-8&target=stock`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -279,25 +279,73 @@ app.get('/api/stock/news', async (req, res) => {
       if (acResponse.ok) {
         const acData = await acResponse.json();
         
-        // Recursive search helper to find a 6-digit stock symbol inside deeply nested arrays
-        const findStockCode = (arr) => {
-          if (!Array.isArray(arr)) return null;
-          for (const item of arr) {
+        // Helper to find exact stock name match and extract its 6-digit code
+        const findMatchingStockCode = (data, queryName) => {
+          const targetName = queryName.trim().toLowerCase();
+          
+          // Check a single item/tuple (Array or Object) for exact name match
+          const processItem = (item) => {
+            if (!item) return null;
+
+            // Handle Array/Tuple structure: e.g. ["삼성전자", "005930", "005930.KS", "KOSPI", ...]
             if (Array.isArray(item)) {
-              // Check if current array item is a tuple containing a 6-digit stock code
-              const matchedCode = item.find(val => typeof val === 'string' && /^\d{6}$/.test(val));
-              if (matchedCode) return matchedCode;
+              const nameMatched = item.some(val => 
+                typeof val === 'string' && val.trim().toLowerCase() === targetName
+              );
               
-              // Search recursively inside nested arrays
-              const nestedResult = findStockCode(item);
-              if (nestedResult) return nestedResult;
+              if (nameMatched) {
+                const codeVal = item.find(val => 
+                  (typeof val === 'string' && /^\d{6}$/.test(val.trim())) ||
+                  (typeof val === 'number' && /^\d{6}$/.test(String(val)))
+                );
+                if (codeVal) return String(codeVal).trim();
+              }
+              return null;
             }
-          }
-          return null;
+
+            // Handle Object structure: e.g. { name: "삼성전자", code: "005930" }
+            if (typeof item === 'object') {
+              const nameVal = item.name || item.stockName || item.title || item.nm;
+              const codeVal = item.code || item.itemCode || item.symbol || item.cd;
+
+              if (nameVal && typeof nameVal === 'string' && nameVal.trim().toLowerCase() === targetName) {
+                if (codeVal) {
+                  const strCode = String(codeVal).trim();
+                  if (/^\d{6}$/.test(strCode)) return strCode;
+                }
+              }
+            }
+
+            return null;
+          };
+
+          // Recursive traversal to find the exact matching item inside nested arrays/objects
+          const traverse = (node) => {
+            if (!node) return null;
+
+            const directMatch = processItem(node);
+            if (directMatch) return directMatch;
+
+            if (Array.isArray(node)) {
+              for (const child of node) {
+                const result = traverse(child);
+                if (result) return result;
+              }
+            } else if (typeof node === 'object') {
+              for (const key of Object.keys(node)) {
+                const result = traverse(node[key]);
+                if (result) return result;
+              }
+            }
+
+            return null;
+          };
+
+          return traverse(data);
         };
 
-        if (acData && acData.items) {
-          targetSymbol = findStockCode(acData.items);
+        if (acData) {
+          targetSymbol = findMatchingStockCode(acData, cleanQuery);
         }
       }
     }
