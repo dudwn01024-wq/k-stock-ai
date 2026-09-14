@@ -17,7 +17,8 @@ const NAVER_HEADERS = {
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const PRIMARY_GEMINI_MODEL =
-  process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  process.env.GEMINI_MODEL ||
+  'gemini-3.6-flash';
 
 const GEMINI_FALLBACK_MODELS = [
   'gemini-3.5-flash',
@@ -25,44 +26,90 @@ const GEMINI_FALLBACK_MODELS = [
   'gemini-2.5-flash'
 ];
 
-const sleep = (ms) =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+const RECOMMENDATION_WATCHLIST = [
+  { symbol: '005930', name: '삼성전자' },
+  { symbol: '000660', name: 'SK하이닉스' },
+  { symbol: '373220', name: 'LG에너지솔루션' },
+  { symbol: '207940', name: '삼성바이오로직스' },
+  { symbol: '005380', name: '현대차' },
+  { symbol: '000270', name: '기아' },
+  { symbol: '068270', name: '셀트리온' },
+  { symbol: '035420', name: 'NAVER' },
+  { symbol: '035720', name: '카카오' },
+  { symbol: '005490', name: 'POSCO홀딩스' },
+  { symbol: '105560', name: 'KB금융' },
+  { symbol: '055550', name: '신한지주' },
+  { symbol: '086790', name: '하나금융지주' },
+  { symbol: '316140', name: '우리금융지주' },
+  { symbol: '028260', name: '삼성물산' },
+  { symbol: '006400', name: '삼성SDI' },
+  { symbol: '051910', name: 'LG화학' },
+  { symbol: '012450', name: '한화에어로스페이스' },
+  { symbol: '329180', name: 'HD현대중공업' },
+  { symbol: '042660', name: '한화오션' },
+  { symbol: '034020', name: '두산에너빌리티' },
+  { symbol: '064350', name: '현대로템' },
+  { symbol: '015760', name: '한국전력' },
+  { symbol: '033780', name: 'KT&G' },
+  { symbol: '017670', name: 'SK텔레콤' },
+  { symbol: '066570', name: 'LG전자' },
+  { symbol: '009150', name: '삼성전기' },
+  { symbol: '003490', name: '대한항공' },
+  { symbol: '090430', name: '아모레퍼시픽' },
+  { symbol: '352820', name: '하이브' }
+];
 
-const parseNumber = (val) => {
+const RECOMMENDATION_CONCURRENCY = 5;
+const RECOMMENDATION_AI_LIMIT = 3;
+
+const sleep = (ms) =>
+  new Promise((resolve) =>
+    setTimeout(resolve, ms)
+  );
+
+const parseNumber = (value) => {
   if (
-    val === null ||
-    val === undefined ||
-    val === ''
+    value === null ||
+    value === undefined ||
+    value === ''
   ) {
     return null;
   }
 
-  if (typeof val === 'number') {
-    return Number.isFinite(val)
-      ? val
+  if (typeof value === 'number') {
+    return Number.isFinite(value)
+      ? value
       : null;
   }
 
-  if (typeof val === 'string') {
-    const cleaned = val
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const cleaned =
+    value
       .replace(/,/g, '')
       .replace(/\s/g, '')
       .trim();
 
-    if (!cleaned) {
-      return null;
-    }
-
-    const num =
-      Number(cleaned);
-
-    return Number.isFinite(num)
-      ? num
-      : null;
+  if (!cleaned) {
+    return null;
   }
 
-  return null;
+  const num =
+    Number(cleaned);
+
+  return Number.isFinite(num)
+    ? num
+    : null;
 };
+
+const round2 = (value) =>
+  Number.isFinite(value)
+    ? Number(
+        value.toFixed(2)
+      )
+    : null;
 
 const average = (numbers) => {
   if (
@@ -89,6 +136,11 @@ const average = (numbers) => {
     ) / numbers.length
   );
 };
+
+const validateSymbol = (symbol) =>
+  /^\d{6}$/.test(
+    String(symbol || '')
+  );
 
 const getIntegrationInfoValue = (
   integrationData,
@@ -138,13 +190,14 @@ const getLatestDealTrend = (
     return null;
   }
 
-  const getDateValue = (item) =>
-    item.localTradedAt ||
-    item.tradeDate ||
-    item.bizdate ||
-    item.date ||
-    item.localDate ||
-    null;
+  const getDateValue =
+    (item) =>
+      item.localTradedAt ||
+      item.tradeDate ||
+      item.bizdate ||
+      item.date ||
+      item.localDate ||
+      null;
 
   const withDate =
     list.filter((item) =>
@@ -175,7 +228,9 @@ const findMatchingStock = (
   queryName
 ) => {
   const targetName =
-    String(queryName || '')
+    String(
+      queryName || ''
+    )
       .trim()
       .toLowerCase();
 
@@ -183,175 +238,231 @@ const findMatchingStock = (
     return null;
   }
 
-  const normalizeCode = (
-    value
-  ) => {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return null;
-    }
-
-    const code =
-      String(value).trim();
-
-    return /^\d{6}$/.test(
-      code
-    )
-      ? code
-      : null;
-  };
-
-  const inspectNode = (
-    node
-  ) => {
-    if (!node) {
-      return null;
-    }
-
-    if (
-      Array.isArray(node)
-    ) {
-      const strings =
-        node
-          .filter(
-            (value) =>
-              typeof value ===
-              'string'
-          )
-          .map(
-            (value) =>
-              value.trim()
-          );
-
-      const exactName =
-        strings.find(
-          (value) =>
-            value.toLowerCase() ===
-            targetName
-        );
-
-      const codeValue =
-        node.find(
-          (value) =>
-            normalizeCode(
-              value
-            )
-        );
+  const normalizeCode =
+    (value) => {
+      if (
+        value === null ||
+        value === undefined
+      ) {
+        return null;
+      }
 
       const code =
-        normalizeCode(
-          codeValue
-        );
+        String(value).trim();
+
+      return /^\d{6}$/.test(
+        code
+      )
+        ? code
+        : null;
+    };
+
+  const inspectNode =
+    (node) => {
+      if (!node) {
+        return null;
+      }
 
       if (
-        exactName &&
-        code
+        Array.isArray(node)
       ) {
-        return {
-          symbol: code,
-          name: exactName
-        };
-      }
-    } else if (
-      typeof node === 'object'
-    ) {
-      const name =
-        node.name ||
-        node.stockName ||
-        node.title ||
-        node.nm ||
-        node.itemName ||
-        null;
+        const strings =
+          node
+            .filter(
+              (value) =>
+                typeof value ===
+                'string'
+            )
+            .map(
+              (value) =>
+                value.trim()
+            );
 
-      const code =
-        normalizeCode(
-          node.code ||
+        const exactName =
+          strings.find(
+            (value) =>
+              value.toLowerCase() ===
+              targetName
+          );
+
+        const codeValue =
+          node.find(
+            (value) =>
+              normalizeCode(
+                value
+              )
+          );
+
+        const code =
+          normalizeCode(
+            codeValue
+          );
+
+        if (
+          exactName &&
+          code
+        ) {
+          return {
+            symbol:
+              code,
+
+            name:
+              exactName
+          };
+        }
+      } else if (
+        typeof node ===
+        'object'
+      ) {
+        const name =
+          node.name ||
+          node.stockName ||
+          node.title ||
+          node.nm ||
+          node.itemName ||
+          null;
+
+        const code =
+          normalizeCode(
+            node.code ||
             node.itemCode ||
             node.symbol ||
             node.cd ||
             node.stockCode ||
             null
-        );
-
-      if (
-        typeof name ===
-          'string' &&
-        name
-          .trim()
-          .toLowerCase() ===
-          targetName &&
-        code
-      ) {
-        return {
-          symbol: code,
-          name:
-            name.trim()
-        };
-      }
-    }
-
-    return null;
-  };
-
-  const traverse = (
-    node
-  ) => {
-    if (!node) {
-      return null;
-    }
-
-    const direct =
-      inspectNode(node);
-
-    if (direct) {
-      return direct;
-    }
-
-    if (
-      Array.isArray(node)
-    ) {
-      for (
-        const child of node
-      ) {
-        const result =
-          traverse(child);
-
-        if (result) {
-          return result;
-        }
-      }
-    } else if (
-      typeof node === 'object'
-    ) {
-      for (
-        const key of
-        Object.keys(node)
-      ) {
-        const result =
-          traverse(
-            node[key]
           );
 
-        if (result) {
-          return result;
+        if (
+          typeof name ===
+            'string' &&
+          name
+            .trim()
+            .toLowerCase() ===
+            targetName &&
+          code
+        ) {
+          return {
+            symbol:
+              code,
+
+            name:
+              name.trim()
+          };
         }
       }
-    }
 
-    return null;
-  };
+      return null;
+    };
+
+  const traverse =
+    (node) => {
+      if (!node) {
+        return null;
+      }
+
+      const direct =
+        inspectNode(node);
+
+      if (direct) {
+        return direct;
+      }
+
+      if (
+        Array.isArray(node)
+      ) {
+        for (
+          const child of node
+        ) {
+          const result =
+            traverse(child);
+
+          if (result) {
+            return result;
+          }
+        }
+      } else if (
+        typeof node ===
+        'object'
+      ) {
+        for (
+          const key of
+          Object.keys(node)
+        ) {
+          const result =
+            traverse(
+              node[key]
+            );
+
+          if (result) {
+            return result;
+          }
+        }
+      }
+
+      return null;
+    };
 
   return traverse(data);
 };
 
-const validateSymbol = (
-  symbol
-) =>
-  /^\d{6}$/.test(
-    String(symbol || '')
-  );
+const mapWithConcurrency =
+  async (
+    items,
+    limit,
+    worker
+  ) => {
+    const results =
+      new Array(
+        items.length
+      );
+
+    let nextIndex = 0;
+
+    const runWorker =
+      async () => {
+        while (true) {
+          const currentIndex =
+            nextIndex;
+
+          nextIndex += 1;
+
+          if (
+            currentIndex >=
+            items.length
+          ) {
+            return;
+          }
+
+          results[currentIndex] =
+            await worker(
+              items[currentIndex],
+              currentIndex
+            );
+        }
+      };
+
+    const workerCount =
+      Math.max(
+        1,
+        Math.min(
+          limit,
+          items.length
+        )
+      );
+
+    await Promise.all(
+      Array.from(
+        {
+          length:
+            workerCount
+        },
+        () =>
+          runWorker()
+      )
+    );
+
+    return results;
+  };
 
 // ========================================
 // STOCK QUOTE DATA
@@ -382,7 +493,7 @@ const fetchStockQuoteData =
     const currentPrice =
       parseNumber(
         basicData.closePrice ||
-          basicData.nowPrice
+        basicData.nowPrice
       );
 
     const priceChange =
@@ -402,27 +513,27 @@ const fetchStockQuoteData =
     let volume =
       parseNumber(
         basicData.accumulatedTradingVolume ||
-          basicData.volume ||
-          basicData.tradingVolume ||
-          basicData.executedVolume
+        basicData.volume ||
+        basicData.tradingVolume ||
+        basicData.executedVolume
       );
 
     let tradingValue =
       parseNumber(
         basicData.accumulatedTradingValue ||
-          basicData.tradingValue
+        basicData.tradingValue
       );
 
     let highPrice =
       parseNumber(
         basicData.highPrice ||
-          basicData.maxPrice
+        basicData.maxPrice
       );
 
     let lowPrice =
       parseNumber(
         basicData.lowPrice ||
-          basicData.minPrice
+        basicData.minPrice
       );
 
     if (
@@ -478,12 +589,13 @@ const fetchStockQuoteData =
             }
 
             if (
-              volume === null
+              volume ===
+              null
             ) {
               volume =
                 parseNumber(
                   latest.accumulatedTradingVolume ||
-                    latest.volume
+                  latest.volume
                 );
             }
 
@@ -494,7 +606,7 @@ const fetchStockQuoteData =
               tradingValue =
                 parseNumber(
                   latest.accumulatedTradingValue ||
-                    latest.tradingValue
+                  latest.tradingValue
                 );
             }
           }
@@ -528,27 +640,13 @@ const fetchStockQuoteData =
             await realtimeResponse.json();
 
           const realtimeItem =
-            realtimeData &&
-            realtimeData.result &&
-            Array.isArray(
-              realtimeData
-                .result
-                .areas
-            ) &&
             realtimeData
-              .result
-              .areas[0] &&
-            Array.isArray(
-              realtimeData
-                .result
-                .areas[0]
-                .datas
-            )
-              ? realtimeData
-                  .result
-                  .areas[0]
-                  .datas[0]
-              : null;
+              ?.result
+              ?.areas
+              ?.[0]
+              ?.datas
+              ?.[0] ||
+            null;
 
           if (
             realtimeItem
@@ -556,7 +654,7 @@ const fetchStockQuoteData =
             tradingValue =
               parseNumber(
                 realtimeItem.aa ||
-                  realtimeItem.accumulatedTradingValue
+                realtimeItem.accumulatedTradingValue
               );
           }
         }
@@ -653,15 +751,21 @@ const fetchStockQuoteData =
       foreignerNet,
       institutionNet,
 
-      foreignerBuy: null,
-      foreignerSell: null,
-      institutionBuy: null,
-      institutionSell: null,
+      foreignerBuy:
+        null,
+
+      foreignerSell:
+        null,
+
+      institutionBuy:
+        null,
+
+      institutionSell:
+        null,
 
       supplyDate
     };
   };
-
 // ========================================
 // STOCK NEWS DATA
 // ========================================
@@ -788,6 +892,7 @@ const fetchStockNewsBySymbol =
       }
     );
   };
+
 // ========================================
 // STRATEGY CALCULATION
 // ========================================
@@ -929,7 +1034,7 @@ const calculateStrategy =
             volume:
               parseNumber(
                 item.accumulatedTradingVolume ||
-                  item.volume
+                item.volume
               )
           })
         )
@@ -1048,11 +1153,9 @@ const calculateStrategy =
         averageVolume20
       ) &&
       averageVolume20 > 0
-        ? Number(
-            (
-              currentVolume /
-              averageVolume20
-            ).toFixed(2)
+        ? round2(
+            currentVolume /
+            averageVolume20
           )
         : null;
 
@@ -1341,68 +1444,835 @@ const calculateStrategy =
   };
 
 // ========================================
+// RISK / REWARD CALCULATION
+// ========================================
+//
+// 중요:
+// 새로운 가격을 만드는 함수가 아닙니다.
+//
+// calculateStrategy()가 실제 가격 데이터로 만든
+// 현재가 / 진입 고려가 / 목표가 / 손절가를 이용해
+// 거리와 비율만 계산합니다.
+//
+// 1) 현재가 → 목표가 남은 상승 여력
+// 2) 현재가 → 손절가 위험
+// 3) 진입 고려가 → 목표가 기대수익
+// 4) 진입 고려가 → 손절가 위험
+// 5) 각각의 손익비
+//
+// ========================================
+
+const calculateRiskReward =
+  (strategy) => {
+    const empty =
+      {
+        available:
+          false,
+
+        currentUpsideAmount:
+          null,
+
+        currentUpsidePercent:
+          null,
+
+        currentDownsideAmount:
+          null,
+
+        currentDownsidePercent:
+          null,
+
+        currentRiskRewardRatio:
+          null,
+
+        entryRewardAmount:
+          null,
+
+        entryRewardPercent:
+          null,
+
+        entryRiskAmount:
+          null,
+
+        entryRiskPercent:
+          null,
+
+        entryRiskRewardRatio:
+          null,
+
+        rewardGreaterThanRisk:
+          null,
+
+        currentPriceBelowTarget:
+          null,
+
+        classification:
+          'NOT_AVAILABLE',
+
+        reason:
+          '손익비 계산에 필요한 가격 데이터가 부족합니다.'
+      };
+
+    if (
+      !strategy ||
+      strategy.signal !==
+        'BUY_CANDIDATE'
+    ) {
+      return {
+        ...empty,
+
+        reason:
+          '현재 전략 판정이 매수 후보가 아니어서 손익비를 계산하지 않습니다.'
+      };
+    }
+
+    const currentPrice =
+      strategy.currentPrice;
+
+    const entryPrice =
+      strategy.entryPrice;
+
+    const targetPrice =
+      strategy.takeProfitPrice;
+
+    const stopPrice =
+      strategy.stopLossPrice;
+
+    if (
+      !Number.isFinite(
+        currentPrice
+      ) ||
+      !Number.isFinite(
+        entryPrice
+      ) ||
+      !Number.isFinite(
+        targetPrice
+      ) ||
+      !Number.isFinite(
+        stopPrice
+      )
+    ) {
+      return empty;
+    }
+
+    if (
+      !(
+        stopPrice <
+          entryPrice &&
+        entryPrice <
+          targetPrice
+      )
+    ) {
+      return {
+        ...empty,
+
+        reason:
+          '진입 고려가·목표가·손절가의 가격 관계가 유효하지 않습니다.'
+      };
+    }
+
+    const currentUpsideAmount =
+      targetPrice -
+      currentPrice;
+
+    const currentDownsideAmount =
+      currentPrice -
+      stopPrice;
+
+    const entryRewardAmount =
+      targetPrice -
+      entryPrice;
+
+    const entryRiskAmount =
+      entryPrice -
+      stopPrice;
+
+    const currentUpsidePercent =
+      currentPrice > 0
+        ? round2(
+            (
+              currentUpsideAmount /
+              currentPrice
+            ) * 100
+          )
+        : null;
+
+    const currentDownsidePercent =
+      currentPrice > 0
+        ? round2(
+            (
+              currentDownsideAmount /
+              currentPrice
+            ) * 100
+          )
+        : null;
+
+    const entryRewardPercent =
+      entryPrice > 0
+        ? round2(
+            (
+              entryRewardAmount /
+              entryPrice
+            ) * 100
+          )
+        : null;
+
+    const entryRiskPercent =
+      entryPrice > 0
+        ? round2(
+            (
+              entryRiskAmount /
+              entryPrice
+            ) * 100
+          )
+        : null;
+
+    const currentRiskRewardRatio =
+      currentDownsideAmount > 0
+        ? round2(
+            currentUpsideAmount /
+            currentDownsideAmount
+          )
+        : null;
+
+    const entryRiskRewardRatio =
+      entryRiskAmount > 0
+        ? round2(
+            entryRewardAmount /
+            entryRiskAmount
+          )
+        : null;
+
+    const currentPriceBelowTarget =
+      currentPrice <
+      targetPrice;
+
+    const rewardGreaterThanRisk =
+      Number.isFinite(
+        currentRiskRewardRatio
+      )
+        ? currentRiskRewardRatio >=
+          1
+        : null;
+
+    let classification =
+      'CHASE_CAUTION';
+
+    let reason =
+      '추세·거래량·수급은 충족했지만 현재가 기준 남은 기대수익이 손절 위험보다 작습니다.';
+
+    if (
+      currentPriceBelowTarget ===
+        true &&
+      rewardGreaterThanRisk ===
+        true
+    ) {
+      classification =
+        'PRIORITY_CANDIDATE';
+
+      reason =
+        '추세·거래량·수급을 모두 충족했고 현재가 기준 남은 기대수익이 손절 위험보다 크거나 같습니다.';
+    } else if (
+      currentPriceBelowTarget ===
+      false
+    ) {
+      classification =
+        'CHASE_CAUTION';
+
+      reason =
+        '현재가가 이미 목표가에 도달했거나 목표가를 넘어 추격 진입에 주의가 필요합니다.';
+    }
+
+    return {
+      available:
+        true,
+
+      currentUpsideAmount:
+        currentUpsideAmount,
+
+      currentUpsidePercent:
+        currentUpsidePercent,
+
+      currentDownsideAmount:
+        currentDownsideAmount,
+
+      currentDownsidePercent:
+        currentDownsidePercent,
+
+      currentRiskRewardRatio:
+        currentRiskRewardRatio,
+
+      entryRewardAmount:
+        entryRewardAmount,
+
+      entryRewardPercent:
+        entryRewardPercent,
+
+      entryRiskAmount:
+        entryRiskAmount,
+
+      entryRiskPercent:
+        entryRiskPercent,
+
+      entryRiskRewardRatio:
+        entryRiskRewardRatio,
+
+      rewardGreaterThanRisk:
+        rewardGreaterThanRisk,
+
+      currentPriceBelowTarget:
+        currentPriceBelowTarget,
+
+      classification:
+        classification,
+
+      reason:
+        reason
+    };
+  };
+
+// ========================================
+// RECOMMENDATION SCORE
+// ========================================
+
+const getRecommendationScore =
+  (strategy) => {
+    if (
+      !strategy ||
+      typeof strategy !==
+        'object'
+    ) {
+      return 0;
+    }
+
+    return [
+      strategy.trendPassed,
+      strategy.volumePassed,
+      strategy.supplyPassed
+    ].filter(
+      (value) =>
+        value === true
+    ).length;
+  };
+
+// ========================================
+// RECOMMENDATION CONDITION LABELS
+// ========================================
+
+const buildRecommendationReason =
+  (strategy) => {
+    const passed = [];
+    const failed = [];
+
+    if (
+      strategy.trendPassed ===
+      true
+    ) {
+      passed.push(
+        '추세'
+      );
+    } else if (
+      strategy.trendPassed ===
+      false
+    ) {
+      failed.push(
+        '추세'
+      );
+    }
+
+    if (
+      strategy.volumePassed ===
+      true
+    ) {
+      passed.push(
+        '거래량'
+      );
+    } else if (
+      strategy.volumePassed ===
+      false
+    ) {
+      failed.push(
+        '거래량'
+      );
+    }
+
+    if (
+      strategy.supplyPassed ===
+      true
+    ) {
+      passed.push(
+        '수급'
+      );
+    } else if (
+      strategy.supplyPassed ===
+      false
+    ) {
+      failed.push(
+        '수급'
+      );
+    }
+
+    return {
+      passedConditions:
+        passed,
+
+      failedConditions:
+        failed
+    };
+  };
+
+// ========================================
+// FINAL RECOMMENDATION GRADE
+// ========================================
+
+const getFinalRecommendationGrade =
+  (
+    score,
+    strategy,
+    riskReward
+  ) => {
+    if (
+      score < 2
+    ) {
+      return 'EXCLUDED';
+    }
+
+    if (
+      score === 2
+    ) {
+      return 'WATCH_CANDIDATE';
+    }
+
+    if (
+      score === 3 &&
+      strategy?.signal ===
+        'BUY_CANDIDATE'
+    ) {
+      if (
+        riskReward
+          ?.classification ===
+        'PRIORITY_CANDIDATE'
+      ) {
+        return 'PRIORITY_CANDIDATE';
+      }
+
+      return 'CHASE_CAUTION';
+    }
+
+    return 'WATCH_CANDIDATE';
+  };
+
+// ========================================
+// BUILD ONE RECOMMENDATION RESULT
+// ========================================
+
+const buildRecommendationResult =
+  async (stock) => {
+    const [
+      quote,
+      strategy
+    ] =
+      await Promise.all([
+        fetchStockQuoteData(
+          stock.symbol
+        ),
+
+        calculateStrategy(
+          stock.symbol
+        )
+      ]);
+
+    const score =
+      getRecommendationScore(
+        strategy
+      );
+
+    const conditionReason =
+      buildRecommendationReason(
+        strategy
+      );
+
+    const riskReward =
+      calculateRiskReward(
+        strategy
+      );
+
+    const grade =
+      getFinalRecommendationGrade(
+        score,
+        strategy,
+        riskReward
+      );
+
+    return {
+      symbol:
+        stock.symbol,
+
+      stockName:
+        quote.stockName ||
+        stock.name,
+
+      currentPrice:
+        quote.currentPrice,
+
+      priceChange:
+        quote.priceChange,
+
+      changeRate:
+        quote.changeRate,
+
+      score,
+
+      maxScore:
+        3,
+
+      grade,
+
+      passedConditions:
+        conditionReason.passedConditions,
+
+      failedConditions:
+        conditionReason.failedConditions,
+
+      riskReward,
+
+      strategy: {
+        ma5:
+          strategy.ma5,
+
+        ma20:
+          strategy.ma20,
+
+        recentHigh20:
+          strategy.recentHigh20,
+
+        recentLow20:
+          strategy.recentLow20,
+
+        nearestSupport:
+          strategy.nearestSupport,
+
+        nearestResistance:
+          strategy.nearestResistance,
+
+        currentVolume:
+          strategy.currentVolume,
+
+        averageVolume20:
+          strategy.averageVolume20,
+
+        volumeRatio:
+          strategy.volumeRatio,
+
+        foreignerNet:
+          strategy.foreignerNet,
+
+        institutionNet:
+          strategy.institutionNet,
+
+        netSupplyTotal:
+          strategy.netSupplyTotal,
+
+        trendPassed:
+          strategy.trendPassed,
+
+        volumePassed:
+          strategy.volumePassed,
+
+        supplyPassed:
+          strategy.supplyPassed,
+
+        signal:
+          strategy.signal,
+
+        entryPrice:
+          strategy.entryPrice,
+
+        takeProfitPrice:
+          strategy.takeProfitPrice,
+
+        stopLossPrice:
+          strategy.stopLossPrice
+      }
+    };
+  };
+
+// ========================================
+// RECOMMENDATION RANKING
+// ========================================
+
+const rankRecommendationResults =
+  (results) =>
+    [...results].sort(
+      (a, b) => {
+        const gradePriority = {
+          PRIORITY_CANDIDATE:
+            4,
+
+          CHASE_CAUTION:
+            3,
+
+          WATCH_CANDIDATE:
+            2,
+
+          EXCLUDED:
+            1
+        };
+
+        const aGrade =
+          gradePriority[
+            a.grade
+          ] || 0;
+
+        const bGrade =
+          gradePriority[
+            b.grade
+          ] || 0;
+
+        if (
+          bGrade !==
+          aGrade
+        ) {
+          return (
+            bGrade -
+            aGrade
+          );
+        }
+
+        if (
+          b.score !==
+          a.score
+        ) {
+          return (
+            b.score -
+            a.score
+          );
+        }
+
+        const aRR =
+          Number.isFinite(
+            a.riskReward
+              ?.currentRiskRewardRatio
+          )
+            ? a.riskReward
+                .currentRiskRewardRatio
+            : -Infinity;
+
+        const bRR =
+          Number.isFinite(
+            b.riskReward
+              ?.currentRiskRewardRatio
+          )
+            ? b.riskReward
+                .currentRiskRewardRatio
+            : -Infinity;
+
+        if (
+          bRR !==
+          aRR
+        ) {
+          return (
+            bRR -
+            aRR
+          );
+        }
+
+        const aUpside =
+          Number.isFinite(
+            a.riskReward
+              ?.currentUpsidePercent
+          )
+            ? a.riskReward
+                .currentUpsidePercent
+            : -Infinity;
+
+        const bUpside =
+          Number.isFinite(
+            b.riskReward
+              ?.currentUpsidePercent
+          )
+            ? b.riskReward
+                .currentUpsidePercent
+            : -Infinity;
+
+        if (
+          bUpside !==
+          aUpside
+        ) {
+          return (
+            bUpside -
+            aUpside
+          );
+        }
+
+        const aVolume =
+          Number.isFinite(
+            a.strategy
+              ?.volumeRatio
+          )
+            ? a.strategy
+                .volumeRatio
+            : -Infinity;
+
+        const bVolume =
+          Number.isFinite(
+            b.strategy
+              ?.volumeRatio
+          )
+            ? b.strategy
+                .volumeRatio
+            : -Infinity;
+
+        if (
+          bVolume !==
+          aVolume
+        ) {
+          return (
+            bVolume -
+            aVolume
+          );
+        }
+
+        const aSupply =
+          Number.isFinite(
+            a.strategy
+              ?.netSupplyTotal
+          )
+            ? a.strategy
+                .netSupplyTotal
+            : -Infinity;
+
+        const bSupply =
+          Number.isFinite(
+            b.strategy
+              ?.netSupplyTotal
+          )
+            ? b.strategy
+                .netSupplyTotal
+            : -Infinity;
+
+        return (
+          bSupply -
+          aSupply
+        );
+      }
+    );
+
+// ========================================
+// SCAN ALL 30 STOCKS
+// ========================================
+
+const scanRecommendationUniverse =
+  async () => {
+    const results =
+      await mapWithConcurrency(
+        RECOMMENDATION_WATCHLIST,
+        RECOMMENDATION_CONCURRENCY,
+        async (stock) => {
+          try {
+            return await buildRecommendationResult(
+              stock
+            );
+          } catch (error) {
+            console.warn(
+              `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
+              error.message
+            );
+
+            return {
+              symbol:
+                stock.symbol,
+
+              stockName:
+                stock.name,
+
+              error:
+                'Failed to load recommendation data'
+            };
+          }
+        }
+      );
+
+    const validResults =
+      results.filter(
+        (item) =>
+          item &&
+          !item.error &&
+          Number.isFinite(
+            item.score
+          )
+      );
+
+    const ranked =
+      rankRecommendationResults(
+        validResults
+      );
+
+    return {
+      validResults,
+      ranked
+    };
+  };
+// ========================================
 // GEMINI RESPONSE HELPERS
 // ========================================
 
-const extractGeminiText = (
-  payload
-) => {
-  const parts =
-    payload?.candidates?.[0]
-      ?.content?.parts;
+const extractGeminiText =
+  (payload) => {
+    const parts =
+      payload?.candidates?.[0]
+        ?.content?.parts;
 
-  if (
-    !Array.isArray(parts)
-  ) {
-    return '';
-  }
+    if (
+      !Array.isArray(parts)
+    ) {
+      return '';
+    }
 
-  return parts
-    .map((part) =>
-      typeof part?.text ===
-      'string'
-        ? part.text
-        : ''
-    )
-    .join('')
-    .trim();
-};
+    return parts
+      .map((part) =>
+        typeof part?.text ===
+          'string'
+          ? part.text
+          : ''
+      )
+      .join('')
+      .trim();
+  };
 
-const parseGeminiJson = (
-  text
-) => {
-  if (!text) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch (_) {
-    const cleaned =
-      text
-        .replace(
-          /^```json\s*/i,
-          ''
-        )
-        .replace(
-          /^```\s*/i,
-          ''
-        )
-        .replace(
-          /```$/i,
-          ''
-        )
-        .trim();
-
-    try {
-      return JSON.parse(
-        cleaned
-      );
-    } catch (_) {
+const parseGeminiJson =
+  (text) => {
+    if (!text) {
       return null;
     }
-  }
-};
+
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      const cleaned =
+        text
+          .replace(
+            /^```json\s*/i,
+            ''
+          )
+          .replace(
+            /^```\s*/i,
+            ''
+          )
+          .replace(
+            /```$/i,
+            ''
+          )
+          .trim();
+
+      try {
+        return JSON.parse(
+          cleaned
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+  };
 
 // ========================================
 // GEMINI SINGLE MODEL CALL
@@ -1451,7 +2321,7 @@ const callGeminiModelOnce =
                   0.2,
 
                 maxOutputTokens:
-                  1400,
+                  1600,
 
                 responseMimeType:
                   'application/json'
@@ -1592,8 +2462,10 @@ const callGeminiPromptWithRetry =
 
           return {
             analysis,
+
             modelUsed:
               model,
+
             attemptUsed:
               attempt
           };
@@ -1652,156 +2524,169 @@ const callGeminiPromptWithRetry =
 
     throw finalError;
   };
+
 // ========================================
 // INDIVIDUAL STOCK AI PROMPT
 // ========================================
 
-const buildGeminiPrompt = ({
-  quote,
-  strategy,
-  news
-}) => {
-  const newsInput =
+const buildGeminiPrompt =
+  ({
+    quote,
+    strategy,
     news
-      .slice(0, 10)
-      .map((item) => ({
-        제목:
-          item.title,
+  }) => {
+    const newsInput =
+      news
+        .slice(
+          0,
+          10
+        )
+        .map(
+          (item) => ({
+            제목:
+              item.title,
 
-        언론사:
-          item.publisher,
+            언론사:
+              item.publisher,
 
-        날짜:
-          item.date,
+            날짜:
+              item.date,
 
-        요약:
-          item.summary
-      }));
+            요약:
+              item.summary
+          })
+        );
 
-  const factualInput = {
-    종목정보: {
-      종목코드:
-        quote.symbol,
+    const factualInput = {
+      종목정보: {
+        종목코드:
+          quote.symbol,
 
-      종목명:
-        quote.stockName,
+        종목명:
+          quote.stockName,
 
-      현재가:
-        quote.currentPrice,
+        현재가:
+          quote.currentPrice,
 
-      전일대비:
-        quote.priceChange,
+        전일대비:
+          quote.priceChange,
 
-      등락률:
-        quote.changeRate,
+        등락률:
+          quote.changeRate,
 
-      오늘거래량:
-        quote.volume,
+        오늘거래량:
+          quote.volume,
 
-      거래대금:
-        quote.tradingValue,
+        거래대금:
+          quote.tradingValue,
 
-      당일고가:
-        quote.highPrice,
+        당일고가:
+          quote.highPrice,
 
-      당일저가:
-        quote.lowPrice,
+        당일저가:
+          quote.lowPrice,
 
-      외국인순매수:
-        quote.foreignerNet,
+        외국인순매수:
+          quote.foreignerNet,
 
-      기관순매수:
-        quote.institutionNet,
+        기관순매수:
+          quote.institutionNet,
 
-      수급기준일:
-        quote.supplyDate
-    },
+        수급기준일:
+          quote.supplyDate
+      },
 
-    기술분석: {
-      현재가:
-        strategy.currentPrice,
+      기술분석: {
+        현재가:
+          strategy.currentPrice,
 
-      '5일이동평균선':
-        strategy.ma5,
+        '5일이동평균선':
+          strategy.ma5,
 
-      '20일이동평균선':
-        strategy.ma20,
+        '20일이동평균선':
+          strategy.ma20,
 
-      '최근20일최고가':
-        strategy.recentHigh20,
+        '최근20일최고가':
+          strategy.recentHigh20,
 
-      '최근20일최저가':
-        strategy.recentLow20,
+        '최근20일최저가':
+          strategy.recentLow20,
 
-      '가장가까운지지선':
-        strategy.nearestSupport,
+        '가장가까운지지선':
+          strategy.nearestSupport,
 
-      '가장가까운저항선':
-        strategy.nearestResistance,
+        '가장가까운저항선':
+          strategy.nearestResistance,
 
-      오늘거래량:
-        strategy.currentVolume,
+        오늘거래량:
+          strategy.currentVolume,
 
-      '이전20일평균거래량':
-        strategy.averageVolume20,
+        '이전20일평균거래량':
+          strategy.averageVolume20,
 
-      거래량비율:
-        strategy.volumeRatio,
+        거래량비율:
+          strategy.volumeRatio,
 
-      외국인순매수:
-        strategy.foreignerNet,
+        외국인순매수:
+          strategy.foreignerNet,
 
-      기관순매수:
-        strategy.institutionNet,
+        기관순매수:
+          strategy.institutionNet,
 
-      외국인기관합산순매수:
-        strategy.netSupplyTotal,
+        외국인기관합산순매수:
+          strategy.netSupplyTotal,
 
-      추세조건:
-        strategy.trendPassed === true
-          ? '충족'
-          : strategy.trendPassed === false
-            ? '미충족'
-            : '데이터 부족',
+        추세조건:
+          strategy.trendPassed ===
+          true
+            ? '충족'
+            : strategy.trendPassed ===
+                false
+              ? '미충족'
+              : '데이터 부족',
 
-      거래량조건:
-        strategy.volumePassed === true
-          ? '충족'
-          : strategy.volumePassed === false
-            ? '미충족'
-            : '데이터 부족',
+        거래량조건:
+          strategy.volumePassed ===
+          true
+            ? '충족'
+            : strategy.volumePassed ===
+                false
+              ? '미충족'
+              : '데이터 부족',
 
-      수급조건:
-        strategy.supplyPassed === true
-          ? '충족'
-          : strategy.supplyPassed === false
-            ? '미충족'
-            : '데이터 부족',
+        수급조건:
+          strategy.supplyPassed ===
+          true
+            ? '충족'
+            : strategy.supplyPassed ===
+                false
+              ? '미충족'
+              : '데이터 부족',
 
-      종합판정:
-        strategy.signal ===
-        'BUY_CANDIDATE'
-          ? '매수 후보 조건 충족'
-          : strategy.signal ===
-              'WAIT'
-            ? '관망'
-            : '데이터 부족',
+        종합판정:
+          strategy.signal ===
+          'BUY_CANDIDATE'
+            ? '매수 후보 조건 충족'
+            : strategy.signal ===
+                'WAIT'
+              ? '관망'
+              : '데이터 부족',
 
-      진입고려가격:
-        strategy.entryPrice,
+        진입고려가격:
+          strategy.entryPrice,
 
-      목표가격:
-        strategy.takeProfitPrice,
+        목표가격:
+          strategy.takeProfitPrice,
 
-      손절기준가격:
-        strategy.stopLossPrice
-    },
+        손절기준가격:
+          strategy.stopLossPrice
+      },
 
-    최신뉴스:
-      newsInput
-  };
+      최신뉴스:
+        newsInput
+    };
 
-  return `
+    return `
 너는 K-Stock AI의 설명 전용 분석 모듈이다.
 
 아래에 제공되는 실제 데이터만 사용해서
@@ -1876,8 +2761,8 @@ null
 [분석 대상 실제 데이터]
 
 ${JSON.stringify(factualInput)}
-  `.trim();
-};
+    `.trim();
+  };
 
 // ========================================
 // INDIVIDUAL STOCK AI CALL
@@ -1912,20 +2797,41 @@ const buildRecommendationGeminiPrompt =
   }) => {
     const newsInput =
       news
-        .slice(0, 10)
-        .map((item) => ({
-          제목:
-            item.title,
+        .slice(
+          0,
+          10
+        )
+        .map(
+          (item) => ({
+            제목:
+              item.title,
 
-          언론사:
-            item.publisher,
+            언론사:
+              item.publisher,
 
-          날짜:
-            item.date,
+            날짜:
+              item.date,
 
-          요약:
-            item.summary
-        }));
+            요약:
+              item.summary
+          })
+        );
+
+    const riskReward =
+      stock.riskReward ||
+      {};
+
+    const classificationLabel =
+      stock.grade ===
+      'PRIORITY_CANDIDATE'
+        ? '최우선 후보'
+        : stock.grade ===
+            'CHASE_CAUTION'
+          ? '추격 주의'
+          : stock.grade ===
+              'WATCH_CANDIDATE'
+            ? '관심 종목'
+            : '제외';
 
     const factualInput = {
       종목정보: {
@@ -1956,7 +2862,10 @@ const buildRecommendationGeminiPrompt =
           stock.passedConditions,
 
         미충족조건:
-          stock.failedConditions
+          stock.failedConditions,
+
+        최종분류:
+          classificationLabel
       },
 
       기술및수급: {
@@ -1967,31 +2876,113 @@ const buildRecommendationGeminiPrompt =
           stock.strategy?.ma20,
 
         '최근20일최고가':
-          stock.strategy?.recentHigh20,
+          stock.strategy
+            ?.recentHigh20,
 
         '최근20일최저가':
-          stock.strategy?.recentLow20,
+          stock.strategy
+            ?.recentLow20,
 
         거래량비율:
-          stock.strategy?.volumeRatio,
+          stock.strategy
+            ?.volumeRatio,
 
         외국인순매수:
-          stock.strategy?.foreignerNet,
+          stock.strategy
+            ?.foreignerNet,
 
         기관순매수:
-          stock.strategy?.institutionNet,
+          stock.strategy
+            ?.institutionNet,
 
         외국인기관합산순매수:
-          stock.strategy?.netSupplyTotal,
+          stock.strategy
+            ?.netSupplyTotal,
 
         진입고려가격:
-          stock.strategy?.entryPrice,
+          stock.strategy
+            ?.entryPrice,
 
         목표가격:
-          stock.strategy?.takeProfitPrice,
+          stock.strategy
+            ?.takeProfitPrice,
 
         손절기준가격:
-          stock.strategy?.stopLossPrice
+          stock.strategy
+            ?.stopLossPrice
+      },
+
+      손익비분석: {
+        계산가능:
+          riskReward.available ===
+          true
+            ? '가능'
+            : '불가',
+
+        현재가에서목표가까지남은금액:
+          riskReward
+            .currentUpsideAmount,
+
+        현재가에서목표가까지남은상승여력퍼센트:
+          riskReward
+            .currentUpsidePercent,
+
+        현재가에서손절가까지위험금액:
+          riskReward
+            .currentDownsideAmount,
+
+        현재가에서손절가까지위험퍼센트:
+          riskReward
+            .currentDownsidePercent,
+
+        현재가기준손익비:
+          riskReward
+            .currentRiskRewardRatio,
+
+        진입고려가에서목표가까지기대수익금액:
+          riskReward
+            .entryRewardAmount,
+
+        진입고려가기준기대수익퍼센트:
+          riskReward
+            .entryRewardPercent,
+
+        진입고려가에서손절가까지위험금액:
+          riskReward
+            .entryRiskAmount,
+
+        진입고려가기준위험퍼센트:
+          riskReward
+            .entryRiskPercent,
+
+        진입고려가기준손익비:
+          riskReward
+            .entryRiskRewardRatio,
+
+        현재가에서기대수익이위험보다크거나같은지:
+          riskReward
+            .rewardGreaterThanRisk ===
+          true
+            ? '예'
+            : riskReward
+                  .rewardGreaterThanRisk ===
+                false
+              ? '아니오'
+              : '판단 불가',
+
+        현재가가목표가보다낮은지:
+          riskReward
+            .currentPriceBelowTarget ===
+          true
+            ? '예'
+            : riskReward
+                  .currentPriceBelowTarget ===
+                false
+              ? '아니오'
+              : '판단 불가',
+
+        손익비판정이유:
+          riskReward.reason
       },
 
       최신뉴스:
@@ -2001,42 +2992,57 @@ const buildRecommendationGeminiPrompt =
     return `
 너는 K-Stock AI의 추천 후보 설명 전용 AI다.
 
-이 종목은 이미 백엔드의 실제 데이터 규칙으로
-추세, 거래량, 수급 조건을 모두 검사한 뒤 선정된 후보이다.
+이 종목은 이미 백엔드가 실제 데이터로
+추세, 거래량, 수급, 가격 구조와 손익비를 계산한 결과다.
 
-너의 역할은 종목을 새로 추천하는 것이 아니다.
+너의 역할은 종목을 새로 추천하거나 계산하는 것이 아니다.
 
 오직 아래에 제공된 실제 데이터와 뉴스만 읽고,
-왜 이 종목이 현재 후보로 선정되었는지와
-어떤 위험을 확인해야 하는지 설명한다.
+왜 현재 분류가 내려졌는지 사용자가 이해하기 쉽게 설명한다.
 
 [절대 규칙]
 
 1. 입력 데이터에 없는 사실을 절대 만들어내지 마라.
 
-2. 새로운 목표가, 진입가, 손절가를 계산하지 마라.
+2. 새로운 진입가, 목표가, 손절가를 계산하지 마라.
 
-3. 제공된 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 마라.
+3. 제공된 진입 고려 가격, 목표 가격, 손절 기준 가격을 절대 변경하지 마라.
 
-4. 후보 조건 점수를 변경하지 마라.
+4. 추세·거래량·수급 점수를 변경하지 마라.
 
-5. 추세, 거래량, 수급의 충족 여부를 변경하지 마라.
+5. 백엔드의 최종 분류를 절대 변경하지 마라.
 
-6. 뉴스에 없는 내용을 추측해서 사실처럼 말하지 마라.
+6. "최우선 후보"가 입력되었다면 그대로 최우선 후보라고 설명한다.
 
-7. 미래 주가 상승 또는 하락을 확정적으로 예측하지 마라.
+7. "추격 주의"가 입력되었다면
+손익비가 불리한 점을 반드시 사용자에게 명확히 설명한다.
 
-8. "무조건 매수", "강력 매수", "지금 사야 한다" 같은 투자 지시를 하지 마라.
+8. 손익비, 상승여력, 위험률을 새로 계산하지 마라.
 
-9. 제공된 최신 뉴스에 부정적 내용이 있다면 반드시 위험 요인에 반영한다.
+9. 입력에 제공된 손익비와 퍼센트만 사용한다.
 
-10. 뉴스가 부족하거나 종목과 직접 관련 없는 뉴스뿐이면
+10. 현재가 기준 손익비가 1보다 낮으면
+남은 기대수익보다 손절 위험이 더 큰 상태라는 점을 설명한다.
+
+11. 현재가가 목표가에 매우 가까운 경우,
+추세·거래량·수급이 모두 좋아도
+추격 위험이 있을 수 있다는 점을 설명한다.
+
+12. 뉴스에 없는 내용을 추측해서 사실처럼 말하지 마라.
+
+13. 미래 주가 상승 또는 하락을 확정적으로 예측하지 마라.
+
+14. "무조건 매수", "강력 매수", "지금 사야 한다" 같은 직접적인 투자 지시를 하지 마라.
+
+15. 제공된 최신 뉴스에 부정적 내용이 있다면 위험 요인에 반영한다.
+
+16. 뉴스가 부족하거나 종목과 직접 관련 없는 뉴스뿐이면
 "뉴스만으로 추가 판단하기 어렵습니다."
 라고 명확하게 설명한다.
 
-11. 숫자를 언급할 때는 제공된 숫자만 사용한다.
+17. 숫자를 언급할 때는 제공된 숫자만 사용한다.
 
-12. 개발자용 변수명과 코드 표현을 절대 보여주지 마라.
+18. 개발자용 변수명과 코드 표현을 절대 보여주지 마라.
 
 다음 단어는 최종 결과에서 사용하지 마라:
 
@@ -2046,6 +3052,10 @@ supplyPassed
 signal
 BUY_CANDIDATE
 WAIT
+PRIORITY_CANDIDATE
+CHASE_CAUTION
+WATCH_CANDIDATE
+EXCLUDED
 true
 false
 null
@@ -2054,570 +3064,37 @@ takeProfitPrice
 stopLossPrice
 ma5
 ma20
+currentRiskRewardRatio
+entryRiskRewardRatio
 
-13. 모든 설명은 자연스러운 한국어로 작성한다.
+19. 위 표현은 자연스러운 한국어로 바꿔 설명한다.
 
-14. 마크다운 없이 JSON만 반환한다.
+20. 모든 설명은 한국어로 작성한다.
+
+21. 마크다운 없이 JSON만 반환한다.
 
 [출력 형식]
 
 {
-  "candidateSummary": "이 종목이 후보로 선정된 이유를 2~3문장으로 설명",
+  "candidateSummary": "현재 후보 상태와 최종 분류 이유를 2~3문장으로 설명",
+  "candidateLevel": "최우선 후보 또는 추격 주의 또는 관심 종목",
   "newsSentiment": "긍정 또는 중립 또는 주의",
   "positiveFactors": [
     "실제 데이터 또는 뉴스에서 확인되는 긍정 요인"
   ],
   "riskFactors": [
-    "실제 데이터 또는 뉴스에서 확인되는 위험 요인"
+    "실제 데이터, 뉴스 또는 손익비에서 확인되는 위험 요인"
   ],
-  "newsSummary": "최신 뉴스에서 확인되는 핵심 내용을 설명",
-  "strategyComment": "진입 고려 가격, 목표 가격, 손절 기준 가격이 있으면 그 의미를 설명하되 값을 변경하지 말 것",
-  "finalComment": "현재 후보를 볼 때 가장 중요하게 확인할 내용을 짧게 설명"
+  "riskRewardExplanation": "현재가 기준 상승여력, 위험, 손익비가 의미하는 바를 제공된 값만 사용해 설명",
+  "newsSummary": "최신 뉴스에서 확인되는 핵심 내용만 설명",
+  "strategyComment": "진입 고려 가격, 목표 가격, 손절 기준 가격의 의미를 설명하되 값을 변경하지 말 것",
+  "finalComment": "현재 후보를 볼 때 가장 중요하게 확인할 점을 짧게 설명"
 }
 
 [실제 입력 데이터]
 
 ${JSON.stringify(factualInput)}
     `.trim();
-  };
-
-// ========================================
-// RECOMMENDATION WATCHLIST - 30 STOCKS
-// ========================================
-
-const RECOMMENDATION_WATCHLIST = [
-  {
-    symbol: '005930',
-    name: '삼성전자'
-  },
-  {
-    symbol: '000660',
-    name: 'SK하이닉스'
-  },
-  {
-    symbol: '373220',
-    name: 'LG에너지솔루션'
-  },
-  {
-    symbol: '207940',
-    name: '삼성바이오로직스'
-  },
-  {
-    symbol: '005380',
-    name: '현대차'
-  },
-  {
-    symbol: '000270',
-    name: '기아'
-  },
-  {
-    symbol: '068270',
-    name: '셀트리온'
-  },
-  {
-    symbol: '035420',
-    name: 'NAVER'
-  },
-  {
-    symbol: '035720',
-    name: '카카오'
-  },
-  {
-    symbol: '005490',
-    name: 'POSCO홀딩스'
-  },
-  {
-    symbol: '105560',
-    name: 'KB금융'
-  },
-  {
-    symbol: '055550',
-    name: '신한지주'
-  },
-  {
-    symbol: '086790',
-    name: '하나금융지주'
-  },
-  {
-    symbol: '316140',
-    name: '우리금융지주'
-  },
-  {
-    symbol: '028260',
-    name: '삼성물산'
-  },
-  {
-    symbol: '006400',
-    name: '삼성SDI'
-  },
-  {
-    symbol: '051910',
-    name: 'LG화학'
-  },
-  {
-    symbol: '012450',
-    name: '한화에어로스페이스'
-  },
-  {
-    symbol: '329180',
-    name: 'HD현대중공업'
-  },
-  {
-    symbol: '042660',
-    name: '한화오션'
-  },
-  {
-    symbol: '034020',
-    name: '두산에너빌리티'
-  },
-  {
-    symbol: '064350',
-    name: '현대로템'
-  },
-  {
-    symbol: '015760',
-    name: '한국전력'
-  },
-  {
-    symbol: '033780',
-    name: 'KT&G'
-  },
-  {
-    symbol: '017670',
-    name: 'SK텔레콤'
-  },
-  {
-    symbol: '066570',
-    name: 'LG전자'
-  },
-  {
-    symbol: '009150',
-    name: '삼성전기'
-  },
-  {
-    symbol: '003490',
-    name: '대한항공'
-  },
-  {
-    symbol: '090430',
-    name: '아모레퍼시픽'
-  },
-  {
-    symbol: '352820',
-    name: '하이브'
-  }
-];
-
-const RECOMMENDATION_CONCURRENCY =
-  5;
-
-const RECOMMENDATION_AI_LIMIT =
-  3;
-
-// ========================================
-// CONCURRENCY HELPER
-// ========================================
-
-const mapWithConcurrency =
-  async (
-    items,
-    limit,
-    worker
-  ) => {
-    const results =
-      new Array(
-        items.length
-      );
-
-    let nextIndex = 0;
-
-    const runWorker =
-      async () => {
-        while (true) {
-          const currentIndex =
-            nextIndex;
-
-          nextIndex += 1;
-
-          if (
-            currentIndex >=
-            items.length
-          ) {
-            return;
-          }
-
-          results[currentIndex] =
-            await worker(
-              items[currentIndex],
-              currentIndex
-            );
-        }
-      };
-
-    const workerCount =
-      Math.max(
-        1,
-        Math.min(
-          limit,
-          items.length
-        )
-      );
-
-    await Promise.all(
-      Array.from(
-        {
-          length:
-            workerCount
-        },
-        () =>
-          runWorker()
-      )
-    );
-
-    return results;
-  };
-
-// ========================================
-// RECOMMENDATION SCORE
-// ========================================
-
-const getRecommendationScore =
-  (strategy) => {
-    if (
-      !strategy ||
-      typeof strategy !==
-        'object'
-    ) {
-      return 0;
-    }
-
-    return [
-      strategy.trendPassed,
-      strategy.volumePassed,
-      strategy.supplyPassed
-    ].filter(
-      (value) =>
-        value === true
-    ).length;
-  };
-
-// ========================================
-// RECOMMENDATION CONDITION LABELS
-// ========================================
-
-const buildRecommendationReason =
-  (strategy) => {
-    const passed = [];
-    const failed = [];
-
-    if (
-      strategy.trendPassed ===
-      true
-    ) {
-      passed.push(
-        '추세'
-      );
-    } else if (
-      strategy.trendPassed ===
-      false
-    ) {
-      failed.push(
-        '추세'
-      );
-    }
-
-    if (
-      strategy.volumePassed ===
-      true
-    ) {
-      passed.push(
-        '거래량'
-      );
-    } else if (
-      strategy.volumePassed ===
-      false
-    ) {
-      failed.push(
-        '거래량'
-      );
-    }
-
-    if (
-      strategy.supplyPassed ===
-      true
-    ) {
-      passed.push(
-        '수급'
-      );
-    } else if (
-      strategy.supplyPassed ===
-      false
-    ) {
-      failed.push(
-        '수급'
-      );
-    }
-
-    return {
-      passedConditions:
-        passed,
-
-      failedConditions:
-        failed
-    };
-  };
-
-// ========================================
-// BUILD ONE RECOMMENDATION RESULT
-// ========================================
-
-const buildRecommendationResult =
-  async (stock) => {
-    const [
-      quote,
-      strategy
-    ] =
-      await Promise.all([
-        fetchStockQuoteData(
-          stock.symbol
-        ),
-
-        calculateStrategy(
-          stock.symbol
-        )
-      ]);
-
-    const score =
-      getRecommendationScore(
-        strategy
-      );
-
-    const reason =
-      buildRecommendationReason(
-        strategy
-      );
-
-    return {
-      symbol:
-        stock.symbol,
-
-      stockName:
-        quote.stockName ||
-        stock.name,
-
-      currentPrice:
-        quote.currentPrice,
-
-      priceChange:
-        quote.priceChange,
-
-      changeRate:
-        quote.changeRate,
-
-      score,
-
-      maxScore:
-        3,
-
-      grade:
-        score === 3
-          ? 'STRONG_CANDIDATE'
-          : score === 2
-            ? 'WATCH_CANDIDATE'
-            : 'EXCLUDED',
-
-      passedConditions:
-        reason.passedConditions,
-
-      failedConditions:
-        reason.failedConditions,
-
-      strategy: {
-        ma5:
-          strategy.ma5,
-
-        ma20:
-          strategy.ma20,
-
-        recentHigh20:
-          strategy.recentHigh20,
-
-        recentLow20:
-          strategy.recentLow20,
-
-        nearestSupport:
-          strategy.nearestSupport,
-
-        nearestResistance:
-          strategy.nearestResistance,
-
-        currentVolume:
-          strategy.currentVolume,
-
-        averageVolume20:
-          strategy.averageVolume20,
-
-        volumeRatio:
-          strategy.volumeRatio,
-
-        foreignerNet:
-          strategy.foreignerNet,
-
-        institutionNet:
-          strategy.institutionNet,
-
-        netSupplyTotal:
-          strategy.netSupplyTotal,
-
-        trendPassed:
-          strategy.trendPassed,
-
-        volumePassed:
-          strategy.volumePassed,
-
-        supplyPassed:
-          strategy.supplyPassed,
-
-        signal:
-          strategy.signal,
-
-        entryPrice:
-          strategy.entryPrice,
-
-        takeProfitPrice:
-          strategy.takeProfitPrice,
-
-        stopLossPrice:
-          strategy.stopLossPrice
-      }
-    };
-  };
-
-// ========================================
-// RANK RECOMMENDATION RESULTS
-// ========================================
-
-const rankRecommendationResults =
-  (results) =>
-    [...results].sort(
-      (a, b) => {
-        if (
-          b.score !==
-          a.score
-        ) {
-          return (
-            b.score -
-            a.score
-          );
-        }
-
-        const aVolume =
-          Number.isFinite(
-            a.strategy
-              ?.volumeRatio
-          )
-            ? a.strategy
-                .volumeRatio
-            : -Infinity;
-
-        const bVolume =
-          Number.isFinite(
-            b.strategy
-              ?.volumeRatio
-          )
-            ? b.strategy
-                .volumeRatio
-            : -Infinity;
-
-        if (
-          bVolume !==
-          aVolume
-        ) {
-          return (
-            bVolume -
-            aVolume
-          );
-        }
-
-        const aSupply =
-          Number.isFinite(
-            a.strategy
-              ?.netSupplyTotal
-          )
-            ? a.strategy
-                .netSupplyTotal
-            : -Infinity;
-
-        const bSupply =
-          Number.isFinite(
-            b.strategy
-              ?.netSupplyTotal
-          )
-            ? b.strategy
-                .netSupplyTotal
-            : -Infinity;
-
-        return (
-          bSupply -
-          aSupply
-        );
-      }
-    );
-
-// ========================================
-// SCAN ALL 30 STOCKS
-// ========================================
-
-const scanRecommendationUniverse =
-  async () => {
-    const results =
-      await mapWithConcurrency(
-        RECOMMENDATION_WATCHLIST,
-        RECOMMENDATION_CONCURRENCY,
-        async (stock) => {
-          try {
-            return await buildRecommendationResult(
-              stock
-            );
-          } catch (error) {
-            console.warn(
-              `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
-              error.message
-            );
-
-            return {
-              symbol:
-                stock.symbol,
-
-              stockName:
-                stock.name,
-
-              error:
-                'Failed to load recommendation data'
-            };
-          }
-        }
-      );
-
-    const validResults =
-      results.filter(
-        (item) =>
-          item &&
-          !item.error &&
-          Number.isFinite(
-            item.score
-          )
-      );
-
-    const ranked =
-      rankRecommendationResults(
-        validResults
-      );
-
-    return {
-      validResults,
-      ranked
-    };
   };
 // ========================================
 // HEALTH
@@ -2629,8 +3106,7 @@ app.get(
     res
       .status(200)
       .json({
-        status:
-          'ok'
+        status: 'ok'
       });
   }
 );
@@ -2652,12 +3128,8 @@ app.get(
       return res
         .status(400)
         .json({
-          symbol:
-            null,
-
-          name:
-            null,
-
+          symbol: null,
+          name: null,
           error:
             'Query parameter is required'
         });
@@ -2687,11 +3159,8 @@ app.get(
           return res
             .status(200)
             .json({
-              symbol:
-                null,
-
-              name:
-                null
+              symbol: null,
+              name: null
             });
         }
 
@@ -2748,11 +3217,8 @@ app.get(
         return res
           .status(200)
           .json({
-            symbol:
-              null,
-
-            name:
-              null
+            symbol: null,
+            name: null
           });
       }
 
@@ -2770,12 +3236,8 @@ app.get(
       return res
         .status(500)
         .json({
-          symbol:
-            null,
-
-          name:
-            null,
-
+          symbol: null,
+          name: null,
           error:
             'Failed to search stock'
         });
@@ -2797,54 +3259,22 @@ app.get(
       return res
         .status(400)
         .json({
-          symbol:
-            null,
-
-          stockName:
-            null,
-
-          currentPrice:
-            null,
-
-          priceChange:
-            null,
-
-          changeRate:
-            null,
-
-          volume:
-            null,
-
-          tradingValue:
-            null,
-
-          highPrice:
-            null,
-
-          lowPrice:
-            null,
-
-          foreignerNet:
-            null,
-
-          institutionNet:
-            null,
-
-          foreignerBuy:
-            null,
-
-          foreignerSell:
-            null,
-
-          institutionBuy:
-            null,
-
-          institutionSell:
-            null,
-
-          supplyDate:
-            null,
-
+          symbol: null,
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
           error:
             'Symbol query parameter is required'
         });
@@ -2859,52 +3289,21 @@ app.get(
         .status(400)
         .json({
           symbol,
-
-          stockName:
-            null,
-
-          currentPrice:
-            null,
-
-          priceChange:
-            null,
-
-          changeRate:
-            null,
-
-          volume:
-            null,
-
-          tradingValue:
-            null,
-
-          highPrice:
-            null,
-
-          lowPrice:
-            null,
-
-          foreignerNet:
-            null,
-
-          institutionNet:
-            null,
-
-          foreignerBuy:
-            null,
-
-          foreignerSell:
-            null,
-
-          institutionBuy:
-            null,
-
-          institutionSell:
-            null,
-
-          supplyDate:
-            null,
-
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
           error:
             'Symbol must be a 6-digit Korean stock code'
         });
@@ -2931,52 +3330,21 @@ app.get(
         .status(500)
         .json({
           symbol,
-
-          stockName:
-            null,
-
-          currentPrice:
-            null,
-
-          priceChange:
-            null,
-
-          changeRate:
-            null,
-
-          volume:
-            null,
-
-          tradingValue:
-            null,
-
-          highPrice:
-            null,
-
-          lowPrice:
-            null,
-
-          foreignerNet:
-            null,
-
-          institutionNet:
-            null,
-
-          foreignerBuy:
-            null,
-
-          foreignerSell:
-            null,
-
-          institutionBuy:
-            null,
-
-          institutionSell:
-            null,
-
-          supplyDate:
-            null,
-
+          stockName: null,
+          currentPrice: null,
+          priceChange: null,
+          changeRate: null,
+          volume: null,
+          tradingValue: null,
+          highPrice: null,
+          lowPrice: null,
+          foreignerNet: null,
+          institutionNet: null,
+          foreignerBuy: null,
+          foreignerSell: null,
+          institutionBuy: null,
+          institutionSell: null,
+          supplyDate: null,
           error:
             'Failed to fetch real stock quote'
         });
@@ -3004,17 +3372,10 @@ app.get(
       return res
         .status(400)
         .json({
-          symbol:
-            null,
-
+          symbol: null,
           timeframe,
-
-          supported:
-            false,
-
-          chart:
-            [],
-
+          supported: false,
+          chart: [],
           error:
             'Symbol query parameter is required'
         });
@@ -3029,15 +3390,9 @@ app.get(
         .status(400)
         .json({
           symbol,
-
           timeframe,
-
-          supported:
-            false,
-
-          chart:
-            [],
-
+          supported: false,
+          chart: [],
           error:
             'Symbol must be a 6-digit Korean stock code'
         });
@@ -3051,19 +3406,13 @@ app.get(
         .status(200)
         .json({
           symbol,
-
           timeframe,
-
-          supported:
-            false,
-
-          chart:
-            []
+          supported: false,
+          chart: []
         });
     }
 
-    let pageSize =
-      30;
+    let pageSize = 30;
 
     switch (
       timeframe
@@ -3122,14 +3471,9 @@ app.get(
           .status(200)
           .json({
             symbol,
-
             timeframe,
-
-            supported:
-              true,
-
-            chart:
-              []
+            supported: true,
+            chart: []
           });
       }
 
@@ -3164,7 +3508,7 @@ app.get(
             volume:
               parseNumber(
                 item.accumulatedTradingVolume ||
-                  item.volume
+                item.volume
               )
           })
         );
@@ -3175,12 +3519,8 @@ app.get(
         .status(200)
         .json({
           symbol,
-
           timeframe,
-
-          supported:
-            true,
-
+          supported: true,
           chart:
             chartData
         });
@@ -3194,15 +3534,9 @@ app.get(
         .status(500)
         .json({
           symbol,
-
           timeframe,
-
-          supported:
-            false,
-
-          chart:
-            [],
-
+          supported: false,
+          chart: [],
           error:
             'Failed to fetch real stock chart data'
         });
@@ -3228,12 +3562,8 @@ app.get(
       return res
         .status(400)
         .json({
-          query:
-            null,
-
-          news:
-            [],
-
+          query: null,
+          news: [],
           error:
             'Query or symbol parameter is required'
         });
@@ -3320,7 +3650,7 @@ app.get(
         });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error fetching news for ${query}:`,
+        `[K-Stock AI] Error fetching news for ${cleanQuery}:`,
         error.message
       );
 
@@ -3457,11 +3787,18 @@ app.get(
           symbol
         );
 
-      return res
-        .status(200)
-        .json(
+      const riskReward =
+        calculateRiskReward(
           strategy
         );
+
+      return res
+        .status(200)
+        .json({
+          ...strategy,
+
+          riskReward
+        });
     } catch (error) {
       console.error(
         `[K-Stock AI] Error calculating strategy for ${symbol}:`,
@@ -3499,6 +3836,27 @@ app.get(
             item.score >= 2
         );
 
+      const priorityCandidates =
+        recommendations.filter(
+          (item) =>
+            item.grade ===
+            'PRIORITY_CANDIDATE'
+        );
+
+      const chaseCautionCandidates =
+        recommendations.filter(
+          (item) =>
+            item.grade ===
+            'CHASE_CAUTION'
+        );
+
+      const watchCandidates =
+        recommendations.filter(
+          (item) =>
+            item.grade ===
+            'WATCH_CANDIDATE'
+        );
+
       return res
         .status(200)
         .json({
@@ -3516,10 +3874,28 @@ app.get(
           recommendationCount:
             recommendations.length,
 
+          priorityCandidateCount:
+            priorityCandidates.length,
+
+          chaseCautionCount:
+            chaseCautionCandidates.length,
+
+          watchCandidateCount:
+            watchCandidates.length,
+
           rule:
-            '추세·거래량·수급 3개 조건 중 충족 개수로 순위를 계산하며, 2개 이상 충족 종목만 후보로 표시합니다.',
+            '추세·거래량·수급 3개 조건을 먼저 검사하고, 3개 모두 충족한 종목은 현재가 기준 목표가까지의 기대수익과 손절가까지의 위험을 비교해 최우선 후보 또는 추격 주의로 분류합니다. 2개 조건 충족 종목은 관심 종목으로 표시합니다.',
+
+          riskRewardRule:
+            '현재가 기준 손익비 = (목표가 - 현재가) ÷ (현재가 - 손절가). 손익비가 1 이상이고 현재가가 목표가보다 낮은 경우에만 최우선 후보로 분류합니다.',
 
           recommendations,
+
+          priorityCandidates,
+
+          chaseCautionCandidates,
+
+          watchCandidates,
 
           allResults:
             ranked
@@ -3547,7 +3923,25 @@ app.get(
           recommendationCount:
             0,
 
+          priorityCandidateCount:
+            0,
+
+          chaseCautionCount:
+            0,
+
+          watchCandidateCount:
+            0,
+
           recommendations:
+            [],
+
+          priorityCandidates:
+            [],
+
+          chaseCautionCandidates:
+            [],
+
+          watchCandidates:
             [],
 
           allResults:
@@ -3583,9 +3977,6 @@ app.get(
             RECOMMENDATION_WATCHLIST
               .length,
 
-          strongCandidateCount:
-            0,
-
           analyzedCount:
             0,
 
@@ -3598,46 +3989,53 @@ app.get(
     }
 
     try {
-      // --------------------------------
-      // 1. 30개 종목 실제 데이터 검사
-      // --------------------------------
-
       const {
         validResults,
         ranked
       } =
         await scanRecommendationUniverse();
 
-      // --------------------------------
-      // 2. 추세 + 거래량 + 수급
-      //    3개 모두 통과한 종목만 선택
-      // --------------------------------
+      // =================================
+      // AI 분석 대상
+      //
+      // 1순위: PRIORITY_CANDIDATE
+      // 2순위: CHASE_CAUTION
+      //
+      // 최대 3종목만 Gemini 호출
+      // =================================
 
-      const strongCandidates =
+      const priorityCandidates =
         ranked.filter(
           (item) =>
-            item.score === 3 &&
             item.grade ===
-              'STRONG_CANDIDATE' &&
+              'PRIORITY_CANDIDATE' &&
             item.strategy
               ?.signal ===
               'BUY_CANDIDATE'
         );
 
-      // --------------------------------
-      // 3. 상위 최대 3종목만
-      //    뉴스 + Gemini 분석
-      // --------------------------------
+      const chaseCautionCandidates =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+              'CHASE_CAUTION' &&
+            item.strategy
+              ?.signal ===
+              'BUY_CANDIDATE'
+        );
 
-      const targets =
-        strongCandidates.slice(
+      const aiTargets =
+        [
+          ...priorityCandidates,
+          ...chaseCautionCandidates
+        ].slice(
           0,
           RECOMMENDATION_AI_LIMIT
         );
 
       const analyzed =
         await mapWithConcurrency(
-          targets,
+          aiTargets,
           2,
           async (stock) => {
             let news = [];
@@ -3744,8 +4142,11 @@ app.get(
           successfulCount:
             validResults.length,
 
-          strongCandidateCount:
-            strongCandidates.length,
+          priorityCandidateCount:
+            priorityCandidates.length,
+
+          chaseCautionCount:
+            chaseCautionCandidates.length,
 
           analyzedCount:
             analyzed.length,
@@ -3754,10 +4155,10 @@ app.get(
             RECOMMENDATION_AI_LIMIT,
 
           selectionRule:
-            '추세·거래량·수급 3개 조건을 모두 충족하고 백엔드 전략 판정이 매수 후보인 종목만 AI 뉴스 분석 대상으로 사용합니다.',
+            '추세·거래량·수급을 모두 충족한 종목 중 현재가 기준 손익비가 1 이상이고 현재가가 목표가보다 낮은 종목은 최우선 후보로 분류합니다. 손익비가 불리하거나 목표가에 너무 가까운 종목은 추격 주의로 분류합니다.',
 
           important:
-            'Gemini는 종목 선정, 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 않고 제공된 실제 데이터와 뉴스만 설명합니다.',
+            'Gemini는 종목 등급, 손익비, 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 않고 백엔드가 계산한 결과와 실제 뉴스만 설명합니다.',
 
           recommendations:
             analyzed
@@ -3785,7 +4186,10 @@ app.get(
           successfulCount:
             0,
 
-          strongCandidateCount:
+          priorityCandidateCount:
+            0,
+
+          chaseCautionCount:
             0,
 
           analyzedCount:
@@ -3918,6 +4322,11 @@ app.get(
 
             strategy,
 
+            riskReward:
+              calculateRiskReward(
+                strategy
+              ),
+
             newsCount:
               news.length
           },
@@ -4003,6 +4412,10 @@ app.listen(
 
     console.log(
       `[K-Stock AI] Gemini primary model: ${PRIMARY_GEMINI_MODEL}`
+    );
+
+    console.log(
+      '[K-Stock AI] Risk/Reward filter enabled'
     );
   }
 );
