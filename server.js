@@ -323,7 +323,14 @@ app.get('/api/stock/news', async (req, res) => {
     }
 
     const data = await response.json();
-    const rawList = Array.isArray(data) ? data : (data.items || data.newsList || []);
+    
+    // Flatten nested items arrays from news group objects into a single raw article list
+    let rawList = [];
+    if (Array.isArray(data)) {
+      rawList = data.flatMap(group => (group && Array.isArray(group.items)) ? group.items : []);
+    } else if (data && Array.isArray(data.items)) {
+      rawList = data.items;
+    }
 
     // Format news items safely using actual Naver stock news response keys (tit, subtit, officeName, articleId, officeId, datetime)
     const newsList = rawList.map((item) => {
