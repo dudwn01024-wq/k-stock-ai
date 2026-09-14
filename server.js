@@ -798,7 +798,8 @@ const calculateStrategy =
     const emptyResult =
       () => ({
         symbol,
-              currentPrice:
+
+        currentPrice:
           null,
 
         ma5:
@@ -948,8 +949,7 @@ const calculateStrategy =
               item.volume
             )
         );
-
-    if (
+        if (
       rows.length === 0
     ) {
       return emptyResult();
@@ -1047,8 +1047,7 @@ const calculateStrategy =
       Number.isFinite(
         averageVolume20
       ) &&
-      averageVolume20 >
-        0
+      averageVolume20 > 0
         ? Number(
             (
               currentVolume /
@@ -1214,17 +1213,13 @@ const calculateStrategy =
       Number.isFinite(
         netSupplyTotal
       )
-        ? netSupplyTotal >
-          0
+        ? netSupplyTotal > 0
         : null;
 
     const allConditionsPassed =
-      trendPassed ===
-        true &&
-      volumePassed ===
-        true &&
-      supplyPassed ===
-        true;
+      trendPassed === true &&
+      volumePassed === true &&
+      supplyPassed === true;
 
     let signal =
       'WAIT';
@@ -1418,78 +1413,144 @@ const buildGeminiPrompt = ({
   strategy,
   news
 }) => {
-  const newsInput = news.slice(0, 10).map((item) => ({
-    제목: item.title,
-    언론사: item.publisher,
-    날짜: item.date,
-    요약: item.summary
-  }));
+  const newsInput =
+    news
+      .slice(0, 10)
+      .map((item) => ({
+        제목:
+          item.title,
+
+        언론사:
+          item.publisher,
+
+        날짜:
+          item.date,
+
+        요약:
+          item.summary
+      }));
 
   const factualInput = {
     종목정보: {
-      종목코드: quote.symbol,
-      종목명: quote.stockName,
-      현재가: quote.currentPrice,
-      전일대비: quote.priceChange,
-      등락률: quote.changeRate,
-      오늘거래량: quote.volume,
-      거래대금: quote.tradingValue,
-      당일고가: quote.highPrice,
-      당일저가: quote.lowPrice,
-      외국인순매수: quote.foreignerNet,
-      기관순매수: quote.institutionNet,
-      수급기준일: quote.supplyDate
+      종목코드:
+        quote.symbol,
+
+      종목명:
+        quote.stockName,
+
+      현재가:
+        quote.currentPrice,
+
+      전일대비:
+        quote.priceChange,
+
+      등락률:
+        quote.changeRate,
+
+      오늘거래량:
+        quote.volume,
+
+      거래대금:
+        quote.tradingValue,
+
+      당일고가:
+        quote.highPrice,
+
+      당일저가:
+        quote.lowPrice,
+
+      외국인순매수:
+        quote.foreignerNet,
+
+      기관순매수:
+        quote.institutionNet,
+
+      수급기준일:
+        quote.supplyDate
     },
 
     기술분석: {
-      현재가: strategy.currentPrice,
-      "5일이동평균선": strategy.ma5,
-      "20일이동평균선": strategy.ma20,
-      "최근20일최고가": strategy.recentHigh20,
-      "최근20일최저가": strategy.recentLow20,
-      "가장가까운지지선": strategy.nearestSupport,
-      "가장가까운저항선": strategy.nearestResistance,
-      오늘거래량: strategy.currentVolume,
-      "이전20일평균거래량": strategy.averageVolume20,
-      거래량비율: strategy.volumeRatio,
-      외국인순매수: strategy.foreignerNet,
-      기관순매수: strategy.institutionNet,
-      외국인기관합산순매수: strategy.netSupplyTotal,
+      현재가:
+        strategy.currentPrice,
+
+      '5일이동평균선':
+        strategy.ma5,
+
+      '20일이동평균선':
+        strategy.ma20,
+
+      '최근20일최고가':
+        strategy.recentHigh20,
+
+      '최근20일최저가':
+        strategy.recentLow20,
+
+      '가장가까운지지선':
+        strategy.nearestSupport,
+
+      '가장가까운저항선':
+        strategy.nearestResistance,
+
+      오늘거래량:
+        strategy.currentVolume,
+
+      '이전20일평균거래량':
+        strategy.averageVolume20,
+
+      거래량비율:
+        strategy.volumeRatio,
+
+      외국인순매수:
+        strategy.foreignerNet,
+
+      기관순매수:
+        strategy.institutionNet,
+
+      외국인기관합산순매수:
+        strategy.netSupplyTotal,
 
       추세조건:
         strategy.trendPassed === true
-          ? "충족"
+          ? '충족'
           : strategy.trendPassed === false
-            ? "미충족"
-            : "데이터 부족",
+            ? '미충족'
+            : '데이터 부족',
 
       거래량조건:
         strategy.volumePassed === true
-          ? "충족"
+          ? '충족'
           : strategy.volumePassed === false
-            ? "미충족"
-            : "데이터 부족",
+            ? '미충족'
+            : '데이터 부족',
 
       수급조건:
         strategy.supplyPassed === true
-          ? "충족"
+          ? '충족'
           : strategy.supplyPassed === false
-            ? "미충족"
-            : "데이터 부족",
+            ? '미충족'
+            : '데이터 부족',
 
       종합판정:
-        strategy.signal === "BUY_CANDIDATE"
-          ? "매수 후보 조건 충족"
-          : strategy.signal === "WAIT"
-            ? "관망"
-            : "데이터 부족",
+        strategy.signal ===
+        'BUY_CANDIDATE'
+          ? '매수 후보 조건 충족'
+          : strategy.signal ===
+              'WAIT'
+            ? '관망'
+            : '데이터 부족',
 
-      진입고려가격: strategy.entryPrice,
-      목표가격: strategy.takeProfitPrice,
-      손절기준가격: strategy.stopLossPrice
+      진입고려가격:
+        strategy.entryPrice,
+
+      목표가격:
+        strategy.takeProfitPrice,
+
+      손절기준가격:
+        strategy.stopLossPrice
     },
 
-    최신뉴스: newsInput
+    최신뉴스:
+      newsInput
   };
 
   return `
@@ -1596,8 +1657,8 @@ const callGeminiModelOnce =
                   parts: [
                     {
                       text:
-                        prompt  
-                                          }
+                        prompt
+                    }
                   ]
                 }
               ],
@@ -1768,9 +1829,11 @@ const callGeminiWithRetryAndFallback =
           errors.push({
             model,
             attempt,
+
             status:
               error.status ||
               null,
+
             message:
               error.message
           });
@@ -1818,56 +1881,186 @@ const callGeminiWithRetryAndFallback =
     throw finalError;
   };
 
+// ========================================
+// RECOMMENDATION WATCHLIST - 30 STOCKS
+// ========================================
+
 const RECOMMENDATION_WATCHLIST = [
   { symbol: '005930', name: '삼성전자' },
   { symbol: '000660', name: 'SK하이닉스' },
   { symbol: '373220', name: 'LG에너지솔루션' },
-  { symbol: '035420', name: 'NAVER' },
+  { symbol: '207940', name: '삼성바이오로직스' },
   { symbol: '005380', name: '현대차' },
+  { symbol: '000270', name: '기아' },
+  { symbol: '068270', name: '셀트리온' },
+  { symbol: '035420', name: 'NAVER' },
   { symbol: '035720', name: '카카오' },
-  { symbol: '068270', name: '셀트리온' }
+  { symbol: '005490', name: 'POSCO홀딩스' },
+  { symbol: '105560', name: 'KB금융' },
+  { symbol: '055550', name: '신한지주' },
+  { symbol: '086790', name: '하나금융지주' },
+  { symbol: '316140', name: '우리금융지주' },
+  { symbol: '028260', name: '삼성물산' },
+  { symbol: '006400', name: '삼성SDI' },
+  { symbol: '051910', name: 'LG화학' },
+  { symbol: '012450', name: '한화에어로스페이스' },
+  { symbol: '329180', name: 'HD현대중공업' },
+  { symbol: '042660', name: '한화오션' },
+  { symbol: '034020', name: '두산에너빌리티' },
+  { symbol: '064350', name: '현대로템' },
+  { symbol: '015760', name: '한국전력' },
+  { symbol: '033780', name: 'KT&G' },
+  { symbol: '017670', name: 'SK텔레콤' },
+  { symbol: '066570', name: 'LG전자' },
+  { symbol: '009150', name: '삼성전기' },
+  { symbol: '003490', name: '대한항공' },
+  { symbol: '090430', name: '아모레퍼시픽' },
+  { symbol: '352820', name: '하이브' }
 ];
 
-const getRecommendationScore = (strategy) => {
-  if (!strategy || typeof strategy !== 'object') {
-    return 0;
-  }
+const RECOMMENDATION_CONCURRENCY =
+  5;
 
-  return [
-    strategy.trendPassed,
-    strategy.volumePassed,
-    strategy.supplyPassed
-  ].filter((value) => value === true).length;
-};
+const mapWithConcurrency =
+  async (
+    items,
+    limit,
+    worker
+  ) => {
+    const results =
+      new Array(
+        items.length
+      );
 
-const buildRecommendationReason = (strategy) => {
-  const passed = [];
-  const failed = [];
+    let nextIndex = 0;
 
-  if (strategy.trendPassed === true) {
-    passed.push('추세');
-  } else if (strategy.trendPassed === false) {
-    failed.push('추세');
-  }
+    const runWorker =
+      async () => {
+        while (true) {
+          const currentIndex =
+            nextIndex;
 
-  if (strategy.volumePassed === true) {
-    passed.push('거래량');
-  } else if (strategy.volumePassed === false) {
-    failed.push('거래량');
-  }
+          nextIndex += 1;
 
-  if (strategy.supplyPassed === true) {
-    passed.push('수급');
-  } else if (strategy.supplyPassed === false) {
-    failed.push('수급');
-  }
+          if (
+            currentIndex >=
+            items.length
+          ) {
+            return;
+          }
 
-  return {
-    passedConditions: passed,
-    failedConditions: failed
+          results[currentIndex] =
+            await worker(
+              items[currentIndex],
+              currentIndex
+            );
+        }
+      };
+
+    const workerCount =
+      Math.max(
+        1,
+        Math.min(
+          limit,
+          items.length
+        )
+      );
+
+    await Promise.all(
+      Array.from(
+        {
+          length:
+            workerCount
+        },
+        () =>
+          runWorker()
+      )
+    );
+
+    return results;
   };
-};
 
+const getRecommendationScore =
+  (strategy) => {
+    if (
+      !strategy ||
+      typeof strategy !==
+        'object'
+    ) {
+      return 0;
+    }
+
+    return [
+      strategy.trendPassed,
+      strategy.volumePassed,
+      strategy.supplyPassed
+    ].filter(
+      (value) =>
+        value === true
+    ).length;
+  };
+
+const buildRecommendationReason =
+  (strategy) => {
+    const passed = [];
+    const failed = [];
+
+    if (
+      strategy.trendPassed ===
+      true
+    ) {
+      passed.push(
+        '추세'
+      );
+    } else if (
+      strategy.trendPassed ===
+      false
+    ) {
+      failed.push(
+        '추세'
+      );
+    }
+
+    if (
+      strategy.volumePassed ===
+      true
+    ) {
+      passed.push(
+        '거래량'
+      );
+    } else if (
+      strategy.volumePassed ===
+      false
+    ) {
+      failed.push(
+        '거래량'
+      );
+    }
+
+    if (
+      strategy.supplyPassed ===
+      true
+    ) {
+      passed.push(
+        '수급'
+      );
+    } else if (
+      strategy.supplyPassed ===
+      false
+    ) {
+      failed.push(
+        '수급'
+      );
+    }
+
+    return {
+      passedConditions:
+        passed,
+
+      failedConditions:
+        failed
+    };
+  };
 // ========================================
 // HEALTH
 // ========================================
@@ -2396,7 +2589,7 @@ app.get(
               ),
 
             high:
-                            parseNumber(
+              parseNumber(
                 item.highPrice
               ),
 
@@ -2737,147 +2930,147 @@ app.get(
   async (req, res) => {
     try {
       const results =
-        await Promise.all(
-          RECOMMENDATION_WATCHLIST.map(
-            async (stock) => {
-              try {
-                const [
-                  quote,
+        await mapWithConcurrency(
+          RECOMMENDATION_WATCHLIST,
+          RECOMMENDATION_CONCURRENCY,
+          async (stock) => {
+            try {
+              const [
+                quote,
+                strategy
+              ] =
+                await Promise.all([
+                  fetchStockQuoteData(
+                    stock.symbol
+                  ),
+
+                  calculateStrategy(
+                    stock.symbol
+                  )
+                ]);
+
+              const score =
+                getRecommendationScore(
                   strategy
-                ] =
-                  await Promise.all([
-                    fetchStockQuoteData(
-                      stock.symbol
-                    ),
-
-                    calculateStrategy(
-                      stock.symbol
-                    )
-                  ]);
-
-                const score =
-                  getRecommendationScore(
-                    strategy
-                  );
-
-                const reason =
-                  buildRecommendationReason(
-                    strategy
-                  );
-
-                return {
-                  symbol:
-                    stock.symbol,
-
-                  stockName:
-                    quote.stockName ||
-                    stock.name,
-
-                  currentPrice:
-                    quote.currentPrice,
-
-                  priceChange:
-                    quote.priceChange,
-
-                  changeRate:
-                    quote.changeRate,
-
-                  score,
-
-                  maxScore:
-                    3,
-
-                  grade:
-                    score === 3
-                      ? 'STRONG_CANDIDATE'
-                      : score === 2
-                        ? 'WATCH_CANDIDATE'
-                        : 'EXCLUDED',
-
-                  passedConditions:
-                    reason.passedConditions,
-
-                  failedConditions:
-                    reason.failedConditions,
-
-                  strategy: {
-                    ma5:
-                      strategy.ma5,
-
-                    ma20:
-                      strategy.ma20,
-
-                    recentHigh20:
-                      strategy.recentHigh20,
-
-                    recentLow20:
-                      strategy.recentLow20,
-
-                    nearestSupport:
-                      strategy.nearestSupport,
-
-                    nearestResistance:
-                      strategy.nearestResistance,
-
-                    currentVolume:
-                      strategy.currentVolume,
-
-                    averageVolume20:
-                      strategy.averageVolume20,
-
-                    volumeRatio:
-                      strategy.volumeRatio,
-
-                    foreignerNet:
-                      strategy.foreignerNet,
-
-                    institutionNet:
-                      strategy.institutionNet,
-
-                    netSupplyTotal:
-                      strategy.netSupplyTotal,
-
-                    trendPassed:
-                      strategy.trendPassed,
-
-                    volumePassed:
-                      strategy.volumePassed,
-
-                    supplyPassed:
-                      strategy.supplyPassed,
-
-                    signal:
-                      strategy.signal,
-
-                    entryPrice:
-                      strategy.entryPrice,
-
-                    takeProfitPrice:
-                      strategy.takeProfitPrice,
-
-                    stopLossPrice:
-                      strategy.stopLossPrice
-                  }
-                };
-              } catch (error) {
-                console.warn(
-                  `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
-                  error.message
                 );
 
-                return {
-                  symbol:
-                    stock.symbol,
+              const reason =
+                buildRecommendationReason(
+                  strategy
+                );
 
-                  stockName:
-                    stock.name,
+              return {
+                symbol:
+                  stock.symbol,
 
-                  error:
-                    'Failed to load recommendation data'
-                };
-              }
+                stockName:
+                  quote.stockName ||
+                  stock.name,
+
+                currentPrice:
+                  quote.currentPrice,
+
+                priceChange:
+                  quote.priceChange,
+
+                changeRate:
+                  quote.changeRate,
+
+                score,
+
+                maxScore:
+                  3,
+
+                grade:
+                  score === 3
+                    ? 'STRONG_CANDIDATE'
+                    : score === 2
+                      ? 'WATCH_CANDIDATE'
+                      : 'EXCLUDED',
+
+                passedConditions:
+                  reason.passedConditions,
+
+                failedConditions:
+                  reason.failedConditions,
+
+                strategy: {
+                  ma5:
+                    strategy.ma5,
+
+                  ma20:
+                    strategy.ma20,
+
+                  recentHigh20:
+                    strategy.recentHigh20,
+
+                  recentLow20:
+                    strategy.recentLow20,
+
+                  nearestSupport:
+                    strategy.nearestSupport,
+
+                  nearestResistance:
+                    strategy.nearestResistance,
+
+                  currentVolume:
+                    strategy.currentVolume,
+
+                  averageVolume20:
+                    strategy.averageVolume20,
+
+                  volumeRatio:
+                    strategy.volumeRatio,
+
+                  foreignerNet:
+                    strategy.foreignerNet,
+
+                  institutionNet:
+                    strategy.institutionNet,
+
+                  netSupplyTotal:
+                    strategy.netSupplyTotal,
+
+                  trendPassed:
+                    strategy.trendPassed,
+
+                  volumePassed:
+                    strategy.volumePassed,
+
+                  supplyPassed:
+                    strategy.supplyPassed,
+
+                  signal:
+                    strategy.signal,
+
+                  entryPrice:
+                    strategy.entryPrice,
+
+                  takeProfitPrice:
+                    strategy.takeProfitPrice,
+
+                  stopLossPrice:
+                    strategy.stopLossPrice
+                }
+              };
+            } catch (error) {
+              console.warn(
+                `[K-Stock AI] Recommendation scan failed for ${stock.symbol}:`,
+                error.message
+              );
+
+              return {
+                symbol:
+                  stock.symbol,
+
+                stockName:
+                  stock.name,
+
+                error:
+                  'Failed to load recommendation data'
+              };
             }
-          )
+          }
         );
 
       const validResults =
@@ -3022,7 +3215,6 @@ app.get(
     }
   }
 );
-
 // ========================================
 // AI ANALYSIS API
 // ========================================
