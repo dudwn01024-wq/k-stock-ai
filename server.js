@@ -74,8 +74,169 @@ const getLatestDealTrend = (integrationData) => {
   return list[0];
 };
 
+const findMatchingStock = (data, queryName) => {
+  const targetName = String(queryName || '')
+    .trim()
+    .toLowerCase();
+
+  if (!targetName) return null;
+
+  const normalizeCode = (value) => {
+    if (value === null || value === undefined) return null;
+    const code = String(value).trim();
+    return /^\d{6}$/.test(code) ? code : null;
+  };
+
+  const inspectNode = (node) => {
+    if (!node) return null;
+
+    if (Array.isArray(node)) {
+      const strings = node
+        .filter((value) => typeof value === 'string')
+        .map((value) => value.trim());
+
+      const exactName = strings.find(
+        (value) => value.toLowerCase() === targetName
+      );
+
+      const codeValue = node.find((value) => normalizeCode(value));
+      const code = normalizeCode(codeValue);
+
+      if (exactName && code) {
+        return { symbol: code, name: exactName };
+      }
+    } else if (typeof node === 'object') {
+      const name =
+        node.name ||
+        node.stockName ||
+        node.title ||
+        node.nm ||
+        node.itemName ||
+        null;
+
+      const code = normalizeCode(
+        node.code ||
+          node.itemCode ||
+          node.symbol ||
+          node.cd ||
+          node.stockCode ||
+          null
+      );
+
+      if (
+        typeof name === 'string' &&
+        name.trim().toLowerCase() === targetName &&
+        code
+      ) {
+        return { symbol: code, name: name.trim() };
+      }
+    }
+
+    return null;
+  };
+
+  const traverse = (node) => {
+    if (!node) return null;
+
+    const direct = inspectNode(node);
+    if (direct) return direct;
+
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const result = traverse(child);
+        if (result) return result;
+      }
+    } else if (typeof node === 'object') {
+      for (const key of Object.keys(node)) {
+        const result = traverse(node[key]);
+        if (result) return result;
+      }
+    }
+
+    return null;
+  };
+
+  return traverse(data);
+};
+
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
+});
+
+app.get('/api/stock/search', async (req, res) => {
+  const query = req.query.query;
+
+  if (!query || !query.trim()) {
+    return res.status(400).json({
+      symbol: null,
+      name: null,
+      error: 'Query parameter is required'
+    });
+  }
+
+  const cleanQuery = query.trim();
+
+  try {
+    if (/^\d{6}$/.test(cleanQuery)) {
+      const basicResponse = await fetch(
+        `https://m.stock.naver.com/api/stock/${cleanQuery}/basic`,
+        { headers: NAVER_HEADERS }
+      );
+
+      if (!basicResponse.ok) {
+        return res.status(200).json({
+          symbol: null,
+          name: null
+        });
+      }
+
+      const basicData = await basicResponse.json();
+
+      return res.status(200).json({
+        symbol: cleanQuery,
+        name: basicData.stockName || cleanQuery
+      });
+    }
+
+    const response = await fetch(
+      `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
+        cleanQuery
+      )}&q_enc=utf-8&target=stock`,
+      {
+        headers: {
+          ...NAVER_HEADERS,
+          Referer: 'https://finance.naver.com'
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to search stock: HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const matched = findMatchingStock(data, cleanQuery);
+
+    if (!matched) {
+      return res.status(200).json({
+        symbol: null,
+        name: null
+      });
+    }
+
+    return res.status(200).json(matched);
+  } catch (error) {
+    console.error(
+      `[K-Stock AI] Error searching stock for ${cleanQuery}:`,
+      error.message
+    );
+
+    return res.status(500).json({
+      symbol: null,
+      name: null,
+      error: 'Failed to search stock'
+    });
+  }
 });
 
 app.get('/api/stock/quote', async (req, res) => {
@@ -242,8 +403,7 @@ app.get('/api/stock/quote', async (req, res) => {
 
           if (realtimeItem) {
             tradingValue = parseNumber(
-              realtimeItem.aa ||
-                realtimeItem.accumulatedTradingValue
+              realtimeItem.aa || realtimeItem.accumulatedTradingValue
             );
           }
         }
@@ -316,10 +476,12 @@ app.get('/api/stock/quote', async (req, res) => {
       lowPrice,
       foreignerNet,
       institutionNet,
+
       foreignerBuy: null,
       foreignerSell: null,
       institutionBuy: null,
       institutionSell: null,
+
       supplyDate
     });
   } catch (error) {
@@ -497,101 +659,11 @@ app.get('/api/stock/news', async (req, res) => {
       if (acResponse.ok) {
         const acData = await acResponse.json();
 
-        const findMatchingStockCode = (data, queryName) => {
-          const targetName = queryName.trim().toLowerCase();
+        const matched = findMatchingStock(acData, cleanQuery);
 
-          const processItem = (item) => {
-            if (!item) return null;
-
-            if (Array.isArray(item)) {
-              const nameMatched = item.some(
-                (val) =>
-                  typeof val === 'string' &&
-                  val.trim().toLowerCase() === targetName
-              );
-
-              if (nameMatched) {
-                const codeVal = item.find(
-                  (val) =>
-                    (typeof val === 'string' &&
-                      /^\d{6}$/.test(val.trim())) ||
-                    (typeof val === 'number' &&
-                      /^\d{6}$/.test(String(val)))
-                );
-
-                if (codeVal) {
-                  return String(codeVal).trim();
-                }
-              }
-
-              return null;
-            }
-
-            if (typeof item === 'object') {
-              const nameVal =
-                item.name ||
-                item.stockName ||
-                item.title ||
-                item.nm;
-
-              const codeVal =
-                item.code ||
-                item.itemCode ||
-                item.symbol ||
-                item.cd;
-
-              if (
-                nameVal &&
-                typeof nameVal === 'string' &&
-                nameVal.trim().toLowerCase() === targetName
-              ) {
-                if (codeVal) {
-                  const strCode = String(codeVal).trim();
-
-                  if (/^\d{6}$/.test(strCode)) {
-                    return strCode;
-                  }
-                }
-              }
-            }
-
-            return null;
-          };
-
-          const traverse = (node) => {
-            if (!node) return null;
-
-            const directMatch = processItem(node);
-
-            if (directMatch) {
-              return directMatch;
-            }
-
-            if (Array.isArray(node)) {
-              for (const child of node) {
-                const result = traverse(child);
-
-                if (result) {
-                  return result;
-                }
-              }
-            } else if (typeof node === 'object') {
-              for (const key of Object.keys(node)) {
-                const result = traverse(node[key]);
-
-                if (result) {
-                  return result;
-                }
-              }
-            }
-
-            return null;
-          };
-
-          return traverse(data);
-        };
-
-        targetSymbol = findMatchingStockCode(acData, cleanQuery);
+        if (matched) {
+          targetSymbol = matched.symbol;
+        }
       }
     }
 
@@ -644,10 +716,18 @@ app.get('/api/stock/news', async (req, res) => {
         ? rawSummary.replace(/<[^>]+>/g, '')
         : null;
 
-      const articleId = item.articleId || item.id || null;
-      const officeId = item.officeId || null;
+      const articleId =
+        item.articleId ||
+        item.id ||
+        null;
 
-      let articleUrl = item.url || null;
+      const officeId =
+        item.officeId ||
+        null;
+
+      let articleUrl =
+        item.url ||
+        null;
 
       if (officeId && articleId) {
         articleUrl =
