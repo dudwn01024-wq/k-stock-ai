@@ -10,12 +10,10 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// 서버 상태 확인
 app.get('/api/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// 국내주식 실제 시세 조회
 app.get('/api/stock/quote', async (req, res) => {
   const symbol = req.query.symbol;
 
@@ -35,7 +33,7 @@ app.get('/api/stock/quote', async (req, res) => {
 
   try {
     const response = await fetch(
-      `https://m.stock.naver.com/api/stock/${encodeURIComponent(symbol)}/basic`,
+      `https://m.stock.naver.com/api/stock/${symbol}/basic`,
       {
         headers: {
           'User-Agent': 'Mozilla/5.0'
@@ -54,18 +52,47 @@ app.get('/api/stock/quote', async (req, res) => {
         return null;
       }
 
-      const number = Number(
-        String(value)
-          .replace(/,/g, '')
-          .replace(/%/g, '')
-          .trim()
-      );
+      if (typeof value === 'number') {
+        return Number.isNaN(value) ? null : value;
+      }
 
-      return Number.isFinite(number) ? number : null;
+      if (typeof value === 'string') {
+        const cleaned = value.replace(/,/g, '').trim();
+        const parsed = parseFloat(cleaned);
+        return Number.isNaN(parsed) ? null : parsed;
+      }
+
+      return null;
     };
 
     return res.status(200).json({
       symbol,
-      stockName: data.stockName ?? null,
-      currentPrice: parseNumber(data.closePrice ?? data.nowPrice),
-      priceChange: parseNumber(data.compare
+      stockName: data.stockName || null,
+      currentPrice: parseNumber(data.closePrice || data.nowPrice),
+      priceChange: parseNumber(data.compareToPreviousClosePrice),
+      changeRate: parseNumber(data.fluctuationsRatio),
+      volume: parseNumber(data.accumulatedTradingVolume),
+      highPrice: parseNumber(data.highPrice),
+      lowPrice: parseNumber(data.lowPrice)
+    });
+
+  } catch (error) {
+    console.error('[K-Stock AI] Quote error:', error.message);
+
+    return res.status(500).json({
+      symbol,
+      stockName: null,
+      currentPrice: null,
+      priceChange: null,
+      changeRate: null,
+      volume: null,
+      highPrice: null,
+      lowPrice: null,
+      error: 'Failed to fetch real stock quote'
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`[K-Stock AI] Backend server is running on port ${PORT}`);
+});
