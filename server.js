@@ -949,8 +949,7 @@ const calculateStrategy =
               item.volume
             )
         );
-
-    if (
+      if (
       rows.length === 0
     ) {
       return emptyResult();
@@ -1424,111 +1423,209 @@ const buildGeminiPrompt = ({
       .slice(0, 10)
       .map(
         (item) => ({
-          title:
+          제목:
             item.title,
 
-          publisher:
+          언론사:
             item.publisher,
 
-          date:
+          날짜:
             item.date,
 
-          summary:
+          요약:
             item.summary
         })
       );
 
   const factualInput = {
-    quote: {
-      symbol:
+    종목정보: {
+      종목코드:
         quote.symbol,
 
-      stockName:
+      종목명:
         quote.stockName,
 
-      currentPrice:
+      현재가:
         quote.currentPrice,
 
-      priceChange:
+      전일대비:
         quote.priceChange,
 
-      changeRate:
+      등락률:
         quote.changeRate,
 
-      volume:
+      오늘거래량:
         quote.volume,
 
-      tradingValue:
+      거래대금:
         quote.tradingValue,
 
-      highPrice:
+      당일고가:
         quote.highPrice,
 
-      lowPrice:
+      당일저가:
         quote.lowPrice,
 
-      foreignerNet:
+      외국인순매수:
         quote.foreignerNet,
 
-      institutionNet:
+      기관순매수:
         quote.institutionNet,
 
-      supplyDate:
+      수급기준일:
         quote.supplyDate
     },
 
-    strategy,
+    기술분석: {
+      현재가:
+        strategy.currentPrice,
 
-    news:
+      "5일이동평균선":
+        strategy.ma5,
+
+      "20일이동평균선":
+        strategy.ma20,
+
+      "최근20일최고가":
+        strategy.recentHigh20,
+
+      "최근20일최저가":
+        strategy.recentLow20,
+
+      "가장가까운지지선":
+        strategy.nearestSupport,
+
+      "가장가까운저항선":
+        strategy.nearestResistance,
+
+      오늘거래량:
+        strategy.currentVolume,
+
+      "이전20일평균거래량":
+        strategy.averageVolume20,
+
+      거래량비율:
+        strategy.volumeRatio,
+
+      외국인순매수:
+        strategy.foreignerNet,
+
+      기관순매수:
+        strategy.institutionNet,
+
+      외국인기관합산순매수:
+        strategy.netSupplyTotal,
+
+      추세조건:
+        strategy.trendPassed === true
+          ? "충족"
+          : strategy.trendPassed === false
+            ? "미충족"
+            : "데이터 부족",
+
+      거래량조건:
+        strategy.volumePassed === true
+          ? "충족"
+          : strategy.volumePassed === false
+            ? "미충족"
+            : "데이터 부족",
+
+      수급조건:
+        strategy.supplyPassed === true
+          ? "충족"
+          : strategy.supplyPassed === false
+            ? "미충족"
+            : "데이터 부족",
+
+      종합판정:
+        strategy.signal === "BUY_CANDIDATE"
+          ? "매수 후보 조건 충족"
+          : strategy.signal === "WAIT"
+            ? "관망"
+            : "데이터 부족",
+
+      진입고려가격:
+        strategy.entryPrice,
+
+      목표가격:
+        strategy.takeProfitPrice,
+
+      손절기준가격:
+        strategy.stopLossPrice
+    },
+
+    최신뉴스:
       newsInput
   };
 
   return `
 너는 K-Stock AI의 설명 전용 분석 모듈이다.
 
-아래 JSON 데이터만 사실로 사용해라.
-JSON에 없는 가격, 수치, 뉴스 내용, 기업 정보, 전망을 절대 만들어내지 마라.
+아래에 제공되는 실제 데이터만 사용해서 투자 초보자도 이해하기 쉬운 자연스러운 한국어로 설명해라.
 
-중요 규칙:
+[절대 규칙]
 
-1. 백엔드가 계산한 signal을 절대 변경하지 마라.
+1. 입력 데이터에 없는 가격, 수치, 뉴스, 기업 정보, 전망을 절대 만들어내지 마라.
 
-2. entryPrice, takeProfitPrice, stopLossPrice가 null이면 새로운 가격을 만들지 마라.
+2. 백엔드가 내린 종합 판정을 절대 변경하지 마라.
+- "매수 후보 조건 충족"이면 그 사실을 설명만 한다.
+- "관망"이면 왜 관망인지 설명한다.
+- "데이터 부족"이면 데이터가 부족하다고 설명한다.
 
-3. "매수하세요", "매도하세요"처럼 직접적인 투자 지시를 하지 마라.
+3. 진입 고려 가격, 목표 가격, 손절 기준 가격이 제공되지 않았다면 임의의 가격을 만들지 마라.
 
-4. 뉴스는 제공된 제목과 요약 범위에서만 설명하고 기사에 없는 사실을 추론해서 단정하지 마라.
+4. "매수하세요", "매도하세요", "반드시 상승합니다" 같은 직접적인 투자 지시나 확정적 표현을 사용하지 마라.
 
-5. 데이터가 부족하면 "데이터 부족"이라고 명확하게 말해라.
+5. 뉴스는 제공된 제목과 요약에서 확인되는 내용만 설명한다. 기사에 없는 원인, 결과, 전망을 추측해서 사실처럼 말하지 마라.
 
-6. 숫자를 언급할 때는 입력 JSON에 존재하는 숫자만 사용해라.
+6. 숫자를 사용할 때는 입력 데이터에 실제로 존재하는 숫자만 사용한다.
 
-7. 결과는 반드시 한국어로 작성해라.
+7. 개발자용 변수명이나 프로그래밍 표현을 사용자에게 절대 보여주지 마라.
+특히 다음 표현은 최종 문장에 절대 쓰지 마라:
+trendPassed, volumePassed, supplyPassed, currentPrice, ma5, ma20,
+entryPrice, takeProfitPrice, stopLossPrice, signal,
+BUY_CANDIDATE, WAIT, true, false, null
 
-8. 마크다운 없이 JSON만 반환해라.
+8. 위 표현 대신 반드시 자연스러운 한국어를 사용한다.
+예:
+- "추세 조건이 충족되었습니다."
+- "거래량 조건은 충족되었습니다."
+- "수급 조건은 아직 충족되지 않았습니다."
+- "현재는 관망 구간입니다."
+- "진입 고려 가격은 아직 제시되지 않았습니다."
 
-다음 JSON 형식으로만 반환해라:
+9. 긍정 요인에는 실제로 긍정적인 데이터만 적는다. 조건이 미충족인데 긍정적인 것처럼 표현하지 마라.
+
+10. 위험 요인에는 실제 데이터에서 확인되는 위험 또는 미충족 조건만 적는다.
+
+11. 시장 상태는 반드시 "긍정", "중립", "주의" 중 하나만 반환한다.
+
+12. 모든 설명은 자연스러운 한국어 문장으로 작성한다. 영어 변수명이나 코드 표현을 섞지 마라.
+
+13. 마크다운을 사용하지 말고 JSON만 반환한다.
+
+[출력 형식]
 
 {
-  "summary": "현재 상태를 2~3문장으로 요약",
+  "summary": "현재 상태를 초보자가 이해하기 쉽게 2~3문장으로 요약",
   "marketCondition": "긍정 또는 중립 또는 주의",
   "positiveFactors": [
-    "실제 데이터에 근거한 긍정 요소"
+    "실제 데이터로 확인되는 긍정 요소"
   ],
   "riskFactors": [
-    "실제 데이터에 근거한 위험 요소"
+    "실제 데이터로 확인되는 위험 또는 주의 요소"
   ],
-  "strategyExplanation": "trendPassed, volumePassed, supplyPassed와 signal이 왜 이렇게 나왔는지 설명",
-  "newsExplanation": "제공된 최신 뉴스에서 확인되는 핵심 내용. 뉴스가 없으면 데이터 부족",
-  "caution": "현재 데이터만으로 판단할 때 주의할 점"
+  "strategyExplanation": "추세, 거래량, 수급 조건과 최종 판정을 자연스러운 한국어로 설명",
+  "newsExplanation": "제공된 최신 뉴스에서 확인되는 핵심 내용만 설명. 뉴스가 없으면 데이터 부족이라고 설명",
+  "caution": "현재 데이터 기준으로 주의할 점을 자연스러운 한국어로 설명"
 }
 
-분석 대상 실제 데이터:
+[분석 대상 실제 데이터]
 
 ${JSON.stringify(
   factualInput
 )}
-`.trim();
+  `.trim();
 };
 
 // ========================================
@@ -1952,7 +2049,6 @@ app.get(
     }
   }
 );
-
 // ========================================
 // STOCK QUOTE
 // ========================================
