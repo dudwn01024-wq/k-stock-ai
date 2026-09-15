@@ -1746,25 +1746,30 @@ const calculateRiskReward =
 // RECOMMENDATION SCORE
 // ========================================
 
-const getRecommendationScore =
-  (strategy) => {
-    if (
-      !strategy ||
-      typeof strategy !==
-        'object'
-    ) {
-      return 0;
-    }
+const getRecommendationScore = (strategy) => {
+  if (
+    !strategy ||
+    typeof strategy !== 'object'
+  ) {
+    return 0;
+  }
 
-    return [
-      strategy.trendPassed,
-      strategy.volumePassed,
-      strategy.supplyPassed
-    ].filter(
-      (value) =>
-        value === true
-    ).length;
-  };
+  let score = 0;
+
+  if (strategy.trendPassed === true) {
+    score += 1;
+  }
+
+  if (strategy.volumePassed === true) {
+    score += 1;
+  }
+
+  if (strategy.supplyPassed === true) {
+    score += 1;
+  }
+
+  return score;
+};
 
 // ========================================
 // RECOMMENDATION CONDITION LABELS
