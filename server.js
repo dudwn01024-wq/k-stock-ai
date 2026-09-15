@@ -21,10 +21,13 @@ const PRIMARY_GEMINI_MODEL =
   'gemini-3.6-flash';
 
 const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.1-flash-lite',
   'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-2.5-flash'
 ];
+
+const GEMINI_REQUEST_TIMEOUT_MS = 15000;
 
 const RECOMMENDATION_WATCHLIST = [
   { symbol: '005930', name: '삼성전자' },
@@ -141,7 +144,6 @@ const validateSymbol = (symbol) =>
   /^\d{6}$/.test(
     String(symbol || '')
   );
-
 const getIntegrationInfoValue = (
   integrationData,
   code
@@ -183,7 +185,6 @@ const getLatestDealTrend = (
     integrationData.dealTrendInfos.filter(
       Boolean
     );
-
   if (
     list.length === 0
   ) {
@@ -246,7 +247,6 @@ const findMatchingStock = (
       ) {
         return null;
       }
-
       const code =
         String(value).trim();
 
@@ -708,7 +708,6 @@ const fetchStockQuoteData =
           getLatestDealTrend(
             integrationData
           );
-
         if (
           latestTrend
         ) {
@@ -750,7 +749,6 @@ const fetchStockQuoteData =
       lowPrice,
       foreignerNet,
       institutionNet,
-
       foreignerBuy:
         null,
 
@@ -876,7 +874,6 @@ const fetchStockNewsBySymbol =
             item.officeName ||
             item.publisher ||
             null,
-
           date:
             item.datetime ||
             item.createdAt ||
@@ -1380,7 +1377,6 @@ const calculateStrategy =
       stopLossPrice =
         stopCandidates[0] ??
         null;
-
       if (
         !Number.isFinite(
           entryPrice
@@ -1527,7 +1523,6 @@ const calculateRiskReward =
 
     const currentPrice =
       strategy.currentPrice;
-
     const entryPrice =
       strategy.entryPrice;
 
@@ -1569,7 +1564,6 @@ const calculateRiskReward =
           '진입 고려가·목표가·손절가의 가격 관계가 유효하지 않습니다.'
       };
     }
-
     const currentUpsideAmount =
       targetPrice -
       currentPrice;
@@ -1653,7 +1647,6 @@ const calculateRiskReward =
         ? currentRiskRewardRatio >=
           1
         : null;
-
     let classification =
       'CHASE_CAUTION';
 
@@ -1926,7 +1919,6 @@ const buildRecommendationResult =
         3,
 
       grade,
-
       passedConditions:
         conditionReason.passedConditions,
 
@@ -1947,7 +1939,6 @@ const buildRecommendationResult =
 
         recentLow20:
           strategy.recentLow20,
-
         nearestSupport:
           strategy.nearestSupport,
 
@@ -1968,7 +1959,6 @@ const buildRecommendationResult =
 
         institutionNet:
           strategy.institutionNet,
-
         netSupplyTotal:
           strategy.netSupplyTotal,
 
@@ -1989,7 +1979,6 @@ const buildRecommendationResult =
 
         takeProfitPrice:
           strategy.takeProfitPrice,
-
         stopLossPrice:
           strategy.stopLossPrice
       }
@@ -2010,7 +1999,6 @@ const rankRecommendationResults =
 
           CHASE_CAUTION:
             3,
-
           WATCH_CANDIDATE:
             2,
 
@@ -2283,115 +2271,160 @@ const callGeminiModelOnce =
     model,
     prompt
   }) => {
-    const response =
-      await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-          model
-        )}:generateContent`,
-        {
-          method:
-            'POST',
+    const controller =
+      new AbortController();
 
-          headers: {
-            'Content-Type':
-              'application/json',
-
-            'x-goog-api-key':
-              GEMINI_API_KEY
-          },
-
-          body:
-            JSON.stringify({
-              contents: [
-                {
-                  role:
-                    'user',
-
-                  parts: [
-                    {
-                      text:
-                        prompt
-                    }
-                  ]
-                }
-              ],
-
-              generationConfig: {
-                temperature:
-                  0.2,
-
-                maxOutputTokens:
-                  1600,
-
-                responseMimeType:
-                  'application/json'
-              }
-            })
-        }
+    const timeoutId =
+      setTimeout(
+        () => controller.abort(),
+        GEMINI_REQUEST_TIMEOUT_MS
       );
-
-    const rawText =
-      await response.text();
-
-    if (
-      !response.ok
-    ) {
-      const error =
-        new Error(
-          `Gemini API error HTTP ${response.status}: ${rawText.slice(
-            0,
-            500
-          )}`
-        );
-
-      error.status =
-        response.status;
-
-      error.model =
-        model;
-
-      throw error;
-    }
-
-    let payload;
 
     try {
-      payload =
-        JSON.parse(
-          rawText
+      const response =
+        await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+            model
+          )}:generateContent`,
+          {
+            method:
+              'POST',
+
+            headers: {
+              'Content-Type':
+                'application/json',
+
+              'x-goog-api-key':
+                GEMINI_API_KEY
+            },
+
+            signal:
+              controller.signal,
+
+            body:
+              JSON.stringify({
+                contents: [
+                  {
+                    role:
+                      'user',
+
+                    parts: [
+                      {
+                        text:
+                          prompt
+                      }
+                    ]
+                  }
+                ],
+
+                generationConfig: {
+                  temperature:
+                    0.2,
+
+                  maxOutputTokens:
+                    1600,
+
+                  responseMimeType:
+                    'application/json'
+                }
+              })
+          }
         );
-    } catch (_) {
-      throw new Error(
-        `Gemini returned non-JSON HTTP response for ${model}`
-      );
-    }
 
-    const text =
-      extractGeminiText(
-        payload
-      );
+      const rawText =
+        await response.text();
 
-    const parsed =
-      parseGeminiJson(
-        text
-      );
+      if (
+        !response.ok
+      ) {
+        const error =
+          new Error(
+            `Gemini API error HTTP ${response.status}: ${rawText.slice(
+              0,
+              500
+            )}`
+          );
 
-    if (!parsed) {
-      const error =
-        new Error(
-          `Gemini returned invalid analysis JSON for ${model}`
+        error.status =
+          response.status;
+
+        error.model =
+          model;
+
+        throw error;
+      }
+
+      let payload;
+      try {
+        payload =
+          JSON.parse(
+            rawText
+          );
+      } catch (_) {
+        const error =
+          new Error(
+            `Gemini returned non-JSON HTTP response for ${model}`
+          );
+
+        error.status =
+          502;
+
+        error.model =
+          model;
+
+        throw error;
+      }
+
+      const text =
+        extractGeminiText(
+          payload
         );
 
-      error.status =
-        200;
+      const parsed =
+        parseGeminiJson(
+          text
+        );
 
-      error.model =
-        model;
+      if (!parsed) {
+        const error =
+          new Error(
+            `Gemini returned invalid analysis JSON for ${model}`
+          );
+
+        error.status =
+          502;
+
+        error.model =
+          model;
+        throw error;
+      }
+
+      return parsed;
+    } catch (error) {
+      if (
+        error?.name ===
+        'AbortError'
+      ) {
+        const timeoutError =
+          new Error(
+            `Gemini request timed out after ${GEMINI_REQUEST_TIMEOUT_MS}ms for ${model}`
+          );
+
+        timeoutError.status =
+          504;
+
+        timeoutError.model =
+          model;
+
+        throw timeoutError;
+      }
 
       throw error;
+    } finally {
+      clearTimeout(
+        timeoutId
+      );
     }
-
-    return parsed;
   };
 
 // ========================================
@@ -2426,6 +2459,8 @@ const callGeminiPromptWithRetry =
 
     const retryableStatuses =
       new Set([
+        408,
+        429,
         500,
         502,
         503,
@@ -2440,8 +2475,8 @@ const callGeminiPromptWithRetry =
       const maxAttempts =
         model ===
         PRIMARY_GEMINI_MODEL
-          ? 3
-          : 2;
+          ? 2
+          : 1;
 
       for (
         let attempt = 1;
@@ -2465,7 +2500,6 @@ const callGeminiPromptWithRetry =
 
             modelUsed:
               model,
-
             attemptUsed:
               attempt
           };
@@ -2486,11 +2520,11 @@ const callGeminiPromptWithRetry =
             `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
             error.message
           );
-
           const shouldRetrySameModel =
             retryableStatuses.has(
               error.status
             ) &&
+            error.status !== 503 &&
             attempt <
               maxAttempts;
 
@@ -2548,7 +2582,6 @@ const buildGeminiPrompt =
 
             언론사:
               item.publisher,
-
             날짜:
               item.date,
 
@@ -2611,7 +2644,6 @@ const buildGeminiPrompt =
 
         '최근20일최저가':
           strategy.recentLow20,
-
         '가장가까운지지선':
           strategy.nearestSupport,
 
@@ -2632,7 +2664,6 @@ const buildGeminiPrompt =
 
         기관순매수:
           strategy.institutionNet,
-
         외국인기관합산순매수:
           strategy.netSupplyTotal,
 
@@ -2653,7 +2684,6 @@ const buildGeminiPrompt =
                 false
               ? '미충족'
               : '데이터 부족',
-
         수급조건:
           strategy.supplyPassed ===
           true
@@ -2674,7 +2704,6 @@ const buildGeminiPrompt =
 
         진입고려가격:
           strategy.entryPrice,
-
         목표가격:
           strategy.takeProfitPrice,
 
@@ -2695,7 +2724,6 @@ const buildGeminiPrompt =
 [절대 규칙]
 
 1. 입력 데이터에 없는 가격, 수치, 뉴스, 기업 정보, 전망을 절대 만들어내지 마라.
-
 2. 백엔드가 내린 종합 판정을 절대 변경하지 마라.
 
 3. 진입 고려 가격, 목표 가격, 손절 기준 가격이 제공되지 않았다면 임의의 가격을 만들지 마라.
@@ -2737,7 +2765,6 @@ null
 12. 시장 상태는 반드시
 "긍정", "중립", "주의"
 중 하나만 반환한다.
-
 13. 모든 설명은 한국어로 작성한다.
 
 14. 마크다운을 사용하지 말고 JSON만 반환한다.
@@ -2863,7 +2890,6 @@ const buildRecommendationGeminiPrompt =
 
         미충족조건:
           stock.failedConditions,
-
         최종분류:
           classificationLabel
       },
@@ -2926,7 +2952,6 @@ const buildRecommendationGeminiPrompt =
         현재가에서목표가까지남은상승여력퍼센트:
           riskReward
             .currentUpsidePercent,
-
         현재가에서손절가까지위험금액:
           riskReward
             .currentDownsideAmount,
@@ -3031,7 +3056,6 @@ const buildRecommendationGeminiPrompt =
 12. 뉴스에 없는 내용을 추측해서 사실처럼 말하지 마라.
 
 13. 미래 주가 상승 또는 하락을 확정적으로 예측하지 마라.
-
 14. "무조건 매수", "강력 매수", "지금 사야 한다" 같은 직접적인 투자 지시를 하지 마라.
 
 15. 제공된 최신 뉴스에 부정적 내용이 있다면 위험 요인에 반영한다.
@@ -3178,7 +3202,6 @@ app.get(
               cleanQuery
           });
       }
-
       const response =
         await fetch(
           `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
@@ -3325,7 +3348,6 @@ app.get(
         `[K-Stock AI] Error fetching stock quote for ${symbol}:`,
         error.message
       );
-
       return res
         .status(500)
         .json({
@@ -3367,7 +3389,6 @@ app.get(
         req.query.timeframe ||
         '1M'
       ).toUpperCase();
-
     if (!symbol) {
       return res
         .status(400)
@@ -3514,7 +3535,6 @@ app.get(
         );
 
       chartData.reverse();
-
       return res
         .status(200)
         .json({
@@ -3598,7 +3618,6 @@ app.get(
               }
             }
           );
-
         if (
           acResponse.ok
         ) {
@@ -3619,7 +3638,6 @@ app.get(
           }
         }
       }
-
       if (
         !targetSymbol
       ) {
@@ -3703,7 +3721,6 @@ app.get(
 
         nearestSupport:
           null,
-
         nearestResistance:
           null,
 
@@ -3724,7 +3741,6 @@ app.get(
 
         netSupplyTotal:
           null,
-
         trendPassed:
           null,
 
@@ -3745,7 +3761,6 @@ app.get(
 
         stopLossPrice:
           null,
-
         dataPoints:
           0,
 
@@ -3766,7 +3781,6 @@ app.get(
           )
         );
     }
-
     if (
       !validateSymbol(
         symbol
@@ -3829,7 +3843,6 @@ app.get(
         ranked
       } =
         await scanRecommendationUniverse();
-
       const recommendations =
         ranked.filter(
           (item) =>
@@ -3892,7 +3905,6 @@ app.get(
           recommendations,
 
           priorityCandidates,
-
           chaseCautionCandidates,
 
           watchCandidates,
@@ -3934,7 +3946,6 @@ app.get(
 
           recommendations:
             [],
-
           priorityCandidates:
             [],
 
@@ -3976,7 +3987,6 @@ app.get(
           universeSize:
             RECOMMENDATION_WATCHLIST
               .length,
-
           analyzedCount:
             0,
 
@@ -4039,7 +4049,6 @@ app.get(
           2,
           async (stock) => {
             let news = [];
-
             try {
               news =
                 await fetchStockNewsBySymbol(
@@ -4081,7 +4090,6 @@ app.get(
 
                 modelUsed:
                   aiResult.modelUsed,
-
                 attemptUsed:
                   aiResult.attemptUsed,
 
@@ -4144,7 +4152,6 @@ app.get(
 
           priorityCandidateCount:
             priorityCandidates.length,
-
           chaseCautionCount:
             chaseCautionCandidates.length,
 
