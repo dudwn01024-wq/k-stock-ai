@@ -515,15 +515,16 @@ export default function App() {
                   50종목을 추세 · 거래량 · 수급으로 검사한 뒤, 3/3 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
                 </p>
               </div>
-             {recommendationData && (
+          {recommendationData && (
   <button
     type="button"
     onClick={() => setRecommendationsCollapsed((prev) => !prev)}
     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200"
   >
-    {recommendationsCollapsed ? '추천 종목 펼치기' : '추천 종목 접기'}
+    {recommendationsCollapsed ? '▼ 추천 종목 펼치기' : '▲ 추천 종목 접기'}
   </button>
-)} <button
+)}   
+ <button
                 onClick={loadRecommendations}
                 disabled={recommendationLoading || recommendationAILoading}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-xs text-slate-300 border border-slate-700"
