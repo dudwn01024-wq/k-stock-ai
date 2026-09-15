@@ -521,7 +521,7 @@ export default function App() {
     onClick={() => setRecommendationsCollapsed((prev) => !prev)}
     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200"
   >
-    {recommendationsCollapsed ? '▼ 추천 종목 펼치기' : '▲ 추천 종목 접기'}
+    {recommendationsCollapsed ? '▼ 추천 종목 펼치기' : '✕ 추천 종목 닫기'}
   </button>
 )}   
  <button
@@ -542,9 +542,13 @@ export default function App() {
               <div className="bg-red-950/30 border border-red-900/40 rounded-xl p-4 text-center text-xs text-red-200">
                 {recommendationError}
               </div>
-           ) :  Array.isArray(recommendationData?.recommendations) && recommendationData.recommendations.length > 0 ? (
-              {!recommendationsCollapsed && (
-  <div className="space-y-5">
+            ) : Array.isArray(recommendationData?.recommendations) && recommendationData.recommendations.length > 0 ? (
+              recommendationsCollapsed ? (
+                <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-5 text-center text-xs text-slate-500">
+                  추천 종목 목록이 닫혀 있습니다. 위의 ‘추천 종목 펼치기’ 버튼을 누르면 다시 볼 수 있습니다.
+                </div>
+              ) : (
+                <div className="space-y-5">
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <span className="px-2.5 py-1 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-emerald-300">
                     🟢 최우선 후보 = 3/3 + 현재가 손익비 통과
@@ -832,9 +836,8 @@ export default function App() {
                   })}
                 </div>
               </div>
-            </div>
-)}
-) : (
+              )
+            ) : (
               <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-7 text-center space-y-2">
                 <ShieldCheck className="w-7 h-7 text-slate-500 mx-auto" />
                 <p className="text-sm font-semibold text-slate-200">현재 추천 조건을 충족한 종목이 없습니다.</p>
@@ -853,10 +856,11 @@ export default function App() {
       onClick={() => setRecommendationsCollapsed(true)}
       className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm text-slate-200"
     >
-      ▲ 추천 종목 접기
+      ✕ 추천 종목 닫기
     </button>
   </div>
-)}          </section>
+)}
+          </section>
         )}
 
         {!loading && quoteData && activeTab === 'detail' && (
