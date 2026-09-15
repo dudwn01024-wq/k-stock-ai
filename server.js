@@ -79,7 +79,8 @@ const RECOMMENDATION_WATCHLIST = [
   { symbol: '377300', name: '카카오페이' },
   { symbol: '402340', name: 'SK스퀘어' },
   { symbol: '267250', name: 'HD현대' },
-  { symbol: '011070', name: 'LG이노텍' }];
+  { symbol: '011070', name: 'LG이노텍' }
+];
 
 const RECOMMENDATION_CONCURRENCY = 2;
 const RECOMMENDATION_AI_LIMIT = 3;
@@ -204,6 +205,7 @@ const getLatestDealTrend = (
     integrationData.dealTrendInfos.filter(
       Boolean
     );
+
   if (
     list.length === 0
   ) {
@@ -266,6 +268,7 @@ const findMatchingStock = (
       ) {
         return null;
       }
+
       const code =
         String(value).trim();
 
@@ -727,6 +730,7 @@ const fetchStockQuoteData =
           getLatestDealTrend(
             integrationData
           );
+
         if (
           latestTrend
         ) {
@@ -768,6 +772,7 @@ const fetchStockQuoteData =
       lowPrice,
       foreignerNet,
       institutionNet,
+
       foreignerBuy:
         null,
 
@@ -783,6 +788,7 @@ const fetchStockQuoteData =
       supplyDate
     };
   };
+
 // ========================================
 // STOCK NEWS DATA
 // ========================================
@@ -893,6 +899,7 @@ const fetchStockNewsBySymbol =
             item.officeName ||
             item.publisher ||
             null,
+
           date:
             item.datetime ||
             item.createdAt ||
@@ -908,7 +915,6 @@ const fetchStockNewsBySymbol =
       }
     );
   };
-
 // ========================================
 // STRATEGY CALCULATION
 // ========================================
@@ -1396,6 +1402,7 @@ const calculateStrategy =
       stopLossPrice =
         stopCandidates[0] ??
         null;
+
       if (
         !Number.isFinite(
           entryPrice
@@ -1542,6 +1549,7 @@ const calculateRiskReward =
 
     const currentPrice =
       strategy.currentPrice;
+
     const entryPrice =
       strategy.entryPrice;
 
@@ -1583,6 +1591,7 @@ const calculateRiskReward =
           '진입 고려가·목표가·손절가의 가격 관계가 유효하지 않습니다.'
       };
     }
+
     const currentUpsideAmount =
       targetPrice -
       currentPrice;
@@ -1666,6 +1675,7 @@ const calculateRiskReward =
         ? currentRiskRewardRatio >=
           1
         : null;
+
     let classification =
       'CHASE_CAUTION';
 
@@ -1741,42 +1751,226 @@ const calculateRiskReward =
         reason
     };
   };
+// ========================================
+// LATEST NEWS / DISCLOSURE-LIKE NEWS CHECK
+// ========================================
+// 실제로 가져온 최신 뉴스 제목/요약만 사용합니다.
+// 새로운 사실이나 가격을 만들지 않습니다.
+// 명확한 악재 키워드가 있으면 최우선 추천을 막고,
+// 호재/중립 뉴스는 기존 차트·거래량·수급 판단을 유지합니다.
+
+const assessLatestNews = (news) => {
+  const list = Array.isArray(news)
+    ? news.slice(0, 10)
+    : [];
+
+  const positiveKeywords = [
+    '수주',
+    '계약',
+    '공급계약',
+    '실적 개선',
+    '호실적',
+    '흑자전환',
+    '매출 증가',
+    '영업이익 증가',
+    '증익',
+    '승인',
+    '허가',
+    '신제품',
+    '증설',
+    '투자 확대',
+    '자사주 매입',
+    '자사주 소각',
+    '배당 확대',
+    '목표가 상향'
+  ];
+
+  const negativeKeywords = [
+    '적자전환',
+    '적자 확대',
+    '실적 부진',
+    '영업손실',
+    '매출 감소',
+    '영업이익 감소',
+    '감익',
+    '리콜',
+    '소송',
+    '과징금',
+    '제재',
+    '압수수색',
+    '횡령',
+    '배임',
+    '유상증자',
+    '전환사채',
+    'CB 발행',
+    '하향',
+    '목표가 하향',
+    '계약 해지',
+    '공급 중단'
+  ];
+
+  let positiveCount = 0;
+  let negativeCount = 0;
+
+  const positiveHeadlines = [];
+  const negativeHeadlines = [];
+
+  for (const item of list) {
+    const text =
+      `${item?.title || ''} ${item?.summary || ''}`.trim();
+
+    if (!text) {
+      continue;
+    }
+
+    const positiveHit =
+      positiveKeywords.some(
+        (keyword) =>
+          text.includes(keyword)
+      );
+
+    const negativeHit =
+      negativeKeywords.some(
+        (keyword) =>
+          text.includes(keyword)
+      );
+
+    if (
+      positiveHit &&
+      !negativeHit
+    ) {
+      positiveCount += 1;
+
+      if (item?.title) {
+        positiveHeadlines.push(
+          item.title
+        );
+      }
+    }
+
+    if (negativeHit) {
+      negativeCount += 1;
+
+      if (item?.title) {
+        negativeHeadlines.push(
+          item.title
+        );
+      }
+    }
+  }
+
+  const sentiment =
+    negativeCount > 0
+      ? 'CAUTION'
+      : positiveCount > 0
+        ? 'POSITIVE'
+        : list.length > 0
+          ? 'NEUTRAL'
+          : 'INSUFFICIENT_DATA';
+
+  // 뉴스가 없으면 통과로 간주하지 않습니다.
+  // 명확한 악재가 하나라도 있으면
+  // 최우선 후보에서 제외합니다.
+  const newsPassed =
+    list.length === 0
+      ? null
+      : negativeCount === 0;
+
+  return {
+    newsPassed,
+
+    sentiment,
+
+    newsCount:
+      list.length,
+
+    positiveCount,
+
+    negativeCount,
+
+    positiveHeadlines:
+      positiveHeadlines.slice(
+        0,
+        3
+      ),
+
+    negativeHeadlines:
+      negativeHeadlines.slice(
+        0,
+        3
+      ),
+
+    reason:
+      list.length === 0
+        ? '최신 뉴스 데이터가 없어 뉴스 조건을 판단할 수 없습니다.'
+        : negativeCount > 0
+          ? '최신 뉴스에서 주의 키워드가 확인되어 최우선 추천에서 제외합니다.'
+          : positiveCount > 0
+            ? '최신 뉴스에서 긍정 재료가 확인되고 명확한 주의 키워드는 확인되지 않았습니다.'
+            : '최신 뉴스는 확인되지만 명확한 호재·악재 키워드가 없어 중립으로 판단합니다.'
+  };
+};
 
 // ========================================
 // RECOMMENDATION SCORE
 // ========================================
 
-const getRecommendationScore = (strategy) => {
-  if (
-    !strategy ||
-    typeof strategy !== 'object'
-  ) {
-    return 0;
-  }
+const getRecommendationScore =
+  (
+    strategy,
+    newsAssessment
+  ) => {
+    if (
+      !strategy ||
+      typeof strategy !==
+        'object'
+    ) {
+      return 0;
+    }
 
-  let score = 0;
+    let score = 0;
 
-  if (strategy.trendPassed === true) {
-    score += 1;
-  }
+    if (
+      strategy.trendPassed ===
+      true
+    ) {
+      score += 1;
+    }
 
-  if (strategy.volumePassed === true) {
-    score += 1;
-  }
+    if (
+      strategy.volumePassed ===
+      true
+    ) {
+      score += 1;
+    }
 
-  if (strategy.supplyPassed === true) {
-    score += 1;
-  }
+    if (
+      strategy.supplyPassed ===
+      true
+    ) {
+      score += 1;
+    }
 
-  return score;
-};
+    if (
+      newsAssessment
+        ?.newsPassed ===
+      true
+    ) {
+      score += 1;
+    }
+
+    return score;
+  };
 
 // ========================================
 // RECOMMENDATION CONDITION LABELS
 // ========================================
 
 const buildRecommendationReason =
-  (strategy) => {
+  (
+    strategy,
+    newsAssessment
+  ) => {
     const passed = [];
     const failed = [];
 
@@ -1828,6 +2022,24 @@ const buildRecommendationReason =
       );
     }
 
+    if (
+      newsAssessment
+        ?.newsPassed ===
+      true
+    ) {
+      passed.push(
+        '최신 뉴스'
+      );
+    } else if (
+      newsAssessment
+        ?.newsPassed ===
+      false
+    ) {
+      failed.push(
+        '최신 뉴스'
+      );
+    }
+
     return {
       passedConditions:
         passed,
@@ -1841,32 +2053,62 @@ const buildRecommendationReason =
 // FINAL RECOMMENDATION GRADE
 // ========================================
 
- const getFinalRecommendationGrade = (
-  score,
-  strategy,
-  riskReward
-) => {
-  if (score < 2) {
-    return 'EXCLUDED';
-  }
+const getFinalRecommendationGrade =
+  (
+    score,
+    strategy,
+    riskReward,
+    newsAssessment
+  ) => {
+    // 기존 3개 기술 조건
+    const baseTechnicalPassed =
+      strategy?.trendPassed ===
+        true &&
+      strategy?.volumePassed ===
+        true &&
+      strategy?.supplyPassed ===
+        true;
 
-  if (score === 2) {
-    return 'WATCH_CANDIDATE';
-  }
+    // 최신 뉴스 조건
+    const newsPassed =
+      newsAssessment
+        ?.newsPassed ===
+      true;
 
-  if (score === 3) {
+    // 기술 조건을 모두 통과하지 못하면
+    // 최우선/추격 후보가 될 수 없습니다.
     if (
-      riskReward?.classification ===
+      !baseTechnicalPassed
+    ) {
+      return score >= 2
+        ? 'WATCH_CANDIDATE'
+        : 'EXCLUDED';
+    }
+
+    // 기술 3조건을 통과했더라도
+    // 뉴스 악재 또는 뉴스 확인 불가이면
+    // 관심 종목으로 낮춥니다.
+    if (
+      !newsPassed
+    ) {
+      return 'WATCH_CANDIDATE';
+    }
+
+    // 기술 + 뉴스 모두 통과 후
+    // 현재가 손익비까지 좋으면 최우선
+    if (
+      riskReward
+        ?.classification ===
       'PRIORITY_CANDIDATE'
     ) {
       return 'PRIORITY_CANDIDATE';
     }
 
+    // 기술 + 뉴스는 통과했지만
+    // 현재가 손익비가 불리하면 추격 주의
     return 'CHASE_CAUTION';
-  }
+  };
 
-  return 'WATCH_CANDIDATE';
-};
 // ========================================
 // BUILD ONE RECOMMENDATION RESULT
 // ========================================
@@ -1875,7 +2117,8 @@ const buildRecommendationResult =
   async (stock) => {
     const [
       quote,
-      strategy
+      strategy,
+      news
     ] =
       await Promise.all([
         fetchStockQuoteData(
@@ -1884,29 +2127,55 @@ const buildRecommendationResult =
 
         calculateStrategy(
           stock.symbol
+        ),
+
+        fetchStockNewsBySymbol(
+          stock.symbol
+        ).catch(
+          (error) => {
+            console.warn(
+              `[K-Stock AI] Recommendation news fetch failed for ${stock.symbol}:`,
+              error.message
+            );
+
+            return [];
+          }
         )
       ]);
 
+    // 실제로 가져온 최신 뉴스만 평가
+    const newsAssessment =
+      assessLatestNews(
+        news
+      );
+
+    // 추세 + 거래량 + 수급 + 뉴스
     const score =
       getRecommendationScore(
-        strategy
+        strategy,
+        newsAssessment
       );
 
     const conditionReason =
       buildRecommendationReason(
-        strategy
+        strategy,
+        newsAssessment
       );
 
+    // 기존 실제 가격 기반 손익비
     const riskReward =
       calculateRiskReward(
         strategy
       );
 
+    // 최종 등급:
+    // 기술조건 + 뉴스 + 손익비
     const grade =
       getFinalRecommendationGrade(
         score,
         strategy,
-        riskReward
+        riskReward,
+        newsAssessment
       );
 
     return {
@@ -1928,17 +2197,32 @@ const buildRecommendationResult =
 
       score,
 
+      // 기존 3점 → 뉴스 포함 4점
       maxScore:
-        3,
+        4,
 
       grade,
+
       passedConditions:
-        conditionReason.passedConditions,
+        conditionReason
+          .passedConditions,
 
       failedConditions:
-        conditionReason.failedConditions,
+        conditionReason
+          .failedConditions,
 
       riskReward,
+
+      // 새로 추가
+      newsAssessment,
+
+      // Gemini가 나중에
+      // 실제 뉴스 내용을 설명할 수 있도록 보존
+      news:
+        news.slice(
+          0,
+          10
+        ),
 
       strategy: {
         ma5:
@@ -1952,6 +2236,7 @@ const buildRecommendationResult =
 
         recentLow20:
           strategy.recentLow20,
+
         nearestSupport:
           strategy.nearestSupport,
 
@@ -1972,6 +2257,7 @@ const buildRecommendationResult =
 
         institutionNet:
           strategy.institutionNet,
+
         netSupplyTotal:
           strategy.netSupplyTotal,
 
@@ -1992,12 +2278,12 @@ const buildRecommendationResult =
 
         takeProfitPrice:
           strategy.takeProfitPrice,
+
         stopLossPrice:
           strategy.stopLossPrice
       }
     };
   };
-
 // ========================================
 // RECOMMENDATION RANKING
 // ========================================
@@ -2012,6 +2298,7 @@ const rankRecommendationResults =
 
           CHASE_CAUTION:
             3,
+
           WATCH_CANDIDATE:
             2,
 
@@ -2039,6 +2326,7 @@ const rankRecommendationResults =
           );
         }
 
+        // 뉴스 포함 4점 점수 우선
         if (
           b.score !==
           a.score
@@ -2049,6 +2337,37 @@ const rankRecommendationResults =
           );
         }
 
+        // 뉴스 상태 우선순위
+        const newsPriority = {
+          POSITIVE: 3,
+          NEUTRAL: 2,
+          INSUFFICIENT_DATA: 1,
+          CAUTION: 0
+        };
+
+        const aNews =
+          newsPriority[
+            a.newsAssessment
+              ?.sentiment
+          ] ?? 0;
+
+        const bNews =
+          newsPriority[
+            b.newsAssessment
+              ?.sentiment
+          ] ?? 0;
+
+        if (
+          bNews !==
+          aNews
+        ) {
+          return (
+            bNews -
+            aNews
+          );
+        }
+
+        // 현재가 손익비
         const aRR =
           Number.isFinite(
             a.riskReward
@@ -2077,6 +2396,7 @@ const rankRecommendationResults =
           );
         }
 
+        // 남은 상승 여력
         const aUpside =
           Number.isFinite(
             a.riskReward
@@ -2105,6 +2425,7 @@ const rankRecommendationResults =
           );
         }
 
+        // 거래량 비율
         const aVolume =
           Number.isFinite(
             a.strategy
@@ -2133,6 +2454,7 @@ const rankRecommendationResults =
           );
         }
 
+        // 외국인 + 기관 합산 수급
         const aSupply =
           Number.isFinite(
             a.strategy
@@ -2159,7 +2481,7 @@ const rankRecommendationResults =
     );
 
 // ========================================
-// SCAN ALL 30 STOCKS
+// SCAN ALL 50 STOCKS
 // ========================================
 
 const scanRecommendationUniverse =
@@ -2213,6 +2535,7 @@ const scanRecommendationUniverse =
       ranked
     };
   };
+
 // ========================================
 // GEMINI RESPONSE HELPERS
 // ========================================
@@ -2368,6 +2691,7 @@ const callGeminiModelOnce =
       }
 
       let payload;
+
       try {
         payload =
           JSON.parse(
@@ -2409,6 +2733,7 @@ const callGeminiModelOnce =
 
         error.model =
           model;
+
         throw error;
       }
 
@@ -2473,7 +2798,7 @@ const callGeminiPromptWithRetry =
     const retryableStatuses =
       new Set([
         408,
-        
+        429,
         500,
         502,
         503,
@@ -2513,6 +2838,7 @@ const callGeminiPromptWithRetry =
 
             modelUsed:
               model,
+
             attemptUsed:
               attempt
           };
@@ -2533,11 +2859,13 @@ const callGeminiPromptWithRetry =
             `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
             error.message
           );
+
           const shouldRetrySameModel =
             retryableStatuses.has(
               error.status
             ) &&
-            error.status !== 503 &&
+            error.status !==
+              503 &&
             attempt <
               maxAttempts;
 
@@ -2571,670 +2899,710 @@ const callGeminiPromptWithRetry =
 
     throw finalError;
   };
-
 // ========================================
-// INDIVIDUAL STOCK AI PROMPT
+// INDIVIDUAL STOCK GEMINI ANALYSIS PROMPT
 // ========================================
 
 const buildGeminiPrompt =
   ({
     quote,
     strategy,
+    riskReward,
     news
   }) => {
-    const newsInput =
-      news
-        .slice(
-          0,
-          10
-        )
-        .map(
-          (item) => ({
-            제목:
-              item.title,
+    const safeNews =
+      Array.isArray(news)
+        ? news
+            .slice(0, 10)
+            .map(
+              (
+                item,
+                index
+              ) => ({
+                index:
+                  index + 1,
 
-            언론사:
-              item.publisher,
-            날짜:
-              item.date,
+                title:
+                  item.title ||
+                  null,
 
-            요약:
-              item.summary
-          })
-        );
+                publisher:
+                  item.publisher ||
+                  null,
 
-    const factualInput = {
-      종목정보: {
-        종목코드:
-          quote.symbol,
+                date:
+                  item.date ||
+                  null,
 
-        종목명:
-          quote.stockName,
+                summary:
+                  item.summary ||
+                  null,
 
-        현재가:
-          quote.currentPrice,
-
-        전일대비:
-          quote.priceChange,
-
-        등락률:
-          quote.changeRate,
-
-        오늘거래량:
-          quote.volume,
-
-        거래대금:
-          quote.tradingValue,
-
-        당일고가:
-          quote.highPrice,
-
-        당일저가:
-          quote.lowPrice,
-
-        외국인순매수:
-          quote.foreignerNet,
-
-        기관순매수:
-          quote.institutionNet,
-
-        수급기준일:
-          quote.supplyDate
-      },
-
-      기술분석: {
-        현재가:
-          strategy.currentPrice,
-
-        '5일이동평균선':
-          strategy.ma5,
-
-        '20일이동평균선':
-          strategy.ma20,
-
-        '최근20일최고가':
-          strategy.recentHigh20,
-
-        '최근20일최저가':
-          strategy.recentLow20,
-        '가장가까운지지선':
-          strategy.nearestSupport,
-
-        '가장가까운저항선':
-          strategy.nearestResistance,
-
-        오늘거래량:
-          strategy.currentVolume,
-
-        '이전20일평균거래량':
-          strategy.averageVolume20,
-
-        거래량비율:
-          strategy.volumeRatio,
-
-        외국인순매수:
-          strategy.foreignerNet,
-
-        기관순매수:
-          strategy.institutionNet,
-        외국인기관합산순매수:
-          strategy.netSupplyTotal,
-
-        추세조건:
-          strategy.trendPassed ===
-          true
-            ? '충족'
-            : strategy.trendPassed ===
-                false
-              ? '미충족'
-              : '데이터 부족',
-
-        거래량조건:
-          strategy.volumePassed ===
-          true
-            ? '충족'
-            : strategy.volumePassed ===
-                false
-              ? '미충족'
-              : '데이터 부족',
-        수급조건:
-          strategy.supplyPassed ===
-          true
-            ? '충족'
-            : strategy.supplyPassed ===
-                false
-              ? '미충족'
-              : '데이터 부족',
-
-        종합판정:
-          strategy.signal ===
-          'BUY_CANDIDATE'
-            ? '매수 후보 조건 충족'
-            : strategy.signal ===
-                'WAIT'
-              ? '관망'
-              : '데이터 부족',
-
-        진입고려가격:
-          strategy.entryPrice,
-        목표가격:
-          strategy.takeProfitPrice,
-
-        손절기준가격:
-          strategy.stopLossPrice
-      },
-
-      최신뉴스:
-        newsInput
-    };
+                url:
+                  item.url ||
+                  null
+              })
+            )
+        : [];
 
     return `
-너는 K-Stock AI의 설명 전용 분석 모듈이다.
+너는 K-Stock AI의 국내주식 분석 보조 AI다.
 
-아래에 제공되는 실제 데이터만 사용해서
-투자 초보자도 이해하기 쉬운 자연스러운 한국어로 설명해라.
+매우 중요한 규칙:
 
-[절대 규칙]
+1. 아래 JSON으로 제공된 데이터만 사용한다.
+2. 제공되지 않은 가격, 거래량, 수급, 뉴스, 기업 사실을 만들지 않는다.
+3. 인터넷에서 알고 있는 별도 정보나 기억을 추가하지 않는다.
+4. 가격을 새로 계산하거나 임의로 제시하지 않는다.
+5. 진입 고려가, 목표가, 손절가는 backend가 실제 가격 데이터로 이미 계산한 값을 그대로 사용한다.
+6. 해당 값이 null이면 절대로 숫자를 만들어 채우지 않는다.
+7. 뉴스 분석은 반드시 suppliedNews 배열에 포함된 기사만 사용한다.
+8. 기사에 없는 사실을 추론해서 확정적으로 말하지 않는다.
+9. 투자 수익을 보장하는 표현을 사용하지 않는다.
+10. 출력은 반드시 JSON만 반환한다.
 
-1. 입력 데이터에 없는 가격, 수치, 뉴스, 기업 정보, 전망을 절대 만들어내지 마라.
-2. 백엔드가 내린 종합 판정을 절대 변경하지 마라.
+분석 대상 실제 데이터:
 
-3. 진입 고려 가격, 목표 가격, 손절 기준 가격이 제공되지 않았다면 임의의 가격을 만들지 마라.
+${JSON.stringify(
+  {
+    quote,
+    strategy,
+    riskReward,
+    suppliedNews:
+      safeNews
+  },
+  null,
+  2
+)}
 
-4. "매수하세요", "매도하세요", "반드시 상승합니다" 같은 직접적인 투자 지시나 확정적 표현을 사용하지 마라.
-
-5. 뉴스는 제공된 제목과 요약에서 확인되는 내용만 설명한다.
-
-6. 기사에 없는 원인이나 전망을 사실처럼 추측하지 마라.
-
-7. 숫자는 입력 데이터에 실제로 존재하는 숫자만 사용한다.
-
-8. 개발자용 변수명이나 코드 표현을 사용자에게 절대 보여주지 마라.
-
-다음 표현은 최종 문장에 절대 사용하지 마라:
-
-trendPassed
-volumePassed
-supplyPassed
-currentPrice
-ma5
-ma20
-entryPrice
-takeProfitPrice
-stopLossPrice
-signal
-BUY_CANDIDATE
-WAIT
-true
-false
-null
-
-9. 위 개발자 표현 대신 자연스러운 한국어를 사용한다.
-
-10. 긍정 요인에는 실제로 확인되는 긍정적인 데이터만 적는다.
-
-11. 위험 요인에는 실제 데이터에서 확인되는 위험 또는 미충족 조건만 적는다.
-
-12. 시장 상태는 반드시
-"긍정", "중립", "주의"
-중 하나만 반환한다.
-13. 모든 설명은 한국어로 작성한다.
-
-14. 마크다운을 사용하지 말고 JSON만 반환한다.
-
-[출력 형식]
+다음 JSON 형식으로만 답한다.
 
 {
-  "summary": "현재 상태를 2~3문장으로 요약",
-  "marketCondition": "긍정 또는 중립 또는 주의",
+  "summary": "현재 실제 데이터 기준 종합 분석",
+  "technicalAnalysis": "현재가, MA5, MA20, 최근 고가/저가를 이용한 설명",
+  "volumeAnalysis": "현재 거래량과 20일 평균 거래량 비교 설명",
+  "supplyDemandAnalysis": "외국인/기관 순매수 데이터를 이용한 설명",
+  "newsAnalysis": "suppliedNews에 포함된 최신 기사만 이용한 설명",
   "positiveFactors": [
-    "실제 데이터로 확인되는 긍정 요소"
+    "실제 데이터에서 확인되는 긍정 요인"
   ],
   "riskFactors": [
-    "실제 데이터로 확인되는 위험 또는 주의 요소"
+    "실제 데이터에서 확인되는 위험 요인"
   ],
-  "strategyExplanation": "추세, 거래량, 수급 조건과 최종 판정을 설명",
-  "newsExplanation": "제공된 최신 뉴스의 핵심 내용만 설명",
-  "caution": "현재 데이터 기준으로 주의할 점"
+  "strategyExplanation": {
+    "signal": "backend의 signal 값을 그대로 설명",
+    "entryPrice": null,
+    "entryReason": "backend가 계산한 진입 고려가의 근거 설명",
+    "targetPrice": null,
+    "targetReason": "backend가 계산한 목표가의 근거 설명",
+    "stopLossPrice": null,
+    "stopLossReason": "backend가 계산한 손절가의 근거 설명"
+  },
+  "riskRewardExplanation": "현재가 기준 손익비와 진입 고려가 기준 손익비 설명",
+  "newsEvidence": [
+    {
+      "title": "실제로 suppliedNews에 존재하는 기사 제목",
+      "date": "실제 기사 날짜 또는 null",
+      "url": "실제 기사 URL 또는 null",
+      "reason": "이 기사가 분석에 어떤 영향을 주는지"
+    }
+  ],
+  "dataLimitations": [
+    "현재 데이터에서 확인할 수 없는 항목"
+  ]
 }
 
-[분석 대상 실제 데이터]
+추가 규칙:
 
-${JSON.stringify(factualInput)}
-    `.trim();
+strategyExplanation.entryPrice는
+strategy.entryPrice와 정확히 동일해야 한다.
+
+strategyExplanation.targetPrice는
+strategy.takeProfitPrice와 정확히 동일해야 한다.
+
+strategyExplanation.stopLossPrice는
+strategy.stopLossPrice와 정확히 동일해야 한다.
+
+세 가격 중 backend 값이 null이면
+반드시 null을 반환한다.
+
+newsEvidence에는 suppliedNews에 실제 존재하는 기사만 넣는다.
+
+관련성이 낮으면 newsEvidence를 빈 배열로 반환한다.
+
+한국어로 작성한다.
+`.trim();
   };
 
 // ========================================
-// INDIVIDUAL STOCK AI CALL
+// INDIVIDUAL STOCK AI ANALYSIS
 // ========================================
 
-const callGeminiWithRetryAndFallback =
+const analyzeStockWithGemini =
   async ({
     quote,
     strategy,
     news
   }) => {
+    const riskReward =
+      calculateRiskReward(
+        strategy
+      );
+
     const prompt =
       buildGeminiPrompt({
         quote,
         strategy,
+        riskReward,
         news
       });
 
-    return callGeminiPromptWithRetry(
-      prompt
-    );
+    const geminiResult =
+      await callGeminiPromptWithRetry(
+        prompt
+      );
+
+    const analysis =
+      geminiResult.analysis;
+
+    // ====================================
+    // IMPORTANT SAFETY OVERRIDE
+    // ====================================
+    // Gemini가 가격을 변경해서 반환하더라도
+    // backend에서 실제 계산값으로 다시 덮어씁니다.
+    // 따라서 AI가 임의 가격을 최종 결과에 넣을 수 없습니다.
+
+    if (
+      !analysis.strategyExplanation ||
+      typeof analysis.strategyExplanation !==
+        'object'
+    ) {
+      analysis.strategyExplanation =
+        {};
+    }
+
+    analysis.strategyExplanation.signal =
+      strategy.signal;
+
+    analysis.strategyExplanation.entryPrice =
+      Number.isFinite(
+        strategy.entryPrice
+      )
+        ? strategy.entryPrice
+        : null;
+
+    analysis.strategyExplanation.targetPrice =
+      Number.isFinite(
+        strategy.takeProfitPrice
+      )
+        ? strategy.takeProfitPrice
+        : null;
+
+    analysis.strategyExplanation.stopLossPrice =
+      Number.isFinite(
+        strategy.stopLossPrice
+      )
+        ? strategy.stopLossPrice
+        : null;
+
+    return {
+      analysis,
+
+      modelUsed:
+        geminiResult.modelUsed,
+
+      attemptUsed:
+        geminiResult.attemptUsed,
+
+      riskReward
+    };
   };
 
 // ========================================
-// RECOMMENDATION AI PROMPT
+// RECOMMENDATION GEMINI PROMPT
 // ========================================
 
 const buildRecommendationGeminiPrompt =
-  ({
-    stock,
-    news
-  }) => {
-    const newsInput =
-      news
-        .slice(
-          0,
-          10
-        )
-        .map(
-          (item) => ({
-            제목:
-              item.title,
+  (candidates) => {
+    const safeCandidates =
+      candidates.map(
+        (candidate) => ({
+          symbol:
+            candidate.symbol,
 
-            언론사:
-              item.publisher,
+          stockName:
+            candidate.stockName,
 
-            날짜:
-              item.date,
+          currentPrice:
+            candidate.currentPrice,
 
-            요약:
-              item.summary
-          })
-        );
+          changeRate:
+            candidate.changeRate,
 
-    const riskReward =
-      stock.riskReward ||
-      {};
+          score:
+            candidate.score,
 
-    const classificationLabel =
-      stock.grade ===
-      'PRIORITY_CANDIDATE'
-        ? '최우선 후보'
-        : stock.grade ===
-            'CHASE_CAUTION'
-          ? '추격 주의'
-          : stock.grade ===
-              'WATCH_CANDIDATE'
-            ? '관심 종목'
-            : '제외';
+          maxScore:
+            candidate.maxScore,
 
-    const factualInput = {
-      종목정보: {
-        종목코드:
-          stock.symbol,
+          grade:
+            candidate.grade,
 
-        종목명:
-          stock.stockName,
+          passedConditions:
+            candidate.passedConditions,
 
-        현재가:
-          stock.currentPrice,
+          failedConditions:
+            candidate.failedConditions,
 
-        전일대비:
-          stock.priceChange,
+          strategy:
+            candidate.strategy,
 
-        등락률:
-          stock.changeRate
-      },
+          riskReward:
+            candidate.riskReward,
 
-      후보조건: {
-        조건충족개수:
-          stock.score,
+          newsAssessment:
+            candidate.newsAssessment,
 
-        전체조건개수:
-          stock.maxScore,
+          suppliedNews:
+            Array.isArray(
+              candidate.news
+            )
+              ? candidate.news
+                  .slice(
+                    0,
+                    5
+                  )
+                  .map(
+                    (
+                      item,
+                      index
+                    ) => ({
+                      index:
+                        index + 1,
 
-        충족조건:
-          stock.passedConditions,
+                      title:
+                        item.title ||
+                        null,
 
-        미충족조건:
-          stock.failedConditions,
-        최종분류:
-          classificationLabel
-      },
+                      publisher:
+                        item.publisher ||
+                        null,
 
-      기술및수급: {
-        '5일이동평균선':
-          stock.strategy?.ma5,
+                      date:
+                        item.date ||
+                        null,
 
-        '20일이동평균선':
-          stock.strategy?.ma20,
+                      summary:
+                        item.summary ||
+                        null,
 
-        '최근20일최고가':
-          stock.strategy
-            ?.recentHigh20,
-
-        '최근20일최저가':
-          stock.strategy
-            ?.recentLow20,
-
-        거래량비율:
-          stock.strategy
-            ?.volumeRatio,
-
-        외국인순매수:
-          stock.strategy
-            ?.foreignerNet,
-
-        기관순매수:
-          stock.strategy
-            ?.institutionNet,
-
-        외국인기관합산순매수:
-          stock.strategy
-            ?.netSupplyTotal,
-
-        진입고려가격:
-          stock.strategy
-            ?.entryPrice,
-
-        목표가격:
-          stock.strategy
-            ?.takeProfitPrice,
-
-        손절기준가격:
-          stock.strategy
-            ?.stopLossPrice
-      },
-
-      손익비분석: {
-        계산가능:
-          riskReward.available ===
-          true
-            ? '가능'
-            : '불가',
-
-        현재가에서목표가까지남은금액:
-          riskReward
-            .currentUpsideAmount,
-
-        현재가에서목표가까지남은상승여력퍼센트:
-          riskReward
-            .currentUpsidePercent,
-        현재가에서손절가까지위험금액:
-          riskReward
-            .currentDownsideAmount,
-
-        현재가에서손절가까지위험퍼센트:
-          riskReward
-            .currentDownsidePercent,
-
-        현재가기준손익비:
-          riskReward
-            .currentRiskRewardRatio,
-
-        진입고려가에서목표가까지기대수익금액:
-          riskReward
-            .entryRewardAmount,
-
-        진입고려가기준기대수익퍼센트:
-          riskReward
-            .entryRewardPercent,
-
-        진입고려가에서손절가까지위험금액:
-          riskReward
-            .entryRiskAmount,
-
-        진입고려가기준위험퍼센트:
-          riskReward
-            .entryRiskPercent,
-
-        진입고려가기준손익비:
-          riskReward
-            .entryRiskRewardRatio,
-
-        현재가에서기대수익이위험보다크거나같은지:
-          riskReward
-            .rewardGreaterThanRisk ===
-          true
-            ? '예'
-            : riskReward
-                  .rewardGreaterThanRisk ===
-                false
-              ? '아니오'
-              : '판단 불가',
-
-        현재가가목표가보다낮은지:
-          riskReward
-            .currentPriceBelowTarget ===
-          true
-            ? '예'
-            : riskReward
-                  .currentPriceBelowTarget ===
-                false
-              ? '아니오'
-              : '판단 불가',
-
-        손익비판정이유:
-          riskReward.reason
-      },
-
-      최신뉴스:
-        newsInput
-    };
+                      url:
+                        item.url ||
+                        null
+                    })
+                  )
+              : []
+        })
+      );
 
     return `
-너는 K-Stock AI의 추천 후보 설명 전용 AI다.
+너는 K-Stock AI 추천 종목 설명 AI다.
 
-이 종목은 이미 백엔드가 실제 데이터로
-추세, 거래량, 수급, 가격 구조와 손익비를 계산한 결과다.
+중요:
+최종 추천 등급은 backend가 이미 결정했다.
 
-너의 역할은 종목을 새로 추천하거나 계산하는 것이 아니다.
+너는 추천 등급이나 가격을 변경할 권한이 없다.
 
-오직 아래에 제공된 실제 데이터와 뉴스만 읽고,
-왜 현재 분류가 내려졌는지 사용자가 이해하기 쉽게 설명한다.
+반드시 아래 제공 데이터만 사용한다.
 
-[절대 규칙]
+절대 규칙:
 
-1. 입력 데이터에 없는 사실을 절대 만들어내지 마라.
+1. 새로운 종목을 추가하지 않는다.
+2. suppliedNews에 없는 뉴스를 만들지 않는다.
+3. 제공되지 않은 공시를 만들지 않는다.
+4. 제공되지 않은 기업 이벤트를 만들지 않는다.
+5. 현재가를 변경하지 않는다.
+6. 진입 고려가를 변경하지 않는다.
+7. 목표가를 변경하지 않는다.
+8. 손절가를 변경하지 않는다.
+9. score를 변경하지 않는다.
+10. grade를 변경하지 않는다.
+11. 손익비를 임의로 변경하지 않는다.
+12. 투자 수익을 보장하지 않는다.
+13. JSON 이외의 텍스트를 출력하지 않는다.
 
-2. 새로운 진입가, 목표가, 손절가를 계산하지 마라.
+backend가 계산한 실제 후보 데이터:
 
-3. 제공된 진입 고려 가격, 목표 가격, 손절 기준 가격을 절대 변경하지 마라.
+${JSON.stringify(
+  safeCandidates,
+  null,
+  2
+)}
 
-4. 추세·거래량·수급 점수를 변경하지 마라.
-
-5. 백엔드의 최종 분류를 절대 변경하지 마라.
-
-6. "최우선 후보"가 입력되었다면 그대로 최우선 후보라고 설명한다.
-
-7. "추격 주의"가 입력되었다면
-손익비가 불리한 점을 반드시 사용자에게 명확히 설명한다.
-
-8. 손익비, 상승여력, 위험률을 새로 계산하지 마라.
-
-9. 입력에 제공된 손익비와 퍼센트만 사용한다.
-
-10. 현재가 기준 손익비가 1보다 낮으면
-남은 기대수익보다 손절 위험이 더 큰 상태라는 점을 설명한다.
-
-11. 현재가가 목표가에 매우 가까운 경우,
-추세·거래량·수급이 모두 좋아도
-추격 위험이 있을 수 있다는 점을 설명한다.
-
-12. 뉴스에 없는 내용을 추측해서 사실처럼 말하지 마라.
-
-13. 미래 주가 상승 또는 하락을 확정적으로 예측하지 마라.
-14. "무조건 매수", "강력 매수", "지금 사야 한다" 같은 직접적인 투자 지시를 하지 마라.
-
-15. 제공된 최신 뉴스에 부정적 내용이 있다면 위험 요인에 반영한다.
-
-16. 뉴스가 부족하거나 종목과 직접 관련 없는 뉴스뿐이면
-"뉴스만으로 추가 판단하기 어렵습니다."
-라고 명확하게 설명한다.
-
-17. 숫자를 언급할 때는 제공된 숫자만 사용한다.
-
-18. 개발자용 변수명과 코드 표현을 절대 보여주지 마라.
-
-다음 단어는 최종 결과에서 사용하지 마라:
-
-trendPassed
-volumePassed
-supplyPassed
-signal
-BUY_CANDIDATE
-WAIT
-PRIORITY_CANDIDATE
-CHASE_CAUTION
-WATCH_CANDIDATE
-EXCLUDED
-true
-false
-null
-entryPrice
-takeProfitPrice
-stopLossPrice
-ma5
-ma20
-currentRiskRewardRatio
-entryRiskRewardRatio
-
-19. 위 표현은 자연스러운 한국어로 바꿔 설명한다.
-
-20. 모든 설명은 한국어로 작성한다.
-
-21. 마크다운 없이 JSON만 반환한다.
-
-[출력 형식]
+각 후보에 대해 다음 형식으로 반환한다.
 
 {
-  "candidateSummary": "현재 후보 상태와 최종 분류 이유를 2~3문장으로 설명",
-  "candidateLevel": "최우선 후보 또는 추격 주의 또는 관심 종목",
-  "newsSentiment": "긍정 또는 중립 또는 주의",
-  "positiveFactors": [
-    "실제 데이터 또는 뉴스에서 확인되는 긍정 요인"
-  ],
-  "riskFactors": [
-    "실제 데이터, 뉴스 또는 손익비에서 확인되는 위험 요인"
-  ],
-  "riskRewardExplanation": "현재가 기준 상승여력, 위험, 손익비가 의미하는 바를 제공된 값만 사용해 설명",
-  "newsSummary": "최신 뉴스에서 확인되는 핵심 내용만 설명",
-  "strategyComment": "진입 고려 가격, 목표 가격, 손절 기준 가격의 의미를 설명하되 값을 변경하지 말 것",
-  "finalComment": "현재 후보를 볼 때 가장 중요하게 확인할 점을 짧게 설명"
+  "recommendations": [
+    {
+      "symbol": "6자리 종목코드",
+      "stockName": "종목명",
+      "grade": "backend grade 그대로",
+      "summary": "왜 현재 등급인지 간단한 종합 설명",
+      "chartExplanation": "차트 조건 설명",
+      "volumeExplanation": "거래량 조건 설명",
+      "supplyDemandExplanation": "외국인/기관 수급 설명",
+      "newsExplanation": "suppliedNews에 있는 기사만 이용한 설명",
+      "riskRewardExplanation": "현재가 기준 손익비 설명",
+      "positiveFactors": [
+        "실제 제공 데이터에 근거한 긍정 요인"
+      ],
+      "riskFactors": [
+        "실제 제공 데이터에 근거한 위험 요인"
+      ],
+      "newsEvidence": [
+        {
+          "title": "suppliedNews에 실제 존재하는 기사 제목",
+          "date": "기사 날짜 또는 null",
+          "url": "기사 URL 또는 null"
+        }
+      ]
+    }
+  ]
 }
 
-[실제 입력 데이터]
+한국어로 작성한다.
+`.trim();
+  };
 
-${JSON.stringify(factualInput)}
-    `.trim();
+// ========================================
+// RECOMMENDATION AI ANALYSIS
+// ========================================
+
+const analyzeRecommendationsWithGemini =
+  async (candidates) => {
+    if (
+      !Array.isArray(
+        candidates
+      ) ||
+      candidates.length === 0
+    ) {
+      return {
+        recommendations:
+          [],
+
+        modelUsed:
+          null
+      };
+    }
+
+    const limitedCandidates =
+      candidates.slice(
+        0,
+        RECOMMENDATION_AI_LIMIT
+      );
+
+    const prompt =
+      buildRecommendationGeminiPrompt(
+        limitedCandidates
+      );
+
+    const geminiResult =
+      await callGeminiPromptWithRetry(
+        prompt
+      );
+
+    const rawRecommendations =
+      Array.isArray(
+        geminiResult.analysis
+          ?.recommendations
+      )
+        ? geminiResult.analysis
+            .recommendations
+        : [];
+
+    // ====================================
+    // GEMINI OUTPUT VALIDATION
+    // ====================================
+    // AI가 후보에 없던 종목을 추가하거나
+    // grade를 바꾸지 못하게 backend에서 재검증
+
+    const validated =
+      limitedCandidates.map(
+        (candidate) => {
+          const aiItem =
+            rawRecommendations.find(
+              (item) =>
+                String(
+                  item?.symbol ||
+                    ''
+                ) ===
+                candidate.symbol
+            );
+
+          if (!aiItem) {
+            return {
+              symbol:
+                candidate.symbol,
+
+              stockName:
+                candidate.stockName,
+
+              grade:
+                candidate.grade,
+
+              summary:
+                null,
+
+              chartExplanation:
+                null,
+
+              volumeExplanation:
+                null,
+
+              supplyDemandExplanation:
+                null,
+
+              newsExplanation:
+                null,
+
+              riskRewardExplanation:
+                null,
+
+              positiveFactors:
+                [],
+
+              riskFactors:
+                [],
+
+              newsEvidence:
+                []
+            };
+          }
+
+          const allowedNews =
+            Array.isArray(
+              candidate.news
+            )
+              ? candidate.news
+              : [];
+
+          const validatedEvidence =
+            Array.isArray(
+              aiItem.newsEvidence
+            )
+              ? aiItem.newsEvidence
+                  .filter(
+                    (evidence) =>
+                      allowedNews.some(
+                        (news) =>
+                          news.title &&
+                          evidence?.title ===
+                            news.title
+                      )
+                  )
+                  .map(
+                    (evidence) => {
+                      const source =
+                        allowedNews.find(
+                          (news) =>
+                            news.title ===
+                            evidence.title
+                        );
+
+                      return {
+                        title:
+                          source?.title ||
+                          null,
+
+                        date:
+                          source?.date ||
+                          null,
+
+                        url:
+                          source?.url ||
+                          null
+                      };
+                    }
+                  )
+              : [];
+
+          return {
+            symbol:
+              candidate.symbol,
+
+            stockName:
+              candidate.stockName,
+
+            // AI 결과가 아니라 backend 값 강제 사용
+            grade:
+              candidate.grade,
+
+            summary:
+              typeof aiItem.summary ===
+              'string'
+                ? aiItem.summary
+                : null,
+
+            chartExplanation:
+              typeof aiItem.chartExplanation ===
+              'string'
+                ? aiItem.chartExplanation
+                : null,
+
+            volumeExplanation:
+              typeof aiItem.volumeExplanation ===
+              'string'
+                ? aiItem.volumeExplanation
+                : null,
+
+            supplyDemandExplanation:
+              typeof aiItem.supplyDemandExplanation ===
+              'string'
+                ? aiItem.supplyDemandExplanation
+                : null,
+
+            newsExplanation:
+              typeof aiItem.newsExplanation ===
+              'string'
+                ? aiItem.newsExplanation
+                : null,
+
+            riskRewardExplanation:
+              typeof aiItem.riskRewardExplanation ===
+              'string'
+                ? aiItem.riskRewardExplanation
+                : null,
+
+            positiveFactors:
+              Array.isArray(
+                aiItem.positiveFactors
+              )
+                ? aiItem.positiveFactors
+                    .filter(
+                      (item) =>
+                        typeof item ===
+                        'string'
+                    )
+                    .slice(
+                      0,
+                      5
+                    )
+                : [],
+
+            riskFactors:
+              Array.isArray(
+                aiItem.riskFactors
+              )
+                ? aiItem.riskFactors
+                    .filter(
+                      (item) =>
+                        typeof item ===
+                        'string'
+                    )
+                    .slice(
+                      0,
+                      5
+                    )
+                : [],
+
+            newsEvidence:
+              validatedEvidence
+          };
+        }
+      );
+
+    return {
+      recommendations:
+        validated,
+
+      modelUsed:
+        geminiResult.modelUsed,
+
+      attemptUsed:
+        geminiResult.attemptUsed
+    };
   };
 // ========================================
-// HEALTH
+// API - HEALTH CHECK
 // ========================================
 
 app.get(
   '/api/health',
   (req, res) => {
-    res
-      .status(200)
-      .json({
-        status: 'ok'
-      });
+    res.json({
+      ok: true,
+      service: 'K-Stock AI Backend',
+      geminiConfigured:
+        Boolean(GEMINI_API_KEY),
+      timestamp:
+        new Date().toISOString()
+    });
   }
 );
 
 // ========================================
-// STOCK SEARCH
+// API - STOCK SEARCH
 // ========================================
 
 app.get(
   '/api/stock/search',
   async (req, res) => {
-    const query =
-      req.query.query;
-
-    if (
-      !query ||
-      !query.trim()
-    ) {
-      return res
-        .status(400)
-        .json({
-          symbol: null,
-          name: null,
-          error:
-            'Query parameter is required'
-        });
-    }
-
-    const cleanQuery =
-      query.trim();
-
     try {
-      if (
-        validateSymbol(
-          cleanQuery
-        )
-      ) {
-        const basicResponse =
-          await fetch(
-            `https://m.stock.naver.com/api/stock/${cleanQuery}/basic`,
-            {
-              headers:
-                NAVER_HEADERS
-            }
-          );
+      const query =
+        String(
+          req.query.query || ''
+        ).trim();
 
-        if (
-          !basicResponse.ok
-        ) {
-          return res
-            .status(200)
-            .json({
-              symbol: null,
-              name: null
-            });
-        }
-
-        const basicData =
-          await basicResponse.json();
-
-        return res
-          .status(200)
-          .json({
-            symbol:
-              cleanQuery,
-
-            name:
-              basicData.stockName ||
-              cleanQuery
-          });
+      if (!query) {
+        return res.status(400).json({
+          error:
+            '검색어를 입력해주세요.'
+        });
       }
+
+      // 6자리 종목코드가 직접 입력된 경우
+      if (validateSymbol(query)) {
+        try {
+          const quote =
+            await fetchStockQuoteData(
+              query
+            );
+
+          return res.json({
+            symbol:
+              query,
+
+            stockName:
+              quote.stockName,
+
+            source:
+              'Naver stock data'
+          });
+        } catch (error) {
+          return res.status(404).json({
+            error:
+              '해당 종목코드를 찾을 수 없습니다.'
+          });
+        }
+      }
+
+      const searchUrl =
+        `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
+          query
+        )}&target=stock`;
+
       const response =
         await fetch(
-          `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
-            cleanQuery
-          )}&q_enc=utf-8&target=stock`,
+          searchUrl,
           {
-            headers: {
-              ...NAVER_HEADERS,
-
-              Referer:
-                'https://finance.naver.com'
-            }
+            headers:
+              NAVER_HEADERS
           }
         );
 
-      if (
-        !response.ok
-      ) {
+      if (!response.ok) {
         throw new Error(
-          `Failed to search stock: HTTP ${response.status}`
+          `Stock search failed: HTTP ${response.status}`
         );
       }
 
@@ -3244,238 +3612,158 @@ app.get(
       const matched =
         findMatchingStock(
           data,
-          cleanQuery
+          query
         );
 
-      if (
-        !matched
-      ) {
-        return res
-          .status(200)
-          .json({
-            symbol: null,
-            name: null
-          });
+      if (!matched) {
+        return res.status(404).json({
+          error:
+            '일치하는 국내주식 종목을 찾을 수 없습니다.'
+        });
       }
 
-      return res
-        .status(200)
-        .json(
-          matched
-        );
+      return res.json({
+        symbol:
+          matched.symbol,
+
+        stockName:
+          matched.name,
+
+        source:
+          'Naver stock search data'
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error searching stock for ${cleanQuery}:`,
-        error.message
+        '[K-Stock AI] Search API error:',
+        error
       );
 
-      return res
-        .status(500)
-        .json({
-          symbol: null,
-          name: null,
-          error:
-            'Failed to search stock'
-        });
+      return res.status(500).json({
+        error:
+          '종목 검색 중 오류가 발생했습니다.'
+      });
     }
   }
 );
 
 // ========================================
-// STOCK QUOTE
+// API - STOCK QUOTE
 // ========================================
 
 app.get(
   '/api/stock/quote',
   async (req, res) => {
-    const symbol =
-      req.query.symbol;
-
-    if (!symbol) {
-      return res
-        .status(400)
-        .json({
-          symbol: null,
-          stockName: null,
-          currentPrice: null,
-          priceChange: null,
-          changeRate: null,
-          volume: null,
-          tradingValue: null,
-          highPrice: null,
-          lowPrice: null,
-          foreignerNet: null,
-          institutionNet: null,
-          foreignerBuy: null,
-          foreignerSell: null,
-          institutionBuy: null,
-          institutionSell: null,
-          supplyDate: null,
-          error:
-            'Symbol query parameter is required'
-        });
-    }
-
-    if (
-      !validateSymbol(
-        symbol
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          symbol,
-          stockName: null,
-          currentPrice: null,
-          priceChange: null,
-          changeRate: null,
-          volume: null,
-          tradingValue: null,
-          highPrice: null,
-          lowPrice: null,
-          foreignerNet: null,
-          institutionNet: null,
-          foreignerBuy: null,
-          foreignerSell: null,
-          institutionBuy: null,
-          institutionSell: null,
-          supplyDate: null,
-          error:
-            'Symbol must be a 6-digit Korean stock code'
-        });
-    }
-
     try {
+      const symbol =
+        String(
+          req.query.symbol || ''
+        ).trim();
+
+      if (!validateSymbol(symbol)) {
+        return res.status(400).json({
+          error:
+            '올바른 6자리 종목코드가 필요합니다.'
+        });
+      }
+
       const quote =
         await fetchStockQuoteData(
           symbol
         );
 
-      return res
-        .status(200)
-        .json(
-          quote
-        );
+      return res.json({
+        ...quote,
+
+        source:
+          'Naver stock data',
+
+        fetchedAt:
+          new Date().toISOString()
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error fetching stock quote for ${symbol}:`,
-        error.message
+        '[K-Stock AI] Quote API error:',
+        error
       );
-      return res
-        .status(500)
-        .json({
-          symbol,
-          stockName: null,
-          currentPrice: null,
-          priceChange: null,
-          changeRate: null,
-          volume: null,
-          tradingValue: null,
-          highPrice: null,
-          lowPrice: null,
-          foreignerNet: null,
-          institutionNet: null,
-          foreignerBuy: null,
-          foreignerSell: null,
-          institutionBuy: null,
-          institutionSell: null,
-          supplyDate: null,
-          error:
-            'Failed to fetch real stock quote'
-        });
+
+      return res.status(500).json({
+        error:
+          '주가 데이터를 불러오지 못했습니다.'
+      });
     }
   }
 );
 
 // ========================================
-// STOCK CHART
+// API - STOCK CHART
 // ========================================
 
 app.get(
   '/api/stock/chart',
   async (req, res) => {
-    const symbol =
-      req.query.symbol;
-
-    const timeframe =
-      (
-        req.query.timeframe ||
-        '1M'
-      ).toUpperCase();
-    if (!symbol) {
-      return res
-        .status(400)
-        .json({
-          symbol: null,
-          timeframe,
-          supported: false,
-          chart: [],
-          error:
-            'Symbol query parameter is required'
-        });
-    }
-
-    if (
-      !validateSymbol(
-        symbol
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          symbol,
-          timeframe,
-          supported: false,
-          chart: [],
-          error:
-            'Symbol must be a 6-digit Korean stock code'
-        });
-    }
-
-    if (
-      timeframe ===
-      '1D'
-    ) {
-      return res
-        .status(200)
-        .json({
-          symbol,
-          timeframe,
-          supported: false,
-          chart: []
-        });
-    }
-
-    let pageSize = 30;
-
-    switch (
-      timeframe
-    ) {
-      case '1W':
-        pageSize = 7;
-        break;
-
-      case '1M':
-        pageSize = 30;
-        break;
-
-      case '3M':
-        pageSize = 90;
-        break;
-
-      case '1Y':
-        pageSize = 365;
-        break;
-
-      case '5Y':
-        pageSize = 1825;
-        break;
-
-      default:
-        pageSize = 30;
-    }
-
     try {
+      const symbol =
+        String(
+          req.query.symbol || ''
+        ).trim();
+
+      const timeframe =
+        String(
+          req.query.timeframe ||
+            '1M'
+        )
+          .trim()
+          .toUpperCase();
+
+      if (!validateSymbol(symbol)) {
+        return res.status(400).json({
+          error:
+            '올바른 6자리 종목코드가 필요합니다.'
+        });
+      }
+
+      const timeframeMap = {
+        '1W': 7,
+        '1M': 30,
+        '3M': 90,
+        '6M': 180,
+        '1Y': 365
+      };
+
+      if (
+        timeframe ===
+        '1D'
+      ) {
+        return res.status(400).json({
+          error:
+            '현재 차트 데이터는 일봉 기준이며 1D 분봉 차트는 아직 지원하지 않습니다.'
+        });
+      }
+
+      const requestedDays =
+        timeframeMap[
+          timeframe
+        ];
+
+      if (!requestedDays) {
+        return res.status(400).json({
+          error:
+            '지원하지 않는 차트 기간입니다.'
+        });
+      }
+
+      // 거래일 기준 여유분을 포함해서 요청
+      const pageSize =
+        timeframe === '1Y'
+          ? 300
+          : timeframe === '6M'
+            ? 150
+            : timeframe === '3M'
+              ? 80
+              : timeframe === '1M'
+                ? 30
+                : 10;
+
       const response =
         await fetch(
           `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${pageSize}&page=1`,
@@ -3485,330 +3773,280 @@ app.get(
           }
         );
 
-      if (
-        !response.ok
-      ) {
+      if (!response.ok) {
         throw new Error(
-          `Failed to fetch stock chart data: HTTP ${response.status}`
+          `Chart fetch failed: HTTP ${response.status}`
         );
       }
 
-      const data =
+      const rawData =
         await response.json();
 
       if (
         !Array.isArray(
-          data
+          rawData
         )
       ) {
-        return res
-          .status(200)
-          .json({
-            symbol,
-            timeframe,
-            supported: true,
-            chart: []
-          });
+        throw new Error(
+          'Invalid chart response'
+        );
       }
 
-      const chartData =
-        data.map(
-          (item) => ({
-            date:
-              item.localTradedAt ||
-              item.bizdate ||
-              null,
+      const descendingRows =
+        rawData
+          .map(
+            (item) => ({
+              date:
+                item.localTradedAt ||
+                item.bizdate ||
+                null,
 
-            open:
-              parseNumber(
-                item.openPrice
-              ),
+              price:
+                parseNumber(
+                  item.closePrice
+                ),
 
-            high:
-              parseNumber(
-                item.highPrice
-              ),
+              open:
+                parseNumber(
+                  item.openPrice
+                ),
 
-            low:
-              parseNumber(
-                item.lowPrice
-              ),
+              high:
+                parseNumber(
+                  item.highPrice
+                ),
 
-            close:
-              parseNumber(
-                item.closePrice
-              ),
+              low:
+                parseNumber(
+                  item.lowPrice
+                ),
 
-            volume:
-              parseNumber(
-                item.accumulatedTradingVolume ||
-                item.volume
+              volume:
+                parseNumber(
+                  item.accumulatedTradingVolume ||
+                  item.volume
+                )
+            })
+          )
+          .filter(
+            (item) =>
+              item.date &&
+              Number.isFinite(
+                item.price
               )
-          })
+          );
+
+      // Naver 데이터는 최신 → 과거 순서이므로
+      // MA 계산 후 차트 표시용으로 과거 → 최신 순서로 변경
+      const withMovingAverage =
+        descendingRows.map(
+          (row, index) => {
+            const ma5Rows =
+              descendingRows.slice(
+                index,
+                index + 5
+              );
+
+            const ma20Rows =
+              descendingRows.slice(
+                index,
+                index + 20
+              );
+
+            const ma5 =
+              ma5Rows.length === 5
+                ? average(
+                    ma5Rows.map(
+                      (item) =>
+                        item.price
+                    )
+                  )
+                : null;
+
+            const ma20 =
+              ma20Rows.length === 20
+                ? average(
+                    ma20Rows.map(
+                      (item) =>
+                        item.price
+                    )
+                  )
+                : null;
+
+            return {
+              ...row,
+              ma5,
+              ma20
+            };
+          }
         );
 
-      chartData.reverse();
-      return res
-        .status(200)
-        .json({
-          symbol,
-          timeframe,
-          supported: true,
-          chart:
-            chartData
-        });
+      const chartData =
+        [...withMovingAverage]
+          .reverse();
+
+      return res.json({
+        symbol,
+        timeframe,
+
+        chart:
+          chartData,
+
+        source:
+          'Naver stock daily price data',
+
+        fetchedAt:
+          new Date().toISOString()
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error fetching stock chart for ${symbol}:`,
-        error.message
+        '[K-Stock AI] Chart API error:',
+        error
       );
 
-      return res
-        .status(500)
-        .json({
-          symbol,
-          timeframe,
-          supported: false,
-          chart: [],
-          error:
-            'Failed to fetch real stock chart data'
-        });
+      return res.status(500).json({
+        error:
+          '차트 데이터를 불러오지 못했습니다.'
+      });
     }
   }
 );
 
 // ========================================
-// STOCK NEWS
+// API - STOCK NEWS
 // ========================================
 
 app.get(
   '/api/stock/news',
   async (req, res) => {
-    const query =
-      req.query.query ||
-      req.query.symbol;
-
-    if (
-      !query ||
-      !query.trim()
-    ) {
-      return res
-        .status(400)
-        .json({
-          query: null,
-          news: [],
-          error:
-            'Query or symbol parameter is required'
-        });
-    }
-
-    const cleanQuery =
-      query.trim();
-
     try {
-      let targetSymbol =
-        null;
+      let symbol =
+        String(
+          req.query.symbol || ''
+        ).trim();
+
+      const query =
+        String(
+          req.query.query || ''
+        ).trim();
 
       if (
-        validateSymbol(
-          cleanQuery
+        !validateSymbol(
+          symbol
         )
       ) {
-        targetSymbol =
-          cleanQuery;
-      } else {
-        const acResponse =
-          await fetch(
-            `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
-              cleanQuery
-            )}&q_enc=utf-8&target=stock`,
-            {
-              headers: {
-                ...NAVER_HEADERS,
+        if (!query) {
+          return res.status(400).json({
+            error:
+              '종목코드 또는 종목명이 필요합니다.'
+          });
+        }
 
-                Referer:
-                  'https://finance.naver.com'
-              }
-            }
-          );
         if (
-          acResponse.ok
+          validateSymbol(
+            query
+          )
         ) {
-          const acData =
-            await acResponse.json();
-
-          const matched =
-            findMatchingStock(
-              acData,
-              cleanQuery
+          symbol =
+            query;
+        } else {
+          const searchResponse =
+            await fetch(
+              `https://ac.stock.naver.com/ac?q=${encodeURIComponent(
+                query
+              )}&target=stock`,
+              {
+                headers:
+                  NAVER_HEADERS
+              }
             );
 
           if (
-            matched
+            !searchResponse.ok
           ) {
-            targetSymbol =
-              matched.symbol;
+            throw new Error(
+              `News stock search failed: HTTP ${searchResponse.status}`
+            );
           }
+
+          const searchData =
+            await searchResponse.json();
+
+          const matched =
+            findMatchingStock(
+              searchData,
+              query
+            );
+
+          if (!matched) {
+            return res.status(404).json({
+              error:
+                '뉴스를 조회할 종목을 찾지 못했습니다.'
+            });
+          }
+
+          symbol =
+            matched.symbol;
         }
       }
-      if (
-        !targetSymbol
-      ) {
-        return res
-          .status(200)
-          .json({
-            query:
-              cleanQuery,
 
-            news:
-              []
-          });
-      }
-
-      const newsList =
+      const news =
         await fetchStockNewsBySymbol(
-          targetSymbol
+          symbol
         );
 
-      return res
-        .status(200)
-        .json({
-          query:
-            cleanQuery,
+      const newsAssessment =
+        assessLatestNews(
+          news
+        );
 
-          news:
-            newsList
-        });
+      return res.json({
+        symbol,
+
+        news,
+
+        newsAssessment,
+
+        source:
+          'Naver stock news data',
+
+        fetchedAt:
+          new Date().toISOString()
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error fetching news for ${cleanQuery}:`,
-        error.message
+        '[K-Stock AI] News API error:',
+        error
       );
 
-      return res
-        .status(500)
-        .json({
-          query:
-            cleanQuery,
-
-          news:
-            [],
-
-          error:
-            'Failed to fetch real stock news'
-        });
+      return res.status(500).json({
+        error:
+          '최신 뉴스를 불러오지 못했습니다.'
+      });
     }
   }
 );
 
 // ========================================
-// STRATEGY API
+// API - STOCK STRATEGY
 // ========================================
 
 app.get(
   '/api/stock/strategy',
   async (req, res) => {
-    const symbol =
-      req.query.symbol;
-
-    const errorResult =
-      (message) => ({
-        symbol:
-          symbol ||
-          null,
-
-        currentPrice:
-          null,
-
-        ma5:
-          null,
-
-        ma20:
-          null,
-
-        recentHigh20:
-          null,
-
-        recentLow20:
-          null,
-
-        nearestSupport:
-          null,
-        nearestResistance:
-          null,
-
-        currentVolume:
-          null,
-
-        averageVolume20:
-          null,
-
-        volumeRatio:
-          null,
-
-        foreignerNet:
-          null,
-
-        institutionNet:
-          null,
-
-        netSupplyTotal:
-          null,
-        trendPassed:
-          null,
-
-        volumePassed:
-          null,
-
-        supplyPassed:
-          null,
-
-        signal:
-          'INSUFFICIENT_DATA',
-
-        entryPrice:
-          null,
-
-        takeProfitPrice:
-          null,
-
-        stopLossPrice:
-          null,
-        dataPoints:
-          0,
-
-        ...(message
-          ? {
-              error:
-                message
-            }
-          : {})
-      });
-
-    if (!symbol) {
-      return res
-        .status(400)
-        .json(
-          errorResult(
-            'Symbol query parameter is required'
-          )
-        );
-    }
-    if (
-      !validateSymbol(
-        symbol
-      )
-    ) {
-      return res
-        .status(400)
-        .json(
-          errorResult(
-            'Symbol must be a 6-digit Korean stock code'
-          )
-        );
-    }
-
     try {
+      const symbol =
+        String(
+          req.query.symbol || ''
+        ).trim();
+
+      if (!validateSymbol(symbol)) {
+        return res.status(400).json({
+          error:
+            '올바른 6자리 종목코드가 필요합니다.'
+        });
+      }
+
       const strategy =
         await calculateStrategy(
           symbol
@@ -3819,481 +4057,57 @@ app.get(
           strategy
         );
 
-      return res
-        .status(200)
-        .json({
-          ...strategy,
+      return res.json({
+        ...strategy,
 
-          riskReward
-        });
+        riskReward,
+
+        source:
+          'Calculated from retrieved stock price, volume and supply-demand data',
+
+        fetchedAt:
+          new Date().toISOString()
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] Error calculating strategy for ${symbol}:`,
-        error.message
+        '[K-Stock AI] Strategy API error:',
+        error
       );
 
-      return res
-        .status(500)
-        .json(
-          errorResult(
-            'Failed to calculate strategy'
-          )
-        );
-    }
-  }
-);
-
-// ========================================
-// 30 STOCK RECOMMENDATION API
-// ========================================
-
-app.get(
-  '/api/stock/recommendations',
-  async (req, res) => {
-    try {
-      const {
-        validResults,
-        ranked
-      } =
-        await scanRecommendationUniverse();
-      const recommendations =
-        ranked.filter(
-          (item) =>
-            item.score >= 2
-        );
-
-      const priorityCandidates =
-        recommendations.filter(
-          (item) =>
-            item.grade ===
-            'PRIORITY_CANDIDATE'
-        );
-
-      const chaseCautionCandidates =
-        recommendations.filter(
-          (item) =>
-            item.grade ===
-            'CHASE_CAUTION'
-        );
-
-      const watchCandidates =
-        recommendations.filter(
-          (item) =>
-            item.grade ===
-            'WATCH_CANDIDATE'
-        );
-
-      return res
-        .status(200)
-        .json({
-          generatedAt:
-            new Date()
-              .toISOString(),
-
-          universeSize:
-            RECOMMENDATION_WATCHLIST
-              .length,
-
-          successfulCount:
-            validResults.length,
-
-          recommendationCount:
-            recommendations.length,
-
-          priorityCandidateCount:
-            priorityCandidates.length,
-
-          chaseCautionCount:
-            chaseCautionCandidates.length,
-
-          watchCandidateCount:
-            watchCandidates.length,
-
-          rule:
-            '추세·거래량·수급 3개 조건을 먼저 검사하고, 3개 모두 충족한 종목은 현재가 기준 목표가까지의 기대수익과 손절가까지의 위험을 비교해 최우선 후보 또는 추격 주의로 분류합니다. 2개 조건 충족 종목은 관심 종목으로 표시합니다.',
-
-          riskRewardRule:
-            '현재가 기준 손익비 = (목표가 - 현재가) ÷ (현재가 - 손절가). 손익비가 1 이상이고 현재가가 목표가보다 낮은 경우에만 최우선 후보로 분류합니다.',
-
-          recommendations,
-
-          priorityCandidates,
-          chaseCautionCandidates,
-
-          watchCandidates,
-
-          allResults:
-            ranked
-        });
-    } catch (error) {
-      console.error(
-        '[K-Stock AI] Recommendation API failed:',
-        error.message
-      );
-
-      return res
-        .status(500)
-        .json({
-          generatedAt:
-            new Date()
-              .toISOString(),
-
-          universeSize:
-            RECOMMENDATION_WATCHLIST
-              .length,
-
-          successfulCount:
-            0,
-
-          recommendationCount:
-            0,
-
-          priorityCandidateCount:
-            0,
-
-          chaseCautionCount:
-            0,
-
-          watchCandidateCount:
-            0,
-
-          recommendations:
-            [],
-          priorityCandidates:
-            [],
-
-          chaseCautionCandidates:
-            [],
-
-          watchCandidates:
-            [],
-
-          allResults:
-            [],
-
-          error:
-            'Failed to build stock recommendations'
-        });
+      return res.status(500).json({
+        error:
+          '전략 계산 중 오류가 발생했습니다.'
+      });
     }
   }
 );
 // ========================================
-// AI RECOMMENDATION ANALYSIS
-// ========================================
-
-app.get(
-  '/api/stock/recommendations-ai',
-  async (req, res) => {
-    if (
-      !GEMINI_API_KEY
-    ) {
-      return res
-        .status(503)
-        .json({
-          generatedAt:
-            new Date()
-              .toISOString(),
-
-          aiAvailable:
-            false,
-
-          universeSize:
-            RECOMMENDATION_WATCHLIST
-              .length,
-          analyzedCount:
-            0,
-
-          recommendations:
-            [],
-
-          error:
-            'GEMINI_API_KEY is not configured on the server'
-        });
-    }
-
-    try {
-      const {
-        validResults,
-        ranked
-      } =
-        await scanRecommendationUniverse();
-
-      // =================================
-      // AI 분석 대상
-      //
-      // 1순위: PRIORITY_CANDIDATE
-      // 2순위: CHASE_CAUTION
-      //
-      // 최대 3종목만 Gemini 호출
-      // =================================
-
-      const priorityCandidates =
-        ranked.filter(
-          (item) =>
-            item.grade ===
-              'PRIORITY_CANDIDATE' &&
-            item.strategy
-              ?.signal ===
-              'BUY_CANDIDATE'
-        );
-
-      const chaseCautionCandidates =
-        ranked.filter(
-          (item) =>
-            item.grade ===
-              'CHASE_CAUTION' &&
-            item.strategy
-              ?.signal ===
-              'BUY_CANDIDATE'
-        );
-
-      const aiTargets =
-        [
-          ...priorityCandidates,
-          ...chaseCautionCandidates
-        ].slice(
-          0,
-          RECOMMENDATION_AI_LIMIT
-        );
-
-      const analyzed =
-        await mapWithConcurrency(
-          aiTargets,
-          2,
-          async (stock) => {
-            let news = [];
-            try {
-              news =
-                await fetchStockNewsBySymbol(
-                  stock.symbol
-                );
-            } catch (error) {
-              console.warn(
-                `[K-Stock AI] Recommendation news failed for ${stock.symbol}:`,
-                error.message
-              );
-            }
-
-            try {
-              const prompt =
-                buildRecommendationGeminiPrompt({
-                  stock,
-                  news
-                });
-
-              const aiResult =
-                await callGeminiPromptWithRetry(
-                  prompt
-                );
-
-              return {
-                ...stock,
-
-                newsCount:
-                  news.length,
-
-                news:
-                  news.slice(
-                    0,
-                    10
-                  ),
-
-                aiAvailable:
-                  true,
-
-                modelUsed:
-                  aiResult.modelUsed,
-                attemptUsed:
-                  aiResult.attemptUsed,
-
-                aiAnalysis:
-                  aiResult.analysis
-              };
-            } catch (error) {
-              console.warn(
-                `[K-Stock AI] Recommendation AI analysis failed for ${stock.symbol}:`,
-                error.message
-              );
-
-              return {
-                ...stock,
-
-                newsCount:
-                  news.length,
-
-                news:
-                  news.slice(
-                    0,
-                    10
-                  ),
-
-                aiAvailable:
-                  false,
-
-                modelUsed:
-                  null,
-
-                attemptUsed:
-                  null,
-
-                aiAnalysis:
-                  null,
-
-                aiError:
-                  'AI analysis is temporarily unavailable'
-              };
-            }
-          }
-        );
-
-      return res
-        .status(200)
-        .json({
-          generatedAt:
-            new Date()
-              .toISOString(),
-
-          aiAvailable:
-            true,
-
-          universeSize:
-            RECOMMENDATION_WATCHLIST
-              .length,
-
-          successfulCount:
-            validResults.length,
-
-          priorityCandidateCount:
-            priorityCandidates.length,
-          chaseCautionCount:
-            chaseCautionCandidates.length,
-
-          analyzedCount:
-            analyzed.length,
-
-          aiAnalysisLimit:
-            RECOMMENDATION_AI_LIMIT,
-
-          selectionRule:
-            '추세·거래량·수급을 모두 충족한 종목 중 현재가 기준 손익비가 1 이상이고 현재가가 목표가보다 낮은 종목은 최우선 후보로 분류합니다. 손익비가 불리하거나 목표가에 너무 가까운 종목은 추격 주의로 분류합니다.',
-
-          important:
-            'Gemini는 종목 등급, 손익비, 진입 고려 가격, 목표 가격, 손절 기준 가격을 변경하지 않고 백엔드가 계산한 결과와 실제 뉴스만 설명합니다.',
-
-          recommendations:
-            analyzed
-        });
-    } catch (error) {
-      console.error(
-        '[K-Stock AI] Recommendation AI API failed:',
-        error.message
-      );
-
-      return res
-        .status(500)
-        .json({
-          generatedAt:
-            new Date()
-              .toISOString(),
-
-          aiAvailable:
-            false,
-
-          universeSize:
-            RECOMMENDATION_WATCHLIST
-              .length,
-
-          successfulCount:
-            0,
-
-          priorityCandidateCount:
-            0,
-
-          chaseCautionCount:
-            0,
-
-          analyzedCount:
-            0,
-
-          recommendations:
-            [],
-
-          error:
-            'Failed to build AI recommendation analysis'
-        });
-    }
-  }
-);
-
-// ========================================
-// INDIVIDUAL STOCK AI ANALYSIS
+// API - INDIVIDUAL STOCK AI ANALYSIS
 // ========================================
 
 app.get(
   '/api/stock/ai-analysis',
   async (req, res) => {
-    const symbol =
-      req.query.symbol;
-
-    if (!symbol) {
-      return res
-        .status(400)
-        .json({
-          symbol:
-            null,
-
-          aiAvailable:
-            false,
-
-          analysis:
-            null,
-
-          error:
-            'Symbol query parameter is required'
-        });
-    }
-
-    if (
-      !validateSymbol(
-        symbol
-      )
-    ) {
-      return res
-        .status(400)
-        .json({
-          symbol,
-
-          aiAvailable:
-            false,
-
-          analysis:
-            null,
-
-          error:
-            'Symbol must be a 6-digit Korean stock code'
-        });
-    }
-
-    if (
-      !GEMINI_API_KEY
-    ) {
-      return res
-        .status(503)
-        .json({
-          symbol,
-
-          aiAvailable:
-            false,
-
-          analysis:
-            null,
-
-          error:
-            'GEMINI_API_KEY is not configured on the server'
-        });
-    }
-
     try {
+      const symbol =
+        String(
+          req.query.symbol || ''
+        ).trim();
+
+      if (!validateSymbol(symbol)) {
+        return res.status(400).json({
+          error:
+            '올바른 6자리 종목코드가 필요합니다.'
+        });
+      }
+
+      if (!GEMINI_API_KEY) {
+        return res.status(503).json({
+          error:
+            'Gemini API key가 설정되어 있지 않습니다.'
+        });
+      }
+
       const [
         quote,
         strategy,
@@ -4310,132 +4124,444 @@ app.get(
 
           fetchStockNewsBySymbol(
             symbol
+          ).catch(
+            (error) => {
+              console.warn(
+                `[K-Stock AI] AI analysis news fetch failed for ${symbol}:`,
+                error.message
+              );
+
+              return [];
+            }
           )
         ]);
 
       const result =
-        await callGeminiWithRetryAndFallback({
+        await analyzeStockWithGemini({
           quote,
           strategy,
           news
         });
 
-      return res
-        .status(200)
-        .json({
-          symbol,
+      return res.json({
+        symbol,
 
-          stockName:
-            quote.stockName,
+        stockName:
+          quote.stockName,
 
-          aiAvailable:
-            true,
+        quote,
 
-          modelUsed:
-            result.modelUsed,
+        strategy,
 
-          attemptUsed:
-            result.attemptUsed,
+        riskReward:
+          result.riskReward,
 
-          source: {
-            quote,
+        news,
 
-            strategy,
+        newsAssessment:
+          assessLatestNews(
+            news
+          ),
 
-            riskReward:
-              calculateRiskReward(
-                strategy
-              ),
+        analysis:
+          result.analysis,
 
-            newsCount:
-              news.length
-          },
+        modelUsed:
+          result.modelUsed,
 
-          analysis:
-            result.analysis
-        });
+        attemptUsed:
+          result.attemptUsed,
+
+        fetchedAt:
+          new Date().toISOString()
+      });
     } catch (error) {
       console.error(
-        `[K-Stock AI] AI analysis failed for ${symbol}:`,
-        error.message
+        '[K-Stock AI] AI analysis API error:',
+        error
       );
 
-      if (
-        Array.isArray(
-          error.details
-        )
-      ) {
-        console.error(
-          '[K-Stock AI] Gemini attempts:',
-          JSON.stringify(
-            error.details
+      return res.status(500).json({
+        error:
+          'AI 종합 분석을 완료하지 못했습니다.',
+
+        details:
+          Array.isArray(
+            error?.details
           )
-        );
-      }
-
-      return res
-        .status(503)
-        .json({
-          symbol,
-
-          aiAvailable:
-            false,
-
-          analysis:
-            null,
-
-          error:
-            'AI service is temporarily unavailable. Please try again later.'
-        });
+            ? error.details
+            : undefined
+      });
     }
   }
 );
 
 // ========================================
-// 404 API FALLBACK
+// API - 50 STOCK RECOMMENDATION SCAN
 // ========================================
 
-app.use(
-  '/api',
-  (req, res) => {
-    return res
-      .status(404)
-      .json({
-        error:
-          'API endpoint not found'
+app.get(
+  '/api/stock/recommendations',
+  async (req, res) => {
+    try {
+      const {
+        validResults,
+        ranked
+      } =
+        await scanRecommendationUniverse();
+
+      const priority =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'PRIORITY_CANDIDATE'
+        );
+
+      const chase =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'CHASE_CAUTION'
+        );
+
+      const watch =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'WATCH_CANDIDATE'
+        );
+
+      const excluded =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'EXCLUDED'
+        );
+
+      return res.json({
+        scannedCount:
+          RECOMMENDATION_WATCHLIST.length,
+
+        validCount:
+          validResults.length,
+
+        candidateCount:
+          priority.length +
+          chase.length +
+          watch.length,
+
+        priorityCount:
+          priority.length,
+
+        chaseCount:
+          chase.length,
+
+        watchCount:
+          watch.length,
+
+        excludedCount:
+          excluded.length,
+
+        // 최우선 후보
+        priority,
+
+        // 추격 주의
+        chase,
+
+        // 관심 종목
+        watch,
+
+        // 전체 유효 결과
+        all:
+          ranked,
+
+        criteria: {
+          technicalConditions: [
+            '추세',
+            '거래량',
+            '외국인/기관 수급'
+          ],
+
+          newsCondition:
+            '실제로 조회된 최신 뉴스에서 명확한 주의 신호가 있는지 확인',
+
+          riskRewardCondition:
+            '기술조건과 뉴스 조건 통과 후 현재가 기준 손익비 확인',
+
+          finalOrder:
+            '차트 + 거래량 + 수급 + 최신 뉴스 + 현재가 손익비 → 최종 추천'
+        },
+
+        source:
+          'Retrieved stock price, volume, supply-demand and news data',
+
+        fetchedAt:
+          new Date().toISOString()
       });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] Recommendation API error:',
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          '추천 종목 스캔 중 오류가 발생했습니다.'
+      });
+    }
   }
 );
 
 // ========================================
-// SERVER START
+// API - RECOMMENDATION AI EXPLANATION
+// ========================================
+
+app.get(
+  '/api/stock/recommendations-ai',
+  async (req, res) => {
+    try {
+      if (!GEMINI_API_KEY) {
+        return res.status(503).json({
+          error:
+            'Gemini API key가 설정되어 있지 않습니다.'
+        });
+      }
+
+      const {
+        validResults,
+        ranked
+      } =
+        await scanRecommendationUniverse();
+
+      const priority =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'PRIORITY_CANDIDATE'
+        );
+
+      const chase =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'CHASE_CAUTION'
+        );
+
+      const watch =
+        ranked.filter(
+          (item) =>
+            item.grade ===
+            'WATCH_CANDIDATE'
+        );
+
+      // AI 분석 대상:
+      // 1순위 = 최우선 후보
+      // 2순위 = 추격 주의
+      //
+      // 최대 RECOMMENDATION_AI_LIMIT개만 Gemini에 전달
+      // → 50종목 각각 Gemini 호출하지 않음
+      // → Gemini API 부하와 503 위험 감소
+
+      const aiCandidates =
+        [
+          ...priority,
+          ...chase
+        ].slice(
+          0,
+          RECOMMENDATION_AI_LIMIT
+        );
+
+      let aiResult = {
+        recommendations:
+          [],
+
+        modelUsed:
+          null,
+
+        attemptUsed:
+          null
+      };
+
+      if (
+        aiCandidates.length >
+        0
+      ) {
+        try {
+          aiResult =
+            await analyzeRecommendationsWithGemini(
+              aiCandidates
+            );
+        } catch (error) {
+          console.warn(
+            '[K-Stock AI] Recommendation Gemini analysis failed:',
+            error.message
+          );
+
+          // Gemini가 실패해도
+          // 실제 데이터 기반 추천 결과 자체는 반환
+          aiResult = {
+            recommendations:
+              [],
+
+            modelUsed:
+              null,
+
+            attemptUsed:
+              null,
+
+            error:
+              'AI 설명을 생성하지 못했지만 실제 데이터 기반 추천 결과는 정상입니다.'
+          };
+        }
+      }
+
+      return res.json({
+        scannedCount:
+          RECOMMENDATION_WATCHLIST.length,
+
+        validCount:
+          validResults.length,
+
+        priorityCount:
+          priority.length,
+
+        chaseCount:
+          chase.length,
+
+        watchCount:
+          watch.length,
+
+        priority,
+
+        chase,
+
+        watch,
+
+        aiCandidates:
+          aiCandidates.map(
+            (item) => ({
+              symbol:
+                item.symbol,
+
+              stockName:
+                item.stockName,
+
+              grade:
+                item.grade,
+
+              score:
+                item.score,
+
+              maxScore:
+                item.maxScore,
+
+              riskReward:
+                item.riskReward,
+
+              newsAssessment:
+                item.newsAssessment
+            })
+          ),
+
+        ai:
+          aiResult.recommendations,
+
+        modelUsed:
+          aiResult.modelUsed,
+
+        attemptUsed:
+          aiResult.attemptUsed,
+
+        aiError:
+          aiResult.error ||
+          null,
+
+        criteria: {
+          order:
+            '차트 + 거래량 + 외국인/기관 수급 + 최신 뉴스 + 현재가 손익비 → 최종 추천',
+
+          aiRole:
+            'Gemini는 실제 데이터를 설명만 하며 가격·점수·최종 등급을 변경하지 않음'
+        },
+
+        fetchedAt:
+          new Date().toISOString()
+      });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] Recommendation AI API error:',
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          '추천 종목 AI 분석 중 오류가 발생했습니다.'
+      });
+    }
+  }
+);
+
+// ========================================
+// ROOT
+// ========================================
+
+app.get(
+  '/',
+  (req, res) => {
+    res.json({
+      service:
+        'K-Stock AI Backend',
+
+      status:
+        'running',
+
+      endpoints: [
+        '/api/health',
+        '/api/stock/search?query=삼성전자',
+        '/api/stock/quote?symbol=005930',
+        '/api/stock/chart?symbol=005930&timeframe=1M',
+        '/api/stock/news?symbol=005930',
+        '/api/stock/strategy?symbol=005930',
+        '/api/stock/ai-analysis?symbol=005930',
+        '/api/stock/recommendations',
+        '/api/stock/recommendations-ai'
+      ]
+    });
+  }
+);
+
+// ========================================
+// 404
+// ========================================
+
+app.use(
+  (req, res) => {
+    res.status(404).json({
+      error:
+        'API endpoint를 찾을 수 없습니다.'
+    });
+  }
+);
+
+// ========================================
+// START SERVER
 // ========================================
 
 app.listen(
   PORT,
   () => {
     console.log(
-      `[K-Stock AI] Backend server is running on port ${PORT}`
+      `[K-Stock AI] Backend running on port ${PORT}`
     );
 
     console.log(
-      `[K-Stock AI] Recommendation universe: ${RECOMMENDATION_WATCHLIST.length} stocks`
+      `[K-Stock AI] Gemini configured: ${Boolean(
+        GEMINI_API_KEY
+      )}`
     );
 
     console.log(
-      `[K-Stock AI] Recommendation concurrency: ${RECOMMENDATION_CONCURRENCY}`
-    );
-
-    console.log(
-      `[K-Stock AI] AI recommendation analysis limit: ${RECOMMENDATION_AI_LIMIT}`
-    );
-
-    console.log(
-      `[K-Stock AI] Gemini primary model: ${PRIMARY_GEMINI_MODEL}`
-    );
-
-    console.log(
-      '[K-Stock AI] Risk/Reward filter enabled'
+      `[K-Stock AI] Primary Gemini model: ${PRIMARY_GEMINI_MODEL}`
     );
   }
 );
