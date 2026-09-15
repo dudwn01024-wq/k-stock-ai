@@ -2479,7 +2479,7 @@ const callGeminiPromptWithRetry =
     const retryableStatuses =
       new Set([
         408,
-        429,
+        
         500,
         502,
         503,
