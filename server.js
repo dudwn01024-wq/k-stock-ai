@@ -62,7 +62,7 @@ const RECOMMENDATION_WATCHLIST = [
   { symbol: '352820', name: '하이브' }
 ];
 
-const RECOMMENDATION_CONCURRENCY = 5;
+const RECOMMENDATION_CONCURRENCY = 2;
 const RECOMMENDATION_AI_LIMIT = 3;
 
 const sleep = (ms) =>
