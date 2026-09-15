@@ -1836,43 +1836,32 @@ const buildRecommendationReason =
 // FINAL RECOMMENDATION GRADE
 // ========================================
 
-const getFinalRecommendationGrade =
-  (
-    score,
-    strategy,
-    riskReward
-  ) => {
-    if (
-      score < 2
-    ) {
-      return 'EXCLUDED';
-    }
+ const getFinalRecommendationGrade = (
+  score,
+  strategy,
+  riskReward
+) => {
+  if (score < 2) {
+    return 'EXCLUDED';
+  }
 
-    if (
-      score === 2
-    ) {
-      return 'WATCH_CANDIDATE';
-    }
-
-    if (
-      score === 3 &&
-      strategy?.signal ===
-        'BUY_CANDIDATE'
-    ) {
-      if (
-        riskReward
-          ?.classification ===
-        'PRIORITY_CANDIDATE'
-      ) {
-        return 'PRIORITY_CANDIDATE';
-      }
-
-      return 'CHASE_CAUTION';
-    }
-
+  if (score === 2) {
     return 'WATCH_CANDIDATE';
-  };
+  }
 
+  if (score === 3) {
+    if (
+      riskReward?.classification ===
+      'PRIORITY_CANDIDATE'
+    ) {
+      return 'PRIORITY_CANDIDATE';
+    }
+
+    return 'CHASE_CAUTION';
+  }
+
+  return 'WATCH_CANDIDATE';
+};
 // ========================================
 // BUILD ONE RECOMMENDATION RESULT
 // ========================================
