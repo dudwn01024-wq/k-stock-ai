@@ -258,42 +258,91 @@ export default function App() {
   }, [loadRealStockData]);
 
   const loadRecommendations = useCallback(async () => {
-    setRecommendationLoading(true);
-    setRecommendationError(null);
-    setRecommendationAIError(null);
-    setRecommendationAIData(null);
+  setRecommendationLoading(true);
+  setRecommendationError(null);
+  setRecommendationAIError(null);
+  setRecommendationAIData(null);
 
-    try {
-      const result = await backendService.getRecommendations();
-      setRecommendationData(result);
-      setRecommendationLoading(false);
+  try {
+    const result = await backendService.getRecommendations();
 
-      const hasAIEligibleCandidate = Array.isArray(result?.recommendations)
-        && result.recommendations.some(
-          (item) => item?.grade === 'PRIORITY_CANDIDATE' || item?.grade === 'CHASE_CAUTION'
+    const priority = Array.isArray(result?.priority) ? result.priority : [];
+    const chase = Array.isArray(result?.chase) ? result.chase : [];
+    const watch = Array.isArray(result?.watch) ? result.watch : [];
+
+    const recommendations = [
+      ...priority,
+      ...chase,
+      ...watch
+    ];
+
+    const normalizedResult = {
+      ...result,
+      recommendations,
+
+      universeSize:
+        result?.universeSize ??
+        result?.scannedCount ??
+        0,
+
+      recommendationCount:
+        result?.recommendationCount ??
+        result?.candidateCount ??
+        recommendations.length,
+
+      priorityCandidateCount:
+        result?.priorityCandidateCount ??
+        result?.priorityCount ??
+        priority.length,
+
+      chaseCautionCount:
+        result?.chaseCautionCount ??
+        result?.chaseCount ??
+        chase.length,
+
+      watchCandidateCount:
+        result?.watchCandidateCount ??
+        result?.watchCount ??
+        watch.length
+    };
+
+    setRecommendationData(normalizedResult);
+    setRecommendationLoading(false);
+
+    const hasAIEligibleCandidate = recommendations.some(
+      (item) =>
+        item?.grade === 'PRIORITY_CANDIDATE' ||
+        item?.grade === 'CHASE_CAUTION'
+    );
+
+    if (hasAIEligibleCandidate) {
+      setRecommendationAILoading(true);
+
+      try {
+        const aiResult = await backendService.getRecommendationAI();
+        setRecommendationAIData(aiResult);
+      } catch (aiError) {
+        console.error('Recommendation AI Error:', aiError);
+        setRecommendationAIError(
+          aiError?.message ||
+          '추천 종목 AI 분석을 일시적으로 불러오지 못했습니다.'
         );
-
-      if (hasAIEligibleCandidate) {
-        setRecommendationAILoading(true);
-        try {
-          const aiResult = await backendService.getRecommendationAI();
-          setRecommendationAIData(aiResult);
-        } catch (aiError) {
-          console.error('Recommendation AI Error:', aiError);
-          setRecommendationAIError(aiError?.message || '추천 종목 AI 분석을 일시적으로 불러오지 못했습니다.');
-        } finally {
-          setRecommendationAILoading(false);
-        }
-      } else {
+      } finally {
         setRecommendationAILoading(false);
       }
-    } catch (error) {
-      console.error('Recommendations Error:', error);
-      setRecommendationError(error?.message || '오늘의 추천 종목을 불러오지 못했습니다.');
-      setRecommendationLoading(false);
+    } else {
       setRecommendationAILoading(false);
     }
-  }, [backendService]);
+  } catch (error) {
+    console.error('Recommendations Error:', error);
+    setRecommendationError(
+      error?.message ||
+      '오늘의 추천 종목을 불러오지 못했습니다.'
+    );
+    setRecommendationLoading(false);
+    setRecommendationAILoading(false);
+  }
+}, [backendService]);
 
   useEffect(() => {
     loadRecommendations();
