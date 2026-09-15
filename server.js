@@ -59,8 +59,27 @@ const RECOMMENDATION_WATCHLIST = [
   { symbol: '009150', name: '삼성전기' },
   { symbol: '003490', name: '대한항공' },
   { symbol: '090430', name: '아모레퍼시픽' },
-  { symbol: '352820', name: '하이브' }
-];
+  { symbol: '352820', name: '하이브' },
+  { symbol: '010140', name: '삼성중공업' },
+  { symbol: '011200', name: 'HMM' },
+  { symbol: '010950', name: 'S-Oil' },
+  { symbol: '096770', name: 'SK이노베이션' },
+  { symbol: '003670', name: '포스코퓨처엠' },
+  { symbol: '247540', name: '에코프로비엠' },
+  { symbol: '086520', name: '에코프로' },
+  { symbol: '003230', name: '삼양식품' },
+  { symbol: '004170', name: '신세계' },
+  { symbol: '139480', name: '이마트' },
+  { symbol: '035250', name: '강원랜드' },
+  { symbol: '010130', name: '고려아연' },
+  { symbol: '018260', name: '삼성에스디에스' },
+  { symbol: '259960', name: '크래프톤' },
+  { symbol: '251270', name: '넷마블' },
+  { symbol: '323410', name: '카카오뱅크' },
+  { symbol: '377300', name: '카카오페이' },
+  { symbol: '402340', name: 'SK스퀘어' },
+  { symbol: '267250', name: 'HD현대' },
+  { symbol: '011070', name: 'LG이노텍' }];
 
 const RECOMMENDATION_CONCURRENCY = 2;
 const RECOMMENDATION_AI_LIMIT = 3;
