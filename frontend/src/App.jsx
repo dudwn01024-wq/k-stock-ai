@@ -729,24 +729,47 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                            <div>
-                              <span className="text-slate-500 block">현재가</span>
-                              <span className="text-white font-mono">{formatKRW(item.currentPrice)}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500 block">진입 고려가</span>
-                              <span className="text-emerald-300 font-mono">{formatKRW(item.strategy?.entryPrice)}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500 block">목표가</span>
-                              <span className="text-red-400 font-mono">{formatKRW(item.strategy?.takeProfitPrice)}</span>
-                            </div>
-                            <div>
-                              <span className="text-slate-500 block">손절가</span>
-                              <span className="text-blue-400 font-mono">{formatKRW(item.strategy?.stopLossPrice)}</span>
-                            </div>
-                          </div>
+                          {item.strategy?.tradeSignal && (
+  <div className="mb-3 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2">
+    <span className="text-xs text-slate-400">
+      매매 신호
+    </span>
+
+    <span className="text-sm font-bold text-white">
+      {item.strategy.tradeSignal === 'BUY'
+        ? '🟢 매수 신호'
+        : item.strategy.tradeSignal === 'WAIT_FOR_ENTRY'
+          ? '🟡 매수 대기'
+          : item.strategy.tradeSignal === 'TAKE_PROFIT'
+            ? '🔴 익절 신호'
+            : item.strategy.tradeSignal === 'STOP'
+              ? '🔵 손절 신호'
+              : '⚪ 관망'}
+    </span>
+  </div>
+)}
+
+<div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+  <div>
+    <span className="text-slate-500 block">현재가</span>
+    <span className="text-white font-mono">{formatKRW(item.currentPrice)}</span>
+  </div>
+
+  <div>
+    <span className="text-slate-500 block">진입 고려가</span>
+    <span className="text-emerald-300 font-mono">{formatKRW(item.strategy?.entryPrice)}</span>
+  </div>
+
+  <div>
+    <span className="text-slate-500 block">목표가</span>
+    <span className="text-red-400 font-mono">{formatKRW(item.strategy?.takeProfitPrice)}</span>
+  </div>
+
+  <div>
+    <span className="text-slate-500 block">손절가</span>
+    <span className="text-blue-400 font-mono">{formatKRW(item.strategy?.stopLossPrice)}</span>
+  </div>
+</div>
 
                           {hasRiskReward && (
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
