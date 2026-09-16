@@ -1241,11 +1241,41 @@ export default function App() {
                   </div>
 
                   {aiAnalysis?.analysis?.strategyExplanation && (
-                    <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
-                      <span className="text-slate-400 font-semibold uppercase tracking-wider block">전략 해설</span>
-                      <p className="text-slate-200 leading-relaxed">{aiAnalysis.analysis.strategyExplanation}</p>
-                    </div>
-                  )}
+  <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2">
+    <span className="text-slate-400 font-semibold uppercase tracking-wider block">
+      전략 해설
+    </span>
+
+    {typeof aiAnalysis.analysis.strategyExplanation === 'string' ? (
+      <p className="text-slate-200 leading-relaxed">
+        {aiAnalysis.analysis.strategyExplanation}
+      </p>
+    ) : (
+      <div className="space-y-2 text-slate-200">
+        {aiAnalysis.analysis.strategyExplanation.entryReason && (
+          <p>
+            <span className="text-emerald-400 font-semibold">진입가 근거: </span>
+            {aiAnalysis.analysis.strategyExplanation.entryReason}
+          </p>
+        )}
+
+        {aiAnalysis.analysis.strategyExplanation.targetReason && (
+          <p>
+            <span className="text-red-400 font-semibold">목표가 근거: </span>
+            {aiAnalysis.analysis.strategyExplanation.targetReason}
+          </p>
+        )}
+
+        {aiAnalysis.analysis.strategyExplanation.stopLossReason && (
+          <p>
+            <span className="text-sky-400 font-semibold">손절가 근거: </span>
+            {aiAnalysis.analysis.strategyExplanation.stopLossReason}
+          </p>
+        )}
+      </div>
+    )}
+  </div>
+)}
 
                   {aiAnalysis?.analysis?.newsExplanation && (
                     <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
