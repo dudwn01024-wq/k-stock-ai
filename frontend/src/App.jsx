@@ -819,12 +819,14 @@ export default function App() {
                               </div>
                             </div>
 
-                            {ai.candidateSummary && (
-                              <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-3">
-                                <div className="text-[11px] text-slate-500 mb-1">현재 후보 판단</div>
-                                <p className="text-xs text-slate-200 leading-relaxed">{ai.candidateSummary}</p>
-                              </div>
-                            )}
+                            {(ai.summary || ai.candidateSummary) && (
+  <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-3">
+    <div className="text-[11px] text-slate-500 mb-1">현재 후보 판단</div>
+    <p className="text-xs text-slate-200 leading-relaxed">
+      {ai.summary || ai.candidateSummary}
+    </p>
+  </div>
+)}
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               {Array.isArray(ai.positiveFactors) && ai.positiveFactors.length > 0 && (
