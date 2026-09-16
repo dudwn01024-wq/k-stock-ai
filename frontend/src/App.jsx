@@ -413,16 +413,22 @@ export default function App() {
   const changeRate = Number(quoteData?.changeRate || 0);
 
   const recommendationAIMap = useMemo(() => {
-    const map = new Map();
-    const items = Array.isArray(recommendationAIData?.recommendations)
+  const map = new Map();
+
+  const items = Array.isArray(recommendationAIData?.ai)
+    ? recommendationAIData.ai
+    : Array.isArray(recommendationAIData?.recommendations)
       ? recommendationAIData.recommendations
       : [];
 
-    items.forEach((item) => {
-      if (item?.symbol) map.set(item.symbol, item);
-    });
-    return map;
-  }, [recommendationAIData]);
+  items.forEach((item) => {
+    if (item?.symbol) {
+      map.set(item.symbol, item);
+    }
+  });
+
+  return map;
+}, [recommendationAIData]);
 
   const renderConditionStatus = (val) => {
     if (val === true) return <span className="text-emerald-400 font-semibold">통과</span>;
@@ -561,7 +567,7 @@ export default function App() {
                   오늘의 AI 추천 종목
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  50종목을 추세 · 거래량 · 수급으로 검사한 뒤, 3/3 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
+                  50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
                 </p>
               </div>
           {recommendationData && (
@@ -600,13 +606,13 @@ export default function App() {
                 <div className="space-y-5">
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <span className="px-2.5 py-1 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-emerald-300">
-                    🟢 최우선 후보 = 3/3 + 현재가 손익비 통과
+                    🟢 최우선 후보 = 4/4 + 현재가 손익비 통과
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-orange-950/30 border border-orange-800/40 text-orange-300">
-                    🟠 추격 주의 = 3/3이지만 현재가 손익비 불리
+                    🟠 추격 주의 = 4/4이지만 현재가 손익비 불리
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-amber-950/30 border border-amber-800/40 text-amber-300">
-                    🟡 관심 종목 = 2/3
+                    🟡 관심 종목 = 3/4
                   </span>
                   <span className="text-slate-500">
                     검사 {recommendationData?.universeSize ?? 0}개 · 후보 {recommendationData?.recommendationCount ?? 0}개
