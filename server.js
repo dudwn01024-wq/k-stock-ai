@@ -1478,13 +1478,13 @@ return {
   takeProfitPrice,
   stopLossPrice,
 
-  dataPoints:
+    dataPoints:
     Math.min(
       rows.length,
       20
     )
+  };
 };
-
 // ========================================
 // RISK / REWARD CALCULATION
 // ========================================
