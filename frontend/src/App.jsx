@@ -661,7 +661,7 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {recommendationData.recommendations.map((item) => {
                     const aiItem = recommendationAIMap.get(item.symbol);
-                    const ai = aiItem?.aiAnalysis;
+                    const ai = aiItem?.aiAnalysis ?? aiItem;
                     const isPriority = item.grade === 'PRIORITY_CANDIDATE';
                     const isChaseCaution = item.grade === 'CHASE_CAUTION';
                     const isWatch = item.grade === 'WATCH_CANDIDATE';
