@@ -1434,36 +1434,56 @@ const calculateStrategy =
       }
     }
 
-    return {
-      symbol,
-      currentPrice,
-      ma5,
-      ma20,
-      recentHigh20,
-      recentLow20,
-      nearestSupport,
-      nearestResistance,
-      currentVolume,
-      averageVolume20,
-      volumeRatio,
-      foreignerNet,
-      institutionNet,
-      netSupplyTotal,
-      trendPassed,
-      volumePassed,
-      supplyPassed,
-      signal,
-      entryPrice,
-      takeProfitPrice,
-      stopLossPrice,
+    let tradeSignal = 'WAIT';
 
-      dataPoints:
-        Math.min(
-          rows.length,
-          20
-        )
-    };
-  };
+if (
+  signal === 'BUY_CANDIDATE' &&
+  Number.isFinite(currentPrice) &&
+  Number.isFinite(entryPrice) &&
+  Number.isFinite(takeProfitPrice) &&
+  Number.isFinite(stopLossPrice)
+) {
+  if (currentPrice <= stopLossPrice) {
+    tradeSignal = 'STOP';
+  } else if (currentPrice >= takeProfitPrice) {
+    tradeSignal = 'TAKE_PROFIT';
+  } else if (currentPrice <= entryPrice) {
+    tradeSignal = 'BUY';
+  } else {
+    tradeSignal = 'WAIT_FOR_ENTRY';
+  }
+}
+
+return {
+  symbol,
+  currentPrice,
+  ma5,
+  ma20,
+  recentHigh20,
+  recentLow20,
+  nearestSupport,
+  nearestResistance,
+  currentVolume,
+  averageVolume20,
+  volumeRatio,
+  foreignerNet,
+  institutionNet,
+  netSupplyTotal,
+  trendPassed,
+  volumePassed,
+  supplyPassed,
+  signal,
+  tradeSignal,
+  entryPrice,
+  takeProfitPrice,
+  stopLossPrice,
+
+  dataPoints:
+    Math.min(
+      rows.length,
+      20
+    )
+};
 
 // ========================================
 // RISK / REWARD CALCULATION
