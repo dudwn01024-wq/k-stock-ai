@@ -796,7 +796,11 @@ export default function App() {
                                 현재 가격 위치 주의
                               </div>
                               <p className="text-xs text-orange-100/80 leading-relaxed">
-                                {item.riskReward.reason}
+                                {typeof item.riskReward.reason === 'string'
+  ? item.riskReward.reason
+  : item.riskReward.reason?.entryReason ||
+    item.riskReward.reason?.reason ||
+    '현재 가격 기준 손익비를 확인하세요.'}
                               </p>
                             </div>
                           )}
