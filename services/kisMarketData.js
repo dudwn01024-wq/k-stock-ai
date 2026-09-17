@@ -45,7 +45,20 @@ const validateSymbol = (symbol) =>
 
 
 const parseNumber = (value) => {
-  const number = Number(value);
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return null;
+  }
+
+  const number =
+    Number(
+      String(value)
+        .replace(/,/g, '')
+        .trim()
+    );
 
   return Number.isFinite(number)
     ? number
