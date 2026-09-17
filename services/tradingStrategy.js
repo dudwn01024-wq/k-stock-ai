@@ -1572,15 +1572,15 @@ const calculateTradingStrategy = ({
 
 
   const currentToEntryRate =
-    price !== 0
-      ? (
-          (
-            entryPrice -
-            price
-          ) /
-          price
-        ) * 100
-      : null;
+  entryPrice !== 0
+    ? (
+        (
+          price -
+          entryPrice
+        ) /
+        entryPrice
+      ) * 100
+    : null;
 
 
   const entryToTargetRate =
