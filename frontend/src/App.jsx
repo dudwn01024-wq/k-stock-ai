@@ -1255,178 +1255,658 @@ export default function App() {
               </div>
             </section>
 
-            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-                <div>
-                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                    <Target className="w-4 h-4 text-emerald-400" />
-                    매매전략 및 기술적 지표
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">백엔드 실시간 계산 지표 및 매매 시그널 분석</p>
-                </div>
-                {strategyData?.signal === 'BUY_CANDIDATE' ? (
-                  <span className="px-3 py-1 rounded-lg bg-red-950/60 border border-red-800 text-red-400 text-xs font-bold flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    매수 후보
-                  </span>
-                ) : (
-                  <span className="px-3 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    현재 진입 대기
-                  </span>
-                )}
-              </div>
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+  {/* =========================================
+      HEADER
+  ========================================= */}
+  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+    <div>
+      <h3 className="text-base font-semibold text-white flex items-center gap-2">
+        <Target className="w-4 h-4 text-emerald-400" />
+        매매전략 및 고급 차트 분석
+      </h3>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">현재가</span>
-                  <span className="text-sm font-bold font-mono text-white mt-1 block">
-                    {formatKRW(strategyData?.currentPrice)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">MA5 (5일 이평선)</span>
-                  <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
-                    {formatKRW(strategyData?.ma5)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">MA20 (20일 이평선)</span>
-                  <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
-                    {formatKRW(strategyData?.ma20)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">20일 최고가</span>
-                  <span className="text-sm font-bold font-mono text-red-400 mt-1 block">
-                    {formatKRW(strategyData?.recentHigh20)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">20일 최저가</span>
-                  <span className="text-sm font-bold font-mono text-blue-400 mt-1 block">
-                    {formatKRW(strategyData?.recentLow20)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">가장 가까운 지지선</span>
-                  <span className="text-sm font-bold font-mono text-slate-200 mt-1 block">
-                    {formatKRW(strategyData?.nearestSupport)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">가장 가까운 저항선</span>
-                  <span className="text-sm font-bold font-mono text-slate-200 mt-1 block">
-                    {formatKRW(strategyData?.nearestResistance)}
-                  </span>
-                </div>
-                <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-                  <span className="text-[11px] text-slate-400 block">데이터 포인트</span>
-                  <span className="text-sm font-bold font-mono text-slate-300 mt-1 block">
-                    {strategyData?.dataPoints !== null && strategyData?.dataPoints !== undefined ? `${strategyData.dataPoints}거래일` : '데이터 없음'}
-                  </span>
-                </div>
-              </div>
+      <p className="text-xs text-slate-400 mt-1">
+        KIS 실제 OHLCV와 실제 거래량·수급·뉴스를 기반으로 프로그램이 계산한 결과입니다.
+      </p>
+    </div>
 
-              <div className="space-y-3 pt-2">
-                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">1. 거래량 분석</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">오늘 거래량</span>
-                    <span className="text-sm font-bold font-mono text-slate-200 mt-1 block">
-                      {formatNumberWithUnit(strategyData?.currentVolume, '주')}
-                    </span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">이전 20일 평균 거래량</span>
-                    <span className="text-sm font-bold font-mono text-slate-200 mt-1 block">
-                      {formatNumberWithUnit(strategyData?.averageVolume20, '주')}
-                    </span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">거래량 배수</span>
-                    <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
-                      {strategyData?.volumeRatio !== null && strategyData?.volumeRatio !== undefined
-                        ? `${strategyData.volumeRatio}배`
-                        : '데이터 없음'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+    <span
+      className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 ${
+        strategyData?.finalAssessment?.status === 'ENTRY_CANDIDATE'
+          ? 'bg-emerald-950/60 border-emerald-700 text-emerald-300'
+          : strategyData?.finalAssessment?.status === 'CHASE_CAUTION'
+            ? 'bg-amber-950/60 border-amber-700 text-amber-300'
+            : strategyData?.finalAssessment?.status === 'CAUTION'
+              ? 'bg-red-950/60 border-red-800 text-red-300'
+              : 'bg-slate-800 border-slate-700 text-slate-300'
+      }`}
+    >
+      {strategyData?.finalAssessment?.status === 'ENTRY_CANDIDATE' ? (
+        <ShieldCheck className="w-3.5 h-3.5" />
+      ) : strategyData?.finalAssessment?.status === 'CHASE_CAUTION' ? (
+        <AlertTriangle className="w-3.5 h-3.5" />
+      ) : (
+        <Clock className="w-3.5 h-3.5" />
+      )}
 
-              <div className="space-y-3 pt-2">
-                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">2. 수급 분석</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">외국인 순매수</span>
-                    <span className={`text-sm font-bold font-mono mt-1 block ${getFlowColorClass(strategyData?.foreignerNet)}`}>
-                      {formatNumberWithUnit(strategyData?.foreignerNet, '주')}
-                    </span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">기관 순매수</span>
-                    <span className={`text-sm font-bold font-mono mt-1 block ${getFlowColorClass(strategyData?.institutionNet)}`}>
-                      {formatNumberWithUnit(strategyData?.institutionNet, '주')}
-                    </span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">외국인+기관 합산 순매수</span>
-                    <span className={`text-sm font-bold font-mono mt-1 block ${getFlowColorClass(strategyData?.netSupplyTotal)}`}>
-                      {formatNumberWithUnit(strategyData?.netSupplyTotal, '주')}
-                    </span>
-                  </div>
-                </div>
-              </div>
+      {strategyData?.finalAssessment?.label || '판정 데이터 없음'}
+    </span>
+  </div>
 
-              <div className="space-y-3 pt-2">
-                <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">3. 매수 조건</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">추세 조건</span>
-                    <span className="text-xs">{renderConditionStatus(strategyData?.trendPassed)}</span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">거래량 조건</span>
-                    <span className="text-xs">{renderConditionStatus(strategyData?.volumePassed)}</span>
-                  </div>
-                  <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">수급 조건</span>
-                    <span className="text-xs">{renderConditionStatus(strategyData?.supplyPassed)}</span>
-                  </div>
-                </div>
-              </div>
 
-              {strategyData?.signal === 'BUY_CANDIDATE' ? (
-                <div className="bg-emerald-950/30 border border-emerald-900/50 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <span className="text-xs text-emerald-400/80 block">진입가 (Entry Price)</span>
-                    <span className="text-base font-bold font-mono text-emerald-300">
-                      {formatKRW(strategyData?.entryPrice)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-emerald-400/80 block">익절가 (Take Profit)</span>
-                    <span className="text-base font-bold font-mono text-red-400">
-                      {formatKRW(strategyData?.takeProfitPrice)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-emerald-400/80 block">손절가 (Stop Loss)</span>
-                    <span className="text-base font-bold font-mono text-blue-400">
-                      {formatKRW(strategyData?.stopLossPrice)}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-4 text-center">
-                  <span className="text-xs text-slate-400">
-                    {strategyData?.entryPrice === null || strategyData?.entryPrice === undefined
-                      ? '조건 미충족'
-                      : `대기 상태 (진입가: ${formatKRW(strategyData?.entryPrice)})`}
+  {/* =========================================
+      최종 판정
+  ========================================= */}
+  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <span className="text-[11px] text-slate-500 block mb-1">
+          최종 전략 판정
+        </span>
+
+        <span
+          className={`text-lg font-bold ${
+            strategyData?.finalAssessment?.status === 'ENTRY_CANDIDATE'
+              ? 'text-emerald-400'
+              : strategyData?.finalAssessment?.status === 'CHASE_CAUTION'
+                ? 'text-amber-400'
+                : strategyData?.finalAssessment?.status === 'CAUTION'
+                  ? 'text-red-400'
+                  : 'text-slate-300'
+          }`}
+        >
+          {strategyData?.finalAssessment?.label || '데이터 없음'}
+        </span>
+      </div>
+
+      <div className="text-right">
+        <span className="text-[11px] text-slate-500 block mb-1">
+          현재가 ↔ 진입가 거리
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white">
+          {strategyData?.currentToEntryRate !== null &&
+          strategyData?.currentToEntryRate !== undefined
+            ? `${Number(strategyData.currentToEntryRate).toFixed(2)}%`
+            : '데이터 없음'}
+        </span>
+      </div>
+    </div>
+
+    {strategyData?.finalAssessment?.reason && (
+      <p className="text-xs text-slate-400 mt-3 leading-relaxed">
+        {strategyData.finalAssessment.reason}
+      </p>
+    )}
+  </div>
+
+
+  {/* =========================================
+      가격 전략
+  ========================================= */}
+  <div className="space-y-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      1. 가격 전략
+    </h4>
+
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          현재가
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {formatKRW(strategyData?.currentPrice)}
+        </span>
+      </div>
+
+      <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/40">
+        <span className="text-[11px] text-emerald-400/80 block">
+          진입 고려가
+        </span>
+
+        <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
+          {formatKRW(strategyData?.entryPrice)}
+        </span>
+      </div>
+
+      <div className="bg-red-950/20 p-3.5 rounded-xl border border-red-900/40">
+        <span className="text-[11px] text-red-400/80 block">
+          목표가
+        </span>
+
+        <span className="text-sm font-bold font-mono text-red-400 mt-1 block">
+          {formatKRW(strategyData?.takeProfitPrice)}
+        </span>
+      </div>
+
+      <div className="bg-blue-950/20 p-3.5 rounded-xl border border-blue-900/40">
+        <span className="text-[11px] text-blue-400/80 block">
+          손절가
+        </span>
+
+        <span className="text-sm font-bold font-mono text-blue-400 mt-1 block">
+          {formatKRW(strategyData?.stopLossPrice)}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          진입 기준 손익비
+        </span>
+
+        <span className="text-sm font-bold font-mono text-amber-300 mt-1 block">
+          {strategyData?.riskRewardRatio !== null &&
+          strategyData?.riskRewardRatio !== undefined
+            ? `${Number(strategyData.riskRewardRatio).toFixed(2)} : 1`
+            : '데이터 없음'}
+        </span>
+      </div>
+    </div>
+
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3">
+        <span className="text-[11px] text-slate-500 block">
+          진입 → 목표 기대수익률
+        </span>
+
+        <span className="text-sm font-bold font-mono text-red-400">
+          {strategyData?.entryToTargetRate !== null &&
+          strategyData?.entryToTargetRate !== undefined
+            ? `+${Number(strategyData.entryToTargetRate).toFixed(2)}%`
+            : '데이터 없음'}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3">
+        <span className="text-[11px] text-slate-500 block">
+          진입 → 손절 위험률
+        </span>
+
+        <span className="text-sm font-bold font-mono text-blue-400">
+          {strategyData?.entryToStopRate !== null &&
+          strategyData?.entryToStopRate !== undefined
+            ? `${Number(strategyData.entryToStopRate).toFixed(2)}%`
+            : '데이터 없음'}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3">
+        <span className="text-[11px] text-slate-500 block">
+          손익비 판정
+        </span>
+
+        <span
+          className={`text-sm font-bold ${
+            strategyData?.riskRewardAssessment?.status === 'PASS'
+              ? 'text-emerald-400'
+              : 'text-amber-400'
+          }`}
+        >
+          {strategyData?.riskRewardAssessment?.status || '데이터 없음'}
+        </span>
+      </div>
+    </div>
+  </div>
+
+
+  {/* =========================================
+      이동평균선
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      2. 이동평균선
+    </h4>
+
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MA5
+        </span>
+        <span className="text-sm font-bold font-mono text-emerald-300">
+          {formatKRW(strategyData?.ma5)}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MA20
+        </span>
+        <span className="text-sm font-bold font-mono text-emerald-300">
+          {formatKRW(strategyData?.ma20)}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MA60
+        </span>
+        <span className="text-sm font-bold font-mono text-emerald-300">
+          {formatKRW(strategyData?.ma60)}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MA120
+        </span>
+        <span className="text-sm font-bold font-mono text-emerald-300">
+          {formatKRW(strategyData?.ma120)}
+        </span>
+      </div>
+    </div>
+
+    {strategyData?.technicalAssessment?.conditions?.trend?.detail && (
+      <p className="text-xs text-slate-400 bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+        {strategyData.technicalAssessment.conditions.trend.detail}
+      </p>
+    )}
+  </div>
+
+
+  {/* =========================================
+      기술적 지표
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      3. 기술적 지표
+    </h4>
+
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          RSI14
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {strategyData?.rsi14 !== null &&
+          strategyData?.rsi14 !== undefined
+            ? Number(strategyData.rsi14).toFixed(2)
+            : '데이터 없음'}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MACD
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {strategyData?.macd?.macd !== null &&
+          strategyData?.macd?.macd !== undefined
+            ? Number(strategyData.macd.macd).toLocaleString('ko-KR')
+            : '데이터 없음'}
+        </span>
+
+        <span className="text-[10px] text-slate-500 block mt-1">
+          Signal{' '}
+          {strategyData?.macd?.signal !== null &&
+          strategyData?.macd?.signal !== undefined
+            ? Number(strategyData.macd.signal).toLocaleString('ko-KR')
+            : '-'}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          ATR14
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {formatKRW(strategyData?.atr14)}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          볼린저밴드 위치
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {strategyData?.bollingerBands?.position !== null &&
+          strategyData?.bollingerBands?.position !== undefined
+            ? `${Number(strategyData.bollingerBands.position).toFixed(2)}%`
+            : '데이터 없음'}
+        </span>
+      </div>
+    </div>
+
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {strategyData?.technicalAssessment?.conditions?.rsi?.detail && (
+        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+          <span className="text-[11px] text-slate-500 block mb-1">
+            RSI 해석
+          </span>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {strategyData.technicalAssessment.conditions.rsi.detail}
+          </p>
+        </div>
+      )}
+
+      {strategyData?.technicalAssessment?.conditions?.macd?.detail && (
+        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+          <span className="text-[11px] text-slate-500 block mb-1">
+            MACD 해석
+          </span>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {strategyData.technicalAssessment.conditions.macd.detail}
+          </p>
+        </div>
+      )}
+    </div>
+  </div>
+
+
+  {/* =========================================
+      지지 / 저항
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      4. 지지선 · 저항선
+    </h4>
+
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="bg-blue-950/15 border border-blue-900/30 rounded-xl p-4">
+        <span className="text-[11px] text-blue-400 block">
+          가장 가까운 지지선
+        </span>
+
+        <span className="text-lg font-bold font-mono text-blue-300">
+          {formatKRW(strategyData?.nearestSupport)}
+        </span>
+
+        {strategyData?.supportResistance?.nearestSupport?.touches !== undefined && (
+          <p className="text-[11px] text-slate-500 mt-1">
+            확인 횟수: {strategyData.supportResistance.nearestSupport.touches}회
+          </p>
+        )}
+      </div>
+
+      <div className="bg-red-950/15 border border-red-900/30 rounded-xl p-4">
+        <span className="text-[11px] text-red-400 block">
+          가장 가까운 저항선
+        </span>
+
+        <span className="text-lg font-bold font-mono text-red-300">
+          {formatKRW(strategyData?.nearestResistance)}
+        </span>
+
+        {strategyData?.supportResistance?.nearestResistance?.touches !== undefined && (
+          <p className="text-[11px] text-slate-500 mt-1">
+            확인 횟수: {strategyData.supportResistance.nearestResistance.touches}회
+          </p>
+        )}
+      </div>
+    </div>
+  </div>
+
+
+  {/* =========================================
+      거래량 / 수급 / 뉴스
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      5. 거래량 · 수급 · 뉴스
+    </h4>
+
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block mb-1">
+          거래량
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white block">
+          {formatNumberWithUnit(strategyData?.currentVolume, '주')}
+        </span>
+
+        <span
+          className={`text-xs font-semibold block mt-2 ${
+            strategyData?.marketAssessment?.conditions?.volume?.status === 'FAVORABLE'
+              ? 'text-emerald-400'
+              : strategyData?.marketAssessment?.conditions?.volume?.status === 'CAUTION'
+                ? 'text-amber-400'
+                : 'text-slate-400'
+          }`}
+        >
+          {strategyData?.marketAssessment?.conditions?.volume?.label || '상태 없음'}
+        </span>
+
+        <p className="text-[11px] text-slate-500 mt-1">
+          {strategyData?.marketAssessment?.conditions?.volume?.detail ||
+            '데이터 없음'}
+        </p>
+      </div>
+
+      <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block mb-1">
+          외국인 · 기관 수급
+        </span>
+
+        <div className="space-y-1">
+          <p className={`text-xs font-mono ${getFlowColorClass(strategyData?.foreignerNet)}`}>
+            외국인 {formatNumberWithUnit(strategyData?.foreignerNet, '주')}
+          </p>
+
+          <p className={`text-xs font-mono ${getFlowColorClass(strategyData?.institutionNet)}`}>
+            기관 {formatNumberWithUnit(strategyData?.institutionNet, '주')}
+          </p>
+        </div>
+
+        <span
+          className={`text-xs font-semibold block mt-2 ${
+            strategyData?.marketAssessment?.conditions?.supply?.status === 'FAVORABLE'
+              ? 'text-emerald-400'
+              : strategyData?.marketAssessment?.conditions?.supply?.status === 'CAUTION'
+                ? 'text-amber-400'
+                : 'text-slate-400'
+          }`}
+        >
+          {strategyData?.marketAssessment?.conditions?.supply?.status === 'NEUTRAL'
+            ? '중립'
+            : strategyData?.marketAssessment?.conditions?.supply?.label || '상태 없음'}
+        </span>
+
+        <p className="text-[11px] text-slate-500 mt-1">
+          {strategyData?.marketAssessment?.conditions?.supply?.detail ||
+            '데이터 없음'}
+        </p>
+      </div>
+
+      <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block mb-1">
+          최신 뉴스
+        </span>
+
+        <span
+          className={`text-sm font-bold ${
+            strategyData?.newsAssessment?.sentiment === 'POSITIVE'
+              ? 'text-emerald-400'
+              : strategyData?.newsAssessment?.sentiment === 'CAUTION'
+                ? 'text-red-400'
+                : 'text-slate-300'
+          }`}
+        >
+          {strategyData?.newsAssessment?.sentiment === 'POSITIVE'
+            ? '긍정'
+            : strategyData?.newsAssessment?.sentiment === 'CAUTION'
+              ? '주의'
+              : strategyData?.newsAssessment?.sentiment === 'NEUTRAL'
+                ? '중립'
+                : '데이터 없음'}
+        </span>
+
+        <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+          {strategyData?.newsAssessment?.reason || '뉴스 평가 데이터 없음'}
+        </p>
+      </div>
+    </div>
+  </div>
+
+
+  {/* =========================================
+      패턴 분석
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      6. 패턴 분석
+    </h4>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+      {/* 캔들 패턴 */}
+      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+        <span className="text-[11px] text-slate-400 block mb-2">
+          캔들 패턴
+        </span>
+
+        {Array.isArray(strategyData?.candlePatterns?.patterns) &&
+        strategyData.candlePatterns.patterns.length > 0 ? (
+          <div className="space-y-1">
+            {strategyData.candlePatterns.patterns.map((pattern, idx) => (
+              <div
+                key={`${pattern?.code || pattern?.label || 'candle'}-${idx}`}
+                className="text-xs text-slate-200"
+              >
+                {pattern?.label || pattern?.code || '패턴'}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-slate-500">
+            탐지된 주요 캔들패턴 없음
+          </span>
+        )}
+      </div>
+
+      {/* 차트 패턴 */}
+      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+        <span className="text-[11px] text-slate-400 block mb-2">
+          차트 패턴
+        </span>
+
+        {Array.isArray(strategyData?.chartPatterns?.patterns) &&
+        strategyData.chartPatterns.patterns.length > 0 ? (
+          <div className="space-y-2">
+            {strategyData.chartPatterns.patterns.map((pattern, idx) => (
+              <div
+                key={`${pattern?.code || 'chart'}-${idx}`}
+                className="text-xs"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-200">
+                    {pattern?.label || pattern?.code || '패턴'}
+                  </span>
+
+                  <span
+                    className={`text-[10px] font-semibold ${
+                      pattern?.status === 'CONFIRMED'
+                        ? 'text-emerald-400'
+                        : 'text-amber-400'
+                    }`}
+                  >
+                    {pattern?.status === 'CONFIRMED'
+                      ? '확정'
+                      : pattern?.status === 'CANDIDATE'
+                        ? '후보'
+                        : pattern?.status || ''}
                   </span>
                 </div>
-              )}
-            </section>
+
+                {pattern?.neckline !== null &&
+                  pattern?.neckline !== undefined && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      기준선 {formatKRW(pattern.neckline)}
+                    </p>
+                  )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-slate-500">
+            탐지된 주요 차트패턴 없음
+          </span>
+        )}
+      </div>
+
+      {/* 엘리엇 파동 */}
+      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+        <span className="text-[11px] text-slate-400 block mb-2">
+          엘리엇 파동
+        </span>
+
+        {strategyData?.elliottWave?.detected === true ? (
+          <>
+            <span className="text-sm font-semibold text-emerald-400">
+              파동 구조 감지
+            </span>
+
+            <p className="text-[11px] text-slate-500 mt-1">
+              방향: {strategyData?.elliottWave?.direction || '정보 없음'}
+            </p>
+          </>
+        ) : (
+          <span className="text-xs text-slate-500">
+            현재 규칙을 충족하는 5파 구조 없음
+          </span>
+        )}
+      </div>
+    </div>
+  </div>
+
+
+  {/* =========================================
+      기술조건 요약
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      7. 기술조건 요약
+    </h4>
+
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 text-center">
+        <span className="text-[11px] text-emerald-400 block">
+          긍정
+        </span>
+
+        <span className="text-xl font-bold text-emerald-300">
+          {strategyData?.technicalAssessment?.favorableCount ?? 0}
+        </span>
+      </div>
+
+      <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3 text-center">
+        <span className="text-[11px] text-amber-400 block">
+          주의
+        </span>
+
+        <span className="text-xl font-bold text-amber-300">
+          {strategyData?.technicalAssessment?.cautionCount ?? 0}
+        </span>
+      </div>
+
+      <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-center">
+        <span className="text-[11px] text-slate-400 block">
+          중립
+        </span>
+
+        <span className="text-xl font-bold text-slate-300">
+          {strategyData?.technicalAssessment?.neutralCount ?? 0}
+        </span>
+      </div>
+    </div>
+  </div>
+
+
+  {/* =========================================
+      데이터 출처 안내
+  ========================================= */}
+  <div className="border-t border-slate-800 pt-4">
+    <p className="text-[11px] text-slate-500 leading-relaxed">
+      가격 전략은 실제 KIS OHLCV에서 계산한 지지선·저항선·ATR을 기반으로 하며,
+      AI가 임의로 진입가·목표가·손절가를 생성하지 않습니다.
+      데이터가 없으면 추측하지 않고 데이터 없음으로 표시합니다.
+    </p>
+  </div>
+</section>
 
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
