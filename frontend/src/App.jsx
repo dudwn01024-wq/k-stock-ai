@@ -146,12 +146,254 @@ class RealStockBackendService {
   }
 
   async getStockStrategy(symbol) {
-    const response = await fetch(
-      `${this.baseUrl}/stock/strategy?symbol=${encodeURIComponent(symbol)}`
+  const response = await fetch(
+    `${this.baseUrl}/kis/trading-strategy-test?symbol=${encodeURIComponent(symbol)}`
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `고급 매매전략 API 오류 (${response.status})`
     );
-    if (!response.ok) throw new Error(`전략 API 오류 (${response.status})`);
-    return response.json();
   }
+
+  const payload =
+    await response.json();
+
+  const strategy =
+    payload?.strategy || {};
+
+  const chart =
+    payload?.chartAnalysis || {};
+
+  const market =
+    payload?.marketContext || {};
+
+  const technical =
+    strategy?.technicalAssessment || {};
+
+  const marketAssessment =
+    strategy?.marketAssessment || {};
+
+  const foreignerNet =
+    market?.foreignerNet ?? null;
+
+  const institutionNet =
+    market?.institutionNet ?? null;
+
+  const netSupplyTotal =
+    Number.isFinite(Number(foreignerNet)) &&
+    Number.isFinite(Number(institutionNet))
+      ? Number(foreignerNet) +
+        Number(institutionNet)
+      : null;
+
+  const trendStatus =
+    technical
+      ?.conditions
+      ?.trend
+      ?.status;
+
+  const volumeStatus =
+    marketAssessment
+      ?.conditions
+      ?.volume
+      ?.status;
+
+  const supplyStatus =
+    marketAssessment
+      ?.conditions
+      ?.supply
+      ?.status;
+
+  return {
+    // 기존 App.jsx와 호환
+    symbol,
+
+    currentPrice:
+      payload?.currentPrice ??
+      strategy?.currentPrice ??
+      null,
+
+    ma5:
+      chart?.ma5 ??
+      null,
+
+    ma20:
+      chart?.ma20 ??
+      null,
+
+    ma60:
+      chart?.ma60 ??
+      null,
+
+    ma120:
+      chart?.ma120 ??
+      null,
+
+    recentHigh20:
+      null,
+
+    recentLow20:
+      null,
+
+    nearestSupport:
+      strategy?.nearestSupport ??
+      null,
+
+    nearestResistance:
+      strategy?.nearestResistance ??
+      null,
+
+    currentVolume:
+      market?.volume ??
+      null,
+
+    averageVolume20:
+      market?.averageVolume20 ??
+      null,
+
+    volumeRatio:
+      market?.volumeRatio ??
+      null,
+
+    foreignerNet,
+
+    institutionNet,
+
+    netSupplyTotal,
+
+    trendPassed:
+      trendStatus === 'FAVORABLE'
+        ? true
+        : trendStatus === 'CAUTION'
+          ? false
+          : null,
+
+    volumePassed:
+      volumeStatus === 'FAVORABLE'
+        ? true
+        : volumeStatus === 'CAUTION'
+          ? false
+          : null,
+
+    supplyPassed:
+      supplyStatus === 'FAVORABLE'
+        ? true
+        : supplyStatus === 'CAUTION'
+          ? false
+          : null,
+
+    signal:
+      strategy
+        ?.finalAssessment
+        ?.status === 'ENTRY_CANDIDATE'
+          ? 'BUY_CANDIDATE'
+          : 'WAIT',
+
+    tradeSignal:
+      strategy
+        ?.finalAssessment
+        ?.status ??
+      'WAIT',
+
+    entryPrice:
+      strategy?.entryPrice ??
+      null,
+
+    takeProfitPrice:
+      strategy?.takeProfitPrice ??
+      null,
+
+    stopLossPrice:
+      strategy?.stopLossPrice ??
+      null,
+
+    dataPoints:
+      payload?.dataPoints ??
+      0,
+
+    // 새 고급 분석 데이터
+    rsi14:
+      chart?.rsi14 ??
+      null,
+
+    macd:
+      chart?.macd ??
+      null,
+
+    bollingerBands:
+      chart?.bollingerBands ??
+      null,
+
+    atr14:
+      chart?.atr14 ??
+      null,
+
+    candlePatterns:
+      chart?.candlePatterns ??
+      null,
+
+    supportResistance:
+      chart?.supportResistance ??
+      null,
+
+    chartPatterns:
+      chart?.chartPatterns ??
+      null,
+
+    elliottWave:
+      chart?.elliottWave ??
+      null,
+
+    technicalAssessment:
+      strategy?.technicalAssessment ??
+      null,
+
+    marketAssessment:
+      strategy?.marketAssessment ??
+      null,
+
+    riskRewardAssessment:
+      strategy?.riskRewardAssessment ??
+      null,
+
+    executionAssessment:
+      strategy?.executionAssessment ??
+      null,
+
+    finalAssessment:
+      strategy?.finalAssessment ??
+      null,
+
+    currentToEntryRate:
+      strategy?.currentToEntryRate ??
+      null,
+
+    entryToTargetRate:
+      strategy?.entryToTargetRate ??
+      null,
+
+    entryToStopRate:
+      strategy?.entryToStopRate ??
+      null,
+
+    riskRewardRatio:
+      strategy?.riskRewardRatio ??
+      null,
+
+    calculationRules:
+      strategy?.calculationRules ??
+      null,
+
+    dataUsage:
+      strategy?.dataUsage ??
+      null,
+
+    newsAssessment:
+      market?.newsAssessment ??
+      null
+  };
+}
 
   async getAIAnalysis(symbol) {
     const response = await fetch(
