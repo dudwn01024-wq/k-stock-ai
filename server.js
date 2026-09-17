@@ -4597,7 +4597,82 @@ app.get(
         });
     }
   }
-);// ========================================
+);
+// ========================================
+// KIS CHART ANALYSIS TEST API
+// 실제 OHLCV → MA5 / MA20 / MA60 / MA120
+// ========================================
+
+app.get(
+  '/api/kis/chart-analysis-test',
+  async (req, res) => {
+    const symbol =
+      String(
+        req.query.symbol ||
+        '005930'
+      ).trim();
+
+    if (
+      !/^\d{6}$/.test(symbol)
+    ) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error:
+            '종목코드는 6자리 숫자여야 합니다.'
+        });
+    }
+
+    try {
+      const rows =
+        await fetchKisDailyOHLCV(
+          symbol,
+          {
+            maxBars: 130
+          }
+        );
+
+      const analysis =
+        analyzeMovingAverages(
+          rows
+        );
+
+      return res.json({
+        success: true,
+        source:
+          'KIS_OPEN_API',
+        symbol,
+        count:
+          rows.length,
+
+        latest:
+          rows.length > 0
+            ? rows[
+                rows.length - 1
+              ]
+            : null,
+
+        analysis
+      });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] KIS CHART ANALYSIS TEST ERROR:',
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+          symbol,
+          error:
+            error.message
+        });
+    }
+  }
+);
+// ========================================
 // ROOT
 // ========================================
 
