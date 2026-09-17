@@ -4675,6 +4675,95 @@ app.get(
   }
 );
 // ========================================
+// KIS TRADING STRATEGY TEST API
+// 실제 OHLCV → 차트분석 → 매매전략
+// ========================================
+
+app.get(
+  '/api/kis/trading-strategy-test',
+  async (req, res) => {
+    const symbol =
+      String(
+        req.query.symbol ||
+        '005930'
+      ).trim();
+
+    if (
+      !/^\d{6}$/.test(symbol)
+    ) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error:
+            '종목코드는 6자리 숫자여야 합니다.'
+        });
+    }
+
+    try {
+      const rows =
+        await fetchKisDailyOHLCV(
+          symbol,
+          {
+            maxBars: 130
+          }
+        );
+
+      const chartAnalysis =
+        analyzeMovingAverages(
+          rows
+        );
+
+      const strategy =
+        calculateTradingStrategy({
+          symbol,
+
+          currentPrice:
+            chartAnalysis
+              ?.latestClose ??
+            null,
+
+          chartAnalysis
+        });
+
+      return res.json({
+        success: true,
+
+        source:
+          'KIS_OPEN_API',
+
+        symbol,
+
+        dataPoints:
+          rows.length,
+
+        currentPrice:
+          chartAnalysis
+            ?.latestClose ??
+          null,
+
+        chartAnalysis,
+
+        strategy
+      });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] KIS TRADING STRATEGY TEST ERROR:',
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+          symbol,
+          error:
+            error.message
+        });
+    }
+  }
+);
+// ========================================
 // ROOT
 // ========================================
 
