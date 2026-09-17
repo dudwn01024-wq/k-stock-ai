@@ -4529,6 +4529,70 @@ app.get(
 );
 
 // ========================================
+// KIS OHLCV TEST API
+// ========================================
+
+app.get(
+  '/api/kis/ohlcv-test',
+  async (req, res) => {
+    const symbol =
+      String(
+        req.query.symbol ||
+        '005930'
+      ).trim();
+
+    if (
+      !/^\d{6}$/.test(symbol)
+    ) {
+      return res
+        .status(400)
+        .json({
+          error:
+            '종목코드는 6자리 숫자여야 합니다.'
+        });
+    }
+
+    try {
+      const rows =
+        await fetchKisDailyOHLCV(
+          symbol,
+          {
+            maxBars: 20
+          }
+        );
+
+      return res.json({
+        success: true,
+        source:
+          'KIS_OPEN_API',
+        symbol,
+        count:
+          rows.length,
+        latest:
+          rows.length > 0
+            ? rows[
+                rows.length - 1
+              ]
+            : null,
+        rows
+      });
+    } catch (error) {
+      console.error(
+        '[K-Stock AI] KIS OHLCV TEST ERROR:',
+        error
+      );
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+          symbol,
+          error:
+            error.message
+        });
+    }
+  }
+);// ========================================
 // ROOT
 // ========================================
 
