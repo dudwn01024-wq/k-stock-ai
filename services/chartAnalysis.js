@@ -985,9 +985,16 @@ const findPivotPoints = (
     };
   }
 
+  const startIndex =
+    Math.max(
+      0,
+      chronologicalRows.length -
+        lookback
+    );
+
   const data =
     chronologicalRows.slice(
-      -lookback
+      startIndex
     );
 
   for (
@@ -1047,13 +1054,20 @@ const findPivotPoints = (
       }
     }
 
+    const originalIndex =
+      startIndex + i;
+
     if (isPivotHigh) {
       highs.push({
         type: 'HIGH',
-        index: i,
+
+        index:
+          originalIndex,
+
         date:
           current.date ||
           null,
+
         price:
           current.high
       });
@@ -1062,10 +1076,14 @@ const findPivotPoints = (
     if (isPivotLow) {
       lows.push({
         type: 'LOW',
-        index: i,
+
+        index:
+          originalIndex,
+
         date:
           current.date ||
           null,
+
         price:
           current.low
       });
@@ -1077,8 +1095,6 @@ const findPivotPoints = (
     lows
   };
 };
-
-
 // ========================================
 // 가격대 묶기
 // 비슷한 지지/저항을 하나의 레벨로 계산
