@@ -4675,8 +4675,14 @@ app.get(
   }
 );
 // ========================================
+// ========================================
 // KIS TRADING STRATEGY TEST API
-// 실제 OHLCV → 차트분석 → 매매전략
+// 실제 OHLCV
+// + 차트분석
+// + 거래량
+// + 외국인/기관 수급
+// + 실제 뉴스
+// → 종합 매매전략
 // ========================================
 
 app.get(
@@ -4695,58 +4701,471 @@ app.get(
         .status(400)
         .json({
           success: false,
+
           error:
             '종목코드는 6자리 숫자여야 합니다.'
         });
     }
 
-    try {
-      const rows =
-        await fetchKisDailyOHLCV(
-          symbol,
-          {
-            maxBars: 130
-          }
+
+    // ------------------------------------
+    // 안전한 숫자 변환
+    // 빈 값은 절대 0으로 만들지 않음
+    // ------------------------------------
+
+    const safeNumber = (
+      value
+    ) => {
+      if (
+        value === null ||
+        value === undefined ||
+        value === ''
+      ) {
+        return null;
+      }
+
+      const number =
+        Number(
+          String(value)
+            .replace(/,/g, '')
+            .trim()
         );
+
+      return Number.isFinite(
+        number
+      )
+        ? number
+        : null;
+    };
+
+
+    try {
+
+      // ==================================
+      // 실제 데이터 동시 조회
+      // ==================================
+
+      const [
+        rows,
+        quoteResult,
+        newsResult
+      ] =
+        await Promise.all([
+
+          // KIS 실제 OHLCV
+          fetchKisDailyOHLCV(
+            symbol,
+            {
+              maxBars: 130
+            }
+          ),
+
+          // 실제 시세 + 수급
+          fetchStockQuoteData(
+            symbol
+          )
+            .then(
+              (data) => ({
+                ok: true,
+                data,
+                error: null
+              })
+            )
+            .catch(
+              (error) => {
+                console.warn(
+                  `[K-Stock AI] Strategy quote fetch failed for ${symbol}:`,
+                  error.message
+                );
+
+                return {
+                  ok: false,
+                  data: null,
+                  error:
+                    error.message
+                };
+              }
+            ),
+
+          // 실제 최신 뉴스
+          fetchStockNewsBySymbol(
+            symbol
+          )
+            .then(
+              (data) => ({
+                ok: true,
+                data,
+                error: null
+              })
+            )
+            .catch(
+              (error) => {
+                console.warn(
+                  `[K-Stock AI] Strategy news fetch failed for ${symbol}:`,
+                  error.message
+                );
+
+                return {
+                  ok: false,
+                  data: [],
+                  error:
+                    error.message
+                };
+              }
+            )
+        ]);
+
+
+      // ==================================
+      // 차트 분석
+      // ==================================
 
       const chartAnalysis =
         analyzeMovingAverages(
           rows
         );
 
+
+      // ==================================
+      // KIS 최신 일봉
+      // ==================================
+
+      const latestRow =
+        rows.length > 0
+          ? rows[
+              rows.length - 1
+            ]
+          : null;
+
+
+      // ==================================
+      // 이전 20거래일 평균 거래량
+      //
+      // 최신 봉은 제외
+      // ==================================
+
+      const previous20Rows =
+        rows.length >= 21
+          ? rows.slice(
+              -21,
+              -1
+            )
+          : [];
+
+
+      const previous20Volumes =
+        previous20Rows
+          .map(
+            (item) =>
+              safeNumber(
+                item?.volume
+              )
+          )
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              )
+          );
+
+
+      const averageVolume20 =
+        previous20Rows.length ===
+          20 &&
+        previous20Volumes.length ===
+          20
+          ? previous20Volumes
+              .reduce(
+                (
+                  sum,
+                  value
+                ) =>
+                  sum + value,
+                0
+              ) / 20
+          : null;
+
+
+      // ==================================
+      // 최신 실제 거래량
+      // KIS OHLCV 기준
+      // ==================================
+
+      const currentVolume =
+        safeNumber(
+          latestRow?.volume
+        );
+
+
+      // ==================================
+      // 실제 시세 / 수급
+      // ==================================
+
+      const quote =
+        quoteResult?.data ||
+        null;
+
+
+      const quoteCurrentPrice =
+        safeNumber(
+          quote?.currentPrice
+        );
+
+
+      const foreignerNet =
+        safeNumber(
+          quote?.foreignerNet
+        );
+
+
+      const institutionNet =
+        safeNumber(
+          quote?.institutionNet
+        );
+
+
+      // ==================================
+      // 실제 최신 뉴스 평가
+      // ==================================
+
+      const news =
+        Array.isArray(
+          newsResult?.data
+        )
+          ? newsResult.data
+          : [];
+
+
+      const rawNewsAssessment =
+        newsResult?.ok
+          ? assessLatestNews(
+              news
+            )
+          : null;
+
+
+      // tradingStrategy.js가 사용하는
+      // 형식으로 변환
+      //
+      // 뉴스 없음 = null
+      // 악재 있음 = true
+      // 악재 없음 = false
+
+      const hasCautionSignal =
+        rawNewsAssessment
+          ?.newsPassed === false
+          ? true
+
+          : rawNewsAssessment
+              ?.newsPassed ===
+            true
+            ? false
+
+            : null;
+
+
+      // ==================================
+      // 실제 현재가
+      //
+      // 1순위 = 실시간/현재 시세
+      // 2순위 = KIS 최신 종가
+      // ==================================
+
+      const currentPrice =
+        Number.isFinite(
+          quoteCurrentPrice
+        )
+          ? quoteCurrentPrice
+
+          : chartAnalysis
+              ?.latestClose ??
+            null;
+
+
+      // ==================================
+      // Market Context
+      // ==================================
+
+      const rawMarketContext = {
+
+        volume:
+          currentVolume,
+
+        averageVolume20,
+
+        foreignerNet,
+
+        institutionNet,
+
+        newsAssessment: {
+          hasCautionSignal,
+
+          newsPassed:
+            rawNewsAssessment
+              ?.newsPassed ??
+            null,
+
+          sentiment:
+            rawNewsAssessment
+              ?.sentiment ??
+            null,
+
+          newsCount:
+            rawNewsAssessment
+              ?.newsCount ??
+            0,
+
+          positiveCount:
+            rawNewsAssessment
+              ?.positiveCount ??
+            0,
+
+          negativeCount:
+            rawNewsAssessment
+              ?.negativeCount ??
+            0
+        }
+      };
+
+
+      // ==================================
+      // 모든 시장 데이터가 있는지 확인
+      //
+      // 하나라도 없으면
+      // 최종 매매판정을 하지 않음
+      // ==================================
+
+      const marketContextComplete =
+        Number.isFinite(
+          currentVolume
+        ) &&
+
+        Number.isFinite(
+          averageVolume20
+        ) &&
+
+        Number.isFinite(
+          foreignerNet
+        ) &&
+
+        Number.isFinite(
+          institutionNet
+        ) &&
+
+        typeof hasCautionSignal ===
+          'boolean';
+
+
+      // 데이터가 완전할 때만
+      // 종합판정 엔진에 전달
+      //
+      // 부족하면 {}
+      // → TECHNICAL_ONLY 처리
+
+      const strategyMarketContext =
+        marketContextComplete
+          ? rawMarketContext
+          : {};
+
+
+      // ==================================
+      // 최종 전략 계산
+      // ==================================
+
       const strategy =
         calculateTradingStrategy({
           symbol,
 
-          currentPrice:
-            chartAnalysis
-              ?.latestClose ??
-            null,
+          currentPrice,
 
-          chartAnalysis
+          chartAnalysis,
+
+          marketContext:
+            strategyMarketContext
         });
+
+
+      // ==================================
+      // RESULT
+      // ==================================
 
       return res.json({
         success: true,
 
         source:
-          'KIS_OPEN_API',
+          'KIS_OPEN_API + NAVER_STOCK_DATA + NAVER_STOCK_NEWS',
 
         symbol,
 
         dataPoints:
           rows.length,
 
-        currentPrice:
+        latestChartDate:
           chartAnalysis
-            ?.latestClose ??
+            ?.latestDate ??
           null,
+
+        currentPrice,
+
+        marketContext: {
+
+          complete:
+            marketContextComplete,
+
+          volume:
+            currentVolume,
+
+          averageVolume20,
+
+          volumeRatio:
+            Number.isFinite(
+              currentVolume
+            ) &&
+            Number.isFinite(
+              averageVolume20
+            ) &&
+            averageVolume20 > 0
+              ? Number(
+                  (
+                    currentVolume /
+                    averageVolume20
+                  ).toFixed(2)
+                )
+              : null,
+
+          foreignerNet,
+
+          institutionNet,
+
+          supplyDate:
+            quote?.supplyDate ??
+            null,
+
+          newsAssessment:
+            rawNewsAssessment,
+
+          dataStatus: {
+
+            kisOHLCV:
+              rows.length > 0,
+
+            quote:
+              quoteResult?.ok ===
+              true,
+
+            news:
+              newsResult?.ok ===
+              true
+          }
+        },
 
         chartAnalysis,
 
         strategy
       });
+
     } catch (error) {
+
       console.error(
         '[K-Stock AI] KIS TRADING STRATEGY TEST ERROR:',
         error
@@ -4756,7 +5175,9 @@ app.get(
         .status(500)
         .json({
           success: false,
+
           symbol,
+
           error:
             error.message
         });
