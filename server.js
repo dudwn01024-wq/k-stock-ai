@@ -8,6 +8,11 @@ const {
   fetchKisDailyOHLCV
 } = require('./services/kisMarketData');
 
+const {
+  analyzeMovingAverages
+} = require('./services/chartAnalysis');
+
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
