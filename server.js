@@ -3684,7 +3684,295 @@ app.get(
     }
   }
 );
+// ========================================
+// INDIVIDUAL STOCK AI ANALYSIS
+// ========================================
 
+const analyzeStockWithGemini =
+  async ({
+    quote,
+    strategy,
+    news
+  }) => {
+
+    let riskReward;
+
+
+    // 새 tradingStrategy.js의
+    // 실제 계산된 손익비 사용
+    if (
+      strategy
+        ?.riskRewardAssessment
+        ?.available === true
+    ) {
+      const currentPrice =
+        parseNumber(
+          strategy?.currentPrice
+        );
+
+      const entryPrice =
+        parseNumber(
+          strategy?.entryPrice
+        );
+
+      const targetPrice =
+        parseNumber(
+          strategy?.takeProfitPrice
+        );
+
+      const stopPrice =
+        parseNumber(
+          strategy?.stopLossPrice
+        );
+
+
+      const currentUpsideAmount =
+        Number.isFinite(currentPrice) &&
+        Number.isFinite(targetPrice)
+          ? targetPrice - currentPrice
+          : null;
+
+
+      const currentDownsideAmount =
+        Number.isFinite(currentPrice) &&
+        Number.isFinite(stopPrice)
+          ? currentPrice - stopPrice
+          : null;
+
+
+      const currentUpsidePercent =
+        Number.isFinite(currentUpsideAmount) &&
+        Number.isFinite(currentPrice) &&
+        currentPrice > 0
+          ? round2(
+              (
+                currentUpsideAmount /
+                currentPrice
+              ) * 100
+            )
+          : null;
+
+
+      const currentDownsidePercent =
+        Number.isFinite(currentDownsideAmount) &&
+        Number.isFinite(currentPrice) &&
+        currentPrice > 0
+          ? round2(
+              (
+                currentDownsideAmount /
+                currentPrice
+              ) * 100
+            )
+          : null;
+
+
+      const currentRiskRewardRatio =
+        Number.isFinite(currentUpsideAmount) &&
+        Number.isFinite(currentDownsideAmount) &&
+        currentDownsideAmount > 0
+          ? round2(
+              currentUpsideAmount /
+              currentDownsideAmount
+            )
+          : null;
+
+
+      riskReward = {
+        available: true,
+
+        currentUpsideAmount,
+
+        currentUpsidePercent,
+
+        currentDownsideAmount,
+
+        currentDownsidePercent,
+
+        currentRiskRewardRatio,
+
+        entryRewardAmount:
+          strategy?.expectedReward ??
+          null,
+
+        entryRewardPercent:
+          strategy?.entryToTargetRate ??
+          null,
+
+        entryRiskAmount:
+          strategy?.expectedRisk ??
+          null,
+
+        entryRiskPercent:
+          Number.isFinite(
+            Number(
+              strategy?.entryToStopRate
+            )
+          )
+            ? Math.abs(
+                Number(
+                  strategy.entryToStopRate
+                )
+              )
+            : null,
+
+        entryRiskRewardRatio:
+          strategy?.riskRewardRatio ??
+          null,
+
+        rewardGreaterThanRisk:
+          Number.isFinite(
+            Number(
+              strategy?.riskRewardRatio
+            )
+          )
+            ? Number(
+                strategy.riskRewardRatio
+              ) >= 1
+            : null,
+
+        currentPriceBelowTarget:
+          Number.isFinite(currentPrice) &&
+          Number.isFinite(targetPrice)
+            ? currentPrice < targetPrice
+            : null,
+
+        classification:
+          strategy
+            ?.finalAssessment
+            ?.status ??
+          'NOT_AVAILABLE',
+
+        reason:
+          strategy
+            ?.finalAssessment
+            ?.reason ??
+          null
+      };
+
+    } else {
+
+      // 기존 전략과의 호환 유지
+      riskReward =
+        calculateRiskReward(
+          strategy
+        );
+    }
+
+
+    const prompt =
+      buildGeminiPrompt({
+        quote,
+        strategy,
+        riskReward,
+        news
+      });
+
+
+    const geminiResult =
+      await callGeminiPromptWithRetry(
+        prompt
+      );
+
+
+    const analysis =
+      geminiResult?.analysis &&
+      typeof geminiResult.analysis ===
+        'object'
+        ? geminiResult.analysis
+        : {};
+
+
+    // ====================================
+    // AI가 가격을 바꿔도
+    // 실제 backend 계산값으로 강제 덮어쓰기
+    // ====================================
+
+    if (
+      !analysis.strategyExplanation ||
+      typeof analysis
+        .strategyExplanation !==
+        'object'
+    ) {
+      analysis.strategyExplanation =
+        {};
+    }
+
+
+    analysis.strategyExplanation.signal =
+      strategy
+        ?.finalAssessment
+        ?.status ??
+      strategy?.signal ??
+      'DATA_INSUFFICIENT';
+
+
+    analysis.strategyExplanation.finalLabel =
+      strategy
+        ?.finalAssessment
+        ?.label ??
+      null;
+
+
+    analysis.strategyExplanation.entryPrice =
+      Number.isFinite(
+        Number(
+          strategy?.entryPrice
+        )
+      )
+        ? Number(
+            strategy.entryPrice
+          )
+        : null;
+
+
+    analysis.strategyExplanation.targetPrice =
+      Number.isFinite(
+        Number(
+          strategy?.takeProfitPrice
+        )
+      )
+        ? Number(
+            strategy.takeProfitPrice
+          )
+        : null;
+
+
+    analysis.strategyExplanation.stopLossPrice =
+      Number.isFinite(
+        Number(
+          strategy?.stopLossPrice
+        )
+      )
+        ? Number(
+            strategy.stopLossPrice
+          )
+        : null;
+
+
+    analysis.strategyExplanation.riskRewardRatio =
+      Number.isFinite(
+        Number(
+          strategy?.riskRewardRatio
+        )
+      )
+        ? Number(
+            strategy.riskRewardRatio
+          )
+        : null;
+
+
+    return {
+      analysis,
+
+      modelUsed:
+        geminiResult.modelUsed,
+
+      attemptUsed:
+        geminiResult.attemptUsed,
+
+      riskReward
+    };
+  };
 // ========================================
 // RECOMMENDATION GEMINI PROMPT
 // ========================================
