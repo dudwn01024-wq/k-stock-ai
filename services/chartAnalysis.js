@@ -528,7 +528,149 @@ const calculateMACD = (
 
 
 // ----------------------------------------
+// 볼린저밴드 계산
+// 기본값 20일 / 표준편차 2배
+// ----------------------------------------
+
+const calculateBollingerBands = (
+  rows,
+  period = 20,
+  stdDevMultiplier = 2
+) => {
+  const emptyResult = {
+    middle: null,
+    upper: null,
+    lower: null,
+    bandwidth: null,
+    position: null
+  };
+
+  if (
+    !Array.isArray(rows) ||
+    rows.length < period
+  ) {
+    return emptyResult;
+  }
+
+  const closes =
+    rows
+      .slice(
+        0,
+        period
+      )
+      .map(
+        (item) =>
+          toNumber(item.close)
+      );
+
+  if (
+    closes.some(
+      (value) =>
+        !Number.isFinite(value)
+    )
+  ) {
+    return emptyResult;
+  }
+
+  const middle =
+    closes.reduce(
+      (sum, value) =>
+        sum + value,
+      0
+    ) / period;
+
+  const variance =
+    closes.reduce(
+      (sum, value) => {
+        const difference =
+          value - middle;
+
+        return (
+          sum +
+          difference *
+            difference
+        );
+      },
+      0
+    ) / period;
+
+  const standardDeviation =
+    Math.sqrt(
+      variance
+    );
+
+  const upper =
+    middle +
+    standardDeviation *
+      stdDevMultiplier;
+
+  const lower =
+    middle -
+    standardDeviation *
+      stdDevMultiplier;
+
+  const latestClose =
+    closes[0];
+
+  const bandwidth =
+    middle !== 0
+      ? (
+          (
+            upper -
+            lower
+          ) /
+          middle
+        ) * 100
+      : null;
+
+  const bandRange =
+    upper -
+    lower;
+
+  const position =
+    bandRange !== 0
+      ? (
+          (
+            latestClose -
+            lower
+          ) /
+          bandRange
+        ) * 100
+      : null;
+
+  return {
+    middle:
+      round2(
+        middle
+      ),
+
+    upper:
+      round2(
+        upper
+      ),
+
+    lower:
+      round2(
+        lower
+      ),
+
+    bandwidth:
+      round2(
+        bandwidth
+      ),
+
+    position:
+      round2(
+        position
+      )
+  };
+};
+
+
+// ----------------------------------------
 // 차트 분석
+// 기존 함수명 유지:
+// server.js와의 호환성을 깨지 않기 위함
 // ----------------------------------------
 
 const analyzeMovingAverages = (
@@ -558,6 +700,14 @@ const analyzeMovingAverages = (
         macd: null,
         signal: null,
         histogram: null
+      },
+
+      bollingerBands: {
+        middle: null,
+        upper: null,
+        lower: null,
+        bandwidth: null,
+        position: null
       }
     };
   }
@@ -610,6 +760,13 @@ const analyzeMovingAverages = (
         12,
         26,
         9
+      ),
+
+    bollingerBands:
+      calculateBollingerBands(
+        rows,
+        20,
+        2
       )
   };
 };
@@ -620,5 +777,6 @@ module.exports = {
   calculateSMA,
   calculateRSI,
   calculateMACD,
+  calculateBollingerBands,
   analyzeMovingAverages
 };
