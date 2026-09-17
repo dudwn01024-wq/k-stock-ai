@@ -231,10 +231,12 @@ class RealStockBackendService {
       null,
 
     recentHigh20:
-      null,
+  payload?.recentHigh20 ??
+  null,
 
-    recentLow20:
-      null,
+recentLow20:
+  payload?.recentLow20 ??
+  null,
 
     nearestSupport:
       strategy?.nearestSupport ??
