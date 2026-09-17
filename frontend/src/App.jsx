@@ -1714,33 +1714,33 @@ export default function App() {
       </div>
 
       <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-        <span className="text-[11px] text-slate-400 block mb-1">
-          최신 뉴스
-        </span>
+  <span className="text-[11px] text-slate-400 block mb-1">
+    최신 뉴스
+  </span>
 
-        <span
-          className={`text-sm font-bold ${
-            strategyData?.newsAssessment?.sentiment === 'POSITIVE'
-              ? 'text-emerald-400'
-              : strategyData?.newsAssessment?.sentiment === 'CAUTION'
-                ? 'text-red-400'
-                : 'text-slate-300'
-          }`}
-        >
-          {strategyData?.newsAssessment?.sentiment === 'POSITIVE'
-            ? '긍정'
-            : strategyData?.newsAssessment?.sentiment === 'CAUTION'
-              ? '주의'
-              : strategyData?.newsAssessment?.sentiment === 'NEUTRAL'
-                ? '중립'
-                : '데이터 없음'}
-        </span>
+  <span
+    className={`text-sm font-bold ${
+      strategyData?.marketAssessment?.conditions?.news?.status === 'FAVORABLE'
+        ? 'text-emerald-400'
+        : strategyData?.marketAssessment?.conditions?.news?.status === 'CAUTION'
+          ? 'text-red-400'
+          : 'text-slate-300'
+    }`}
+  >
+    {strategyData?.marketAssessment?.conditions?.news?.status === 'FAVORABLE'
+      ? '긍정'
+      : strategyData?.marketAssessment?.conditions?.news?.status === 'CAUTION'
+        ? '주의'
+        : strategyData?.marketAssessment?.conditions?.news?.status === 'NEUTRAL'
+          ? '중립'
+          : '데이터 없음'}
+  </span>
 
-        <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
-          {strategyData?.newsAssessment?.reason || '뉴스 평가 데이터 없음'}
-        </p>
-      </div>
-    </div>
+  <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+    {strategyData?.marketAssessment?.conditions?.news?.detail ||
+      '뉴스 평가 데이터 없음'}
+  </p>
+</div>
   </div>
 
 
