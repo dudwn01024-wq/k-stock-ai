@@ -11,7 +11,9 @@ const {
 const {
   analyzeMovingAverages
 } = require('./services/chartAnalysis');
-
+const {
+  calculateTradingStrategy
+} = require('./services/tradingStrategy');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
