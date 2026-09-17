@@ -2291,10 +2291,13 @@ const buildRecommendationResult =
           strategy.supplyPassed,
 
         signal:
-          strategy.signal,
+  strategy.signal,
 
-        entryPrice:
-          strategy.entryPrice,
+tradeSignal:
+  strategy.tradeSignal,
+
+entryPrice:
+  strategy.entryPrice,
 
         takeProfitPrice:
           strategy.takeProfitPrice,
