@@ -1936,7 +1936,8 @@ export default function App() {
       가격 전략은 실제 KIS OHLCV에서 계산한 지지선·저항선·ATR을 기반으로 하며,
       AI가 임의로 진입가·목표가·손절가를 생성하지 않습니다.
       데이터가 없으면 추측하지 않고 데이터 없음으로 표시합니다.
-    </p>
+         </p>
+    </div>
   </div>
 </section>
 
