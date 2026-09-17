@@ -5657,7 +5657,61 @@ app.get(
               rows.length - 1
             ]
           : null;
+// ==================================
+// 최근 20거래일 실제 최고가 / 최저가
+// KIS OHLCV 기준
+// ==================================
 
+const recent20Rows =
+  rows.slice(-20);
+
+
+const recentHighValues =
+  recent20Rows
+    .map(
+      (item) =>
+        safeNumber(
+          item?.high
+        )
+    )
+    .filter(
+      (value) =>
+        Number.isFinite(
+          value
+        )
+    );
+
+
+const recentLowValues =
+  recent20Rows
+    .map(
+      (item) =>
+        safeNumber(
+          item?.low
+        )
+    )
+    .filter(
+      (value) =>
+        Number.isFinite(
+          value
+        )
+    );
+
+
+const recentHigh20 =
+  recentHighValues.length > 0
+    ? Math.max(
+        ...recentHighValues
+      )
+    : null;
+
+
+const recentLow20 =
+  recentLowValues.length > 0
+    ? Math.min(
+        ...recentLowValues
+      )
+    : null;
 
       // ==================================
       // 이전 20거래일 평균 거래량
@@ -5927,7 +5981,9 @@ app.get(
           null,
 
         currentPrice,
+recentHigh20,
 
+recentLow20,
         marketContext: {
 
           complete:
