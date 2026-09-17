@@ -1452,13 +1452,43 @@ export default function App() {
     </div>
   </div>
 
+{/* =========================================
+    최근 20일 고가 / 저가
+========================================= */}
+<div className="space-y-2 pt-2">
+  <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+    최근 20거래일 가격 범위
+  </h4>
 
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="bg-red-950/15 border border-red-900/30 rounded-xl p-4">
+      <span className="text-[11px] text-red-400 block">
+        20일 최고가
+      </span>
+
+      <span className="text-lg font-bold font-mono text-red-300">
+        {formatKRW(strategyData?.recentHigh20)}
+      </span>
+    </div>
+
+    <div className="bg-blue-950/15 border border-blue-900/30 rounded-xl p-4">
+      <span className="text-[11px] text-blue-400 block">
+        20일 최저가
+      </span>
+
+      <span className="text-lg font-bold font-mono text-blue-300">
+        {formatKRW(strategyData?.recentLow20)}
+      </span>
+    </div>
+  </div>
+</div>
   {/* =========================================
       이동평균선
   ========================================= */}
   <div className="space-y-2 pt-2">
     <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
       2. 이동평균선
+   
     </h4>
 
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
