@@ -1446,7 +1446,13 @@ export default function App() {
               : 'text-amber-400'
           }`}
         >
-          {strategyData?.riskRewardAssessment?.status || '데이터 없음'}
+          {strategyData?.riskRewardAssessment?.status === 'PASS'
+  ? '통과'
+  : strategyData?.riskRewardAssessment?.status === 'FAIL'
+    ? '미통과'
+    : strategyData?.riskRewardAssessment?.status === 'UNAVAILABLE'
+      ? '데이터 부족'
+      : '데이터 없음'}
         </span>
       </div>
     </div>
@@ -2054,6 +2060,45 @@ export default function App() {
         )}
       </div>
     )}
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-800">
+  <div className="bg-slate-900/70 rounded-lg p-3">
+    <span className="text-[11px] text-slate-500 block mb-1">
+      진입 고려가
+    </span>
+    <span className="text-sm font-bold font-mono text-emerald-300">
+      {formatKRW(strategyData?.entryPrice)}
+    </span>
+  </div>
+
+  <div className="bg-slate-900/70 rounded-lg p-3">
+    <span className="text-[11px] text-slate-500 block mb-1">
+      목표가
+    </span>
+    <span className="text-sm font-bold font-mono text-red-400">
+      {formatKRW(strategyData?.takeProfitPrice)}
+    </span>
+  </div>
+
+  <div className="bg-slate-900/70 rounded-lg p-3">
+    <span className="text-[11px] text-slate-500 block mb-1">
+      손절가
+    </span>
+    <span className="text-sm font-bold font-mono text-blue-400">
+      {formatKRW(strategyData?.stopLossPrice)}
+    </span>
+  </div>
+
+  <div className="bg-slate-900/70 rounded-lg p-3">
+    <span className="text-[11px] text-slate-500 block mb-1">
+      진입 기준 손익비
+    </span>
+    <span className="text-sm font-bold font-mono text-yellow-300">
+      {Number.isFinite(Number(strategyData?.riskRewardRatio))
+        ? `${Number(strategyData.riskRewardRatio).toFixed(2)} : 1`
+        : '데이터 없음'}
+    </span>
+  </div>
+</div>
   </div>
 )}
 
