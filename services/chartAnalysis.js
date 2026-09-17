@@ -24,6 +24,13 @@ const toNumber = (value) => {
 };
 
 
+const round2 = (value) => {
+  return Number.isFinite(value)
+    ? Number(value.toFixed(2))
+    : null;
+};
+
+
 // ----------------------------------------
 // OHLCV 데이터 정리
 // ----------------------------------------
@@ -138,9 +145,8 @@ const calculateSMA = (
       0
     );
 
-  return Number(
-    (sum / period)
-      .toFixed(2)
+  return round2(
+    sum / period
   );
 };
 
@@ -148,7 +154,7 @@ const calculateSMA = (
 // ----------------------------------------
 // RSI 계산
 // 기본값 RSI14
-// Wilder 방식 사용
+// Wilder 방식
 // ----------------------------------------
 
 const calculateRSI = (
@@ -273,9 +279,251 @@ const calculateRSI = (
       )
     );
 
-  return Number(
-    rsi.toFixed(2)
-  );
+  return round2(rsi);
+};
+
+
+// ----------------------------------------
+// EMA 계산
+// MACD 계산용
+// ----------------------------------------
+
+const calculateEMAValues = (
+  values,
+  period
+) => {
+  if (
+    !Array.isArray(values) ||
+    values.length < period
+  ) {
+    return [];
+  }
+
+  if (
+    values.some(
+      (value) =>
+        !Number.isFinite(value)
+    )
+  ) {
+    return [];
+  }
+
+  const result =
+    new Array(
+      values.length
+    ).fill(null);
+
+  const seedValues =
+    values.slice(
+      0,
+      period
+    );
+
+  const seedAverage =
+    seedValues.reduce(
+      (sum, value) =>
+        sum + value,
+      0
+    ) / period;
+
+  const multiplier =
+    2 /
+    (period + 1);
+
+  let previousEMA =
+    seedAverage;
+
+  result[
+    period - 1
+  ] =
+    previousEMA;
+
+  for (
+    let i = period;
+    i < values.length;
+    i += 1
+  ) {
+    const currentEMA =
+      (
+        values[i] -
+        previousEMA
+      ) *
+        multiplier +
+      previousEMA;
+
+    result[i] =
+      currentEMA;
+
+    previousEMA =
+      currentEMA;
+  }
+
+  return result;
+};
+
+
+// ----------------------------------------
+// MACD 계산
+// 기본값 12 / 26 / 9
+// ----------------------------------------
+
+const calculateMACD = (
+  rows,
+  shortPeriod = 12,
+  longPeriod = 26,
+  signalPeriod = 9
+) => {
+  const emptyResult = {
+    macd: null,
+    signal: null,
+    histogram: null
+  };
+
+  if (
+    !Array.isArray(rows)
+  ) {
+    return emptyResult;
+  }
+
+  const minimumBars =
+    longPeriod +
+    signalPeriod -
+    1;
+
+  if (
+    rows.length <
+    minimumBars
+  ) {
+    return emptyResult;
+  }
+
+  const closes =
+    rows
+      .map(
+        (item) =>
+          toNumber(item.close)
+      )
+      .filter(
+        (value) =>
+          Number.isFinite(value)
+      )
+      .reverse();
+
+  if (
+    closes.length <
+    minimumBars
+  ) {
+    return emptyResult;
+  }
+
+  const shortEMA =
+    calculateEMAValues(
+      closes,
+      shortPeriod
+    );
+
+  const longEMA =
+    calculateEMAValues(
+      closes,
+      longPeriod
+    );
+
+  if (
+    shortEMA.length === 0 ||
+    longEMA.length === 0
+  ) {
+    return emptyResult;
+  }
+
+  const macdValues = [];
+
+  for (
+    let i =
+      longPeriod - 1;
+    i < closes.length;
+    i += 1
+  ) {
+    const shortValue =
+      shortEMA[i];
+
+    const longValue =
+      longEMA[i];
+
+    if (
+      Number.isFinite(
+        shortValue
+      ) &&
+      Number.isFinite(
+        longValue
+      )
+    ) {
+      macdValues.push(
+        shortValue -
+        longValue
+      );
+    }
+  }
+
+  if (
+    macdValues.length <
+    signalPeriod
+  ) {
+    return emptyResult;
+  }
+
+  const signalValues =
+    calculateEMAValues(
+      macdValues,
+      signalPeriod
+    );
+
+  if (
+    signalValues.length === 0
+  ) {
+    return emptyResult;
+  }
+
+  const latestMacd =
+    macdValues[
+      macdValues.length - 1
+    ];
+
+  const latestSignal =
+    signalValues[
+      signalValues.length - 1
+    ];
+
+  if (
+    !Number.isFinite(
+      latestMacd
+    ) ||
+    !Number.isFinite(
+      latestSignal
+    )
+  ) {
+    return emptyResult;
+  }
+
+  const histogram =
+    latestMacd -
+    latestSignal;
+
+  return {
+    macd:
+      round2(
+        latestMacd
+      ),
+
+    signal:
+      round2(
+        latestSignal
+      ),
+
+    histogram:
+      round2(
+        histogram
+      )
+  };
 };
 
 
@@ -304,7 +552,13 @@ const analyzeMovingAverages = (
       ma60: null,
       ma120: null,
 
-      rsi14: null
+      rsi14: null,
+
+      macd: {
+        macd: null,
+        signal: null,
+        histogram: null
+      }
     };
   }
 
@@ -348,6 +602,14 @@ const analyzeMovingAverages = (
       calculateRSI(
         rows,
         14
+      ),
+
+    macd:
+      calculateMACD(
+        rows,
+        12,
+        26,
+        9
       )
   };
 };
@@ -357,5 +619,6 @@ module.exports = {
   normalizeOHLCV,
   calculateSMA,
   calculateRSI,
+  calculateMACD,
   analyzeMovingAverages
 };
