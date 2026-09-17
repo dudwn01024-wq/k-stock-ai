@@ -13,7 +13,9 @@ const toNumber = (value) => {
   }
 
   const number = Number(
-    String(value).replace(/,/g, '').trim()
+    String(value)
+      .replace(/,/g, '')
+      .trim()
   );
 
   return Number.isFinite(number)
@@ -69,18 +71,17 @@ const normalizeOHLCV = (ohlcv) => {
         )
       };
     })
-
-    // 종가가 없는 데이터는 계산에서 제외
     .filter(
       (item) =>
         Number.isFinite(item.close)
     );
 
-
-  // 날짜가 있으면 최신 날짜가 맨 앞으로 오도록 정렬
   const allHaveDate =
     rows.length > 0 &&
-    rows.every((item) => item.date);
+    rows.every(
+      (item) =>
+        item.date
+    );
 
   if (allHaveDate) {
     rows.sort(
@@ -97,7 +98,6 @@ const normalizeOHLCV = (ohlcv) => {
 
 // ----------------------------------------
 // 단순 이동평균선 SMA 계산
-// MA5 / MA20 / MA60 / MA120
 // ----------------------------------------
 
 const calculateSMA = (
@@ -113,9 +113,13 @@ const calculateSMA = (
 
   const closes =
     rows
-      .slice(0, period)
-      .map((item) =>
-        toNumber(item.close)
+      .slice(
+        0,
+        period
+      )
+      .map(
+        (item) =>
+          toNumber(item.close)
       );
 
   if (
@@ -135,22 +139,161 @@ const calculateSMA = (
     );
 
   return Number(
-    (sum / period).toFixed(2)
+    (sum / period)
+      .toFixed(2)
   );
 };
 
 
 // ----------------------------------------
-// 이동평균선 분석
+// RSI 계산
+// 기본값 RSI14
+// Wilder 방식 사용
+// ----------------------------------------
+
+const calculateRSI = (
+  rows,
+  period = 14
+) => {
+  if (
+    !Array.isArray(rows) ||
+    rows.length <
+      period + 1
+  ) {
+    return null;
+  }
+
+  const closes =
+    rows
+      .map(
+        (item) =>
+          toNumber(item.close)
+      )
+      .filter(
+        (value) =>
+          Number.isFinite(value)
+      )
+      .reverse();
+
+  if (
+    closes.length <
+      period + 1
+  ) {
+    return null;
+  }
+
+  let gainSum = 0;
+  let lossSum = 0;
+
+  for (
+    let i = 1;
+    i <= period;
+    i += 1
+  ) {
+    const change =
+      closes[i] -
+      closes[i - 1];
+
+    if (change > 0) {
+      gainSum += change;
+    } else if (
+      change < 0
+    ) {
+      lossSum +=
+        Math.abs(change);
+    }
+  }
+
+  let averageGain =
+    gainSum / period;
+
+  let averageLoss =
+    lossSum / period;
+
+  for (
+    let i =
+      period + 1;
+    i <
+      closes.length;
+    i += 1
+  ) {
+    const change =
+      closes[i] -
+      closes[i - 1];
+
+    const gain =
+      change > 0
+        ? change
+        : 0;
+
+    const loss =
+      change < 0
+        ? Math.abs(change)
+        : 0;
+
+    averageGain =
+      (
+        averageGain *
+          (period - 1) +
+        gain
+      ) / period;
+
+    averageLoss =
+      (
+        averageLoss *
+          (period - 1) +
+        loss
+      ) / period;
+  }
+
+  if (
+    averageLoss === 0 &&
+    averageGain === 0
+  ) {
+    return 50;
+  }
+
+  if (
+    averageLoss === 0
+  ) {
+    return 100;
+  }
+
+  const relativeStrength =
+    averageGain /
+    averageLoss;
+
+  const rsi =
+    100 -
+    (
+      100 /
+      (
+        1 +
+        relativeStrength
+      )
+    );
+
+  return Number(
+    rsi.toFixed(2)
+  );
+};
+
+
+// ----------------------------------------
+// 차트 분석
 // ----------------------------------------
 
 const analyzeMovingAverages = (
   ohlcv
 ) => {
   const rows =
-    normalizeOHLCV(ohlcv);
+    normalizeOHLCV(
+      ohlcv
+    );
 
-  if (rows.length === 0) {
+  if (
+    rows.length === 0
+  ) {
     return {
       dataPoints: 0,
       latestDate: null,
@@ -159,7 +302,9 @@ const analyzeMovingAverages = (
       ma5: null,
       ma20: null,
       ma60: null,
-      ma120: null
+      ma120: null,
+
+      rsi14: null
     };
   }
 
@@ -197,6 +342,12 @@ const analyzeMovingAverages = (
       calculateSMA(
         rows,
         120
+      ),
+
+    rsi14:
+      calculateRSI(
+        rows,
+        14
       )
   };
 };
@@ -205,5 +356,6 @@ const analyzeMovingAverages = (
 module.exports = {
   normalizeOHLCV,
   calculateSMA,
+  calculateRSI,
   analyzeMovingAverages
 };
