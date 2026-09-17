@@ -3072,85 +3072,618 @@ newsEvidence에는 suppliedNews에 실제 존재하는 기사만 넣는다.
 // INDIVIDUAL STOCK AI ANALYSIS
 // ========================================
 
-const analyzeStockWithGemini =
-  async ({
-    quote,
-    strategy,
-    news
-  }) => {
-    const riskReward =
-      calculateRiskReward(
-        strategy
-      );
+// ========================================
+// API - INDIVIDUAL STOCK AI ANALYSIS
+//
+// KIS 실제 OHLCV
+// → chartAnalysis
+// → tradingStrategy
+// → AI 설명
+// ========================================
 
-    const prompt =
-      buildGeminiPrompt({
+app.get(
+  '/api/stock/ai-analysis',
+  async (req, res) => {
+    try {
+      const symbol =
+        String(
+          req.query.symbol ||
+          ''
+        ).trim();
+
+
+      if (
+        !validateSymbol(
+          symbol
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error:
+              '올바른 6자리 종목코드가 필요합니다.'
+          });
+      }
+
+
+      if (
+        !GEMINI_API_KEY
+      ) {
+        return res
+          .status(503)
+          .json({
+            error:
+              'Gemini API key가 설정되어 있지 않습니다.'
+          });
+      }
+
+
+      // ==================================
+      // 실제 데이터 조회
+      // ==================================
+
+      const [
         quote,
-        strategy,
-        riskReward,
+        rows,
         news
+      ] =
+        await Promise.all([
+
+          fetchStockQuoteData(
+            symbol
+          ),
+
+          fetchKisDailyOHLCV(
+            symbol,
+            {
+              maxBars: 130
+            }
+          ),
+
+          fetchStockNewsBySymbol(
+            symbol
+          ).catch(
+            (error) => {
+              console.warn(
+                `[K-Stock AI] AI analysis news fetch failed for ${symbol}:`,
+                error.message
+              );
+
+              return [];
+            }
+          )
+        ]);
+
+
+      // ==================================
+      // 실제 KIS 차트 분석
+      // ==================================
+
+      const chartAnalysis =
+        analyzeMovingAverages(
+          rows
+        );
+
+
+      const latestRow =
+        rows.length > 0
+          ? rows[
+              rows.length - 1
+            ]
+          : null;
+
+
+      // ==================================
+      // 이전 20거래일 평균 거래량
+      // 최신 거래일은 제외
+      // ==================================
+
+      const previous20Rows =
+        rows.length >= 21
+          ? rows.slice(
+              -21,
+              -1
+            )
+          : [];
+
+
+      const previous20Volumes =
+        previous20Rows
+          .map(
+            (item) =>
+              parseNumber(
+                item?.volume
+              )
+          )
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              )
+          );
+
+
+      const averageVolume20 =
+        previous20Volumes.length ===
+          20
+          ? previous20Volumes
+              .reduce(
+                (
+                  sum,
+                  value
+                ) =>
+                  sum + value,
+                0
+              ) / 20
+          : null;
+
+
+      const currentVolume =
+        parseNumber(
+          latestRow?.volume
+        );
+
+
+      // ==================================
+      // 최근 20일 실제 고가 / 저가
+      // AI 설명용
+      // ==================================
+
+      const recent20Rows =
+        rows.slice(
+          -20
+        );
+
+
+      const recentHighValues =
+        recent20Rows
+          .map(
+            (item) =>
+              parseNumber(
+                item?.high
+              )
+          )
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              )
+          );
+
+
+      const recentLowValues =
+        recent20Rows
+          .map(
+            (item) =>
+              parseNumber(
+                item?.low
+              )
+          )
+          .filter(
+            (value) =>
+              Number.isFinite(
+                value
+              )
+          );
+
+
+      const recentHigh20 =
+        recentHighValues.length >
+        0
+          ? Math.max(
+              ...recentHighValues
+            )
+          : null;
+
+
+      const recentLow20 =
+        recentLowValues.length >
+        0
+          ? Math.min(
+              ...recentLowValues
+            )
+          : null;
+
+
+      // ==================================
+      // 실제 뉴스 평가
+      // ==================================
+
+      const newsAssessment =
+        assessLatestNews(
+          news
+        );
+
+
+      let hasCautionSignal =
+        null;
+
+
+      if (
+        newsAssessment
+          ?.sentiment ===
+        'CAUTION'
+      ) {
+        hasCautionSignal =
+          true;
+
+      } else if (
+        newsAssessment
+          ?.newsPassed ===
+        true
+      ) {
+        hasCautionSignal =
+          false;
+      }
+
+
+      // ==================================
+      // 실제 수급
+      // ==================================
+
+      const foreignerNet =
+        parseNumber(
+          quote
+            ?.foreignerNet
+        );
+
+
+      const institutionNet =
+        parseNumber(
+          quote
+            ?.institutionNet
+        );
+
+
+      const quoteCurrentPrice =
+        parseNumber(
+          quote
+            ?.currentPrice
+        );
+
+
+      // 현재가는 실제 시세 우선
+      // 없으면 최신 KIS 종가
+      const currentPrice =
+        Number.isFinite(
+          quoteCurrentPrice
+        )
+          ? quoteCurrentPrice
+          : chartAnalysis
+              ?.latestClose ??
+            null;
+
+
+      // ==================================
+      // 시장 데이터 완전성 검사
+      // ==================================
+
+      const marketContextComplete =
+        Number.isFinite(
+          currentVolume
+        ) &&
+
+        Number.isFinite(
+          averageVolume20
+        ) &&
+
+        Number.isFinite(
+          foreignerNet
+        ) &&
+
+        Number.isFinite(
+          institutionNet
+        ) &&
+
+        typeof hasCautionSignal ===
+          'boolean';
+
+
+      const rawMarketContext = {
+        volume:
+          currentVolume,
+
+        averageVolume20,
+
+        foreignerNet,
+
+        institutionNet,
+
+        newsAssessment: {
+          hasCautionSignal,
+
+          newsPassed:
+            newsAssessment
+              ?.newsPassed ??
+            null,
+
+          sentiment:
+            newsAssessment
+              ?.sentiment ??
+            null,
+
+          newsCount:
+            newsAssessment
+              ?.newsCount ??
+            0,
+
+          positiveCount:
+            newsAssessment
+              ?.positiveCount ??
+            0,
+
+          negativeCount:
+            newsAssessment
+              ?.negativeCount ??
+            0
+        }
+      };
+
+
+      // 데이터가 모두 있을 때만
+      // 종합 매매판정에 사용
+      const strategyMarketContext =
+        marketContextComplete
+          ? rawMarketContext
+          : {};
+
+
+      // ==================================
+      // 새 tradingStrategy.js 실행
+      // ==================================
+
+      const strategy =
+        calculateTradingStrategy({
+          symbol,
+
+          currentPrice,
+
+          chartAnalysis,
+
+          marketContext:
+            strategyMarketContext
+        });
+
+
+      // ==================================
+      // 기존 Gemini Prompt와 호환시키면서
+      // 새 고급 데이터 전체 전달
+      // ==================================
+
+      const trendStatus =
+        strategy
+          ?.technicalAssessment
+          ?.conditions
+          ?.trend
+          ?.status;
+
+
+      const volumeStatus =
+        strategy
+          ?.marketAssessment
+          ?.conditions
+          ?.volume
+          ?.status;
+
+
+      const supplyStatus =
+        strategy
+          ?.marketAssessment
+          ?.conditions
+          ?.supply
+          ?.status;
+
+
+      const netSupplyTotal =
+        Number.isFinite(
+          foreignerNet
+        ) &&
+        Number.isFinite(
+          institutionNet
+        )
+          ? foreignerNet +
+            institutionNet
+          : null;
+
+
+      const strategyForAI = {
+        ...strategy,
+
+        // 기존 AI prompt 호환값
+        signal:
+          strategy
+            ?.finalAssessment
+            ?.status ??
+          'DATA_INSUFFICIENT',
+
+        tradeSignal:
+          strategy
+            ?.finalAssessment
+            ?.status ??
+          'DATA_INSUFFICIENT',
+
+        ma5:
+          chartAnalysis
+            ?.ma5 ??
+          null,
+
+        ma20:
+          chartAnalysis
+            ?.ma20 ??
+          null,
+
+        ma60:
+          chartAnalysis
+            ?.ma60 ??
+          null,
+
+        ma120:
+          chartAnalysis
+            ?.ma120 ??
+          null,
+
+        recentHigh20,
+
+        recentLow20,
+
+        currentVolume,
+
+        averageVolume20,
+
+        volumeRatio:
+          Number.isFinite(
+            currentVolume
+          ) &&
+          Number.isFinite(
+            averageVolume20
+          ) &&
+          averageVolume20 >
+            0
+            ? round2(
+                currentVolume /
+                averageVolume20
+              )
+            : null,
+
+        foreignerNet,
+
+        institutionNet,
+
+        netSupplyTotal,
+
+        trendPassed:
+          trendStatus ===
+            'FAVORABLE'
+            ? true
+            : trendStatus ===
+                'CAUTION'
+              ? false
+              : null,
+
+        volumePassed:
+          volumeStatus ===
+            'FAVORABLE'
+            ? true
+            : volumeStatus ===
+                'CAUTION'
+              ? false
+              : null,
+
+        supplyPassed:
+          supplyStatus ===
+            'FAVORABLE'
+            ? true
+            : supplyStatus ===
+                'CAUTION'
+              ? false
+              : null,
+
+        // 새 고급 분석값
+        chartAnalysis,
+
+        marketContext:
+          rawMarketContext
+      };
+
+
+      // ==================================
+      // Gemini는 설명만
+      // ==================================
+
+      const result =
+        await analyzeStockWithGemini({
+          quote,
+
+          strategy:
+            strategyForAI,
+
+          news
+        });
+
+
+      // ==================================
+      // RESULT
+      // ==================================
+
+      return res.json({
+        symbol,
+
+        stockName:
+          quote
+            ?.stockName ??
+          symbol,
+
+        quote,
+
+        chartAnalysis,
+
+        marketContext: {
+          complete:
+            marketContextComplete,
+
+          ...rawMarketContext
+        },
+
+        // 실제 프로그램 계산 결과
+        strategy,
+
+        riskReward:
+          result.riskReward,
+
+        news,
+
+        newsAssessment,
+
+        // AI 설명
+        analysis:
+          result.analysis,
+
+        modelUsed:
+          result.modelUsed,
+
+        attemptUsed:
+          result.attemptUsed,
+
+        dataUsage: {
+          priceSource:
+            'KIS + actual quote data',
+
+          aiGeneratedPrice:
+            false,
+
+          aiRole:
+            '계산된 실제 데이터와 전략 결과 설명만 수행'
+        },
+
+        fetchedAt:
+          new Date()
+            .toISOString()
       });
 
-    const geminiResult =
-      await callGeminiPromptWithRetry(
-        prompt
+    } catch (error) {
+
+      console.error(
+        '[K-Stock AI] AI analysis API error:',
+        error
       );
 
-    const analysis =
-      geminiResult.analysis;
 
-    // ====================================
-    // IMPORTANT SAFETY OVERRIDE
-    // ====================================
-    // Gemini가 가격을 변경해서 반환하더라도
-    // backend에서 실제 계산값으로 다시 덮어씁니다.
-    // 따라서 AI가 임의 가격을 최종 결과에 넣을 수 없습니다.
+      return res
+        .status(500)
+        .json({
+          error:
+            'AI 종합 분석을 완료하지 못했습니다.',
 
-    if (
-      !analysis.strategyExplanation ||
-      typeof analysis.strategyExplanation !==
-        'object'
-    ) {
-      analysis.strategyExplanation =
-        {};
+          details:
+            Array.isArray(
+              error?.details
+            )
+              ? error.details
+              : undefined
+        });
     }
-
-    analysis.strategyExplanation.signal =
-      strategy.signal;
-
-    analysis.strategyExplanation.entryPrice =
-      Number.isFinite(
-        strategy.entryPrice
-      )
-        ? strategy.entryPrice
-        : null;
-
-    analysis.strategyExplanation.targetPrice =
-      Number.isFinite(
-        strategy.takeProfitPrice
-      )
-        ? strategy.takeProfitPrice
-        : null;
-
-    analysis.strategyExplanation.stopLossPrice =
-      Number.isFinite(
-        strategy.stopLossPrice
-      )
-        ? strategy.stopLossPrice
-        : null;
-
-    return {
-      analysis,
-
-      modelUsed:
-        geminiResult.modelUsed,
-
-      attemptUsed:
-        geminiResult.attemptUsed,
-
-      riskReward
-    };
-  };
+  }
+);
 
 // ========================================
 // RECOMMENDATION GEMINI PROMPT
