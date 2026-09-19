@@ -670,17 +670,6 @@ const evaluateTechnicalConditions = ({
 const evaluateMarketContext = (
   marketContext = {}
 ) => {
-  const volume =
-    toNumber(
-      marketContext?.volume
-    );
-
-  const averageVolume20 =
-    toNumber(
-      marketContext
-        ?.averageVolume20
-    );
-
   const foreignerNet =
     toNumber(
       marketContext
@@ -703,67 +692,15 @@ const evaluateMarketContext = (
   // VOLUME
   // =====================================
 
-  let volumeCondition;
-
-  let volumeRatio = null;
-
-
-  if (
-    Number.isFinite(volume) &&
-    Number.isFinite(
-      averageVolume20
-    ) &&
-    averageVolume20 > 0
-  ) {
-    volumeRatio =
-      volume /
-      averageVolume20;
-
-    if (
-      volumeRatio >=
-      STRATEGY_RULES
-        .highVolumeRatio
-    ) {
-      volumeCondition =
-        createCondition(
-          'FAVORABLE',
-          '거래량',
-          `20일 평균 대비 ${round2(
-            volumeRatio
-          )}배입니다.`
-        );
-    } else if (
-      volumeRatio <=
-      STRATEGY_RULES
-        .lowVolumeRatio
-    ) {
-      volumeCondition =
-        createCondition(
-          'CAUTION',
-          '거래량',
-          `20일 평균 대비 ${round2(
-            volumeRatio
-          )}배로 거래량이 낮습니다.`
-        );
-    } else {
-      volumeCondition =
-        createCondition(
-          'NEUTRAL',
-          '거래량',
-          `20일 평균 대비 ${round2(
-            volumeRatio
-          )}배입니다.`
-        );
-    }
-  } else {
-    volumeCondition =
-      createCondition(
-        'UNAVAILABLE',
-        '거래량',
-        '평균 거래량 데이터가 아직 연결되지 않았습니다.'
-      );
-  }
-
+  const evaluation = marketContext?.volumeAssessment;
+  const status = { PASS: 'FAVORABLE', FAIL: 'CAUTION', NEUTRAL: 'NEUTRAL' }[evaluation?.status] || 'UNAVAILABLE';
+  const volumeRatio = evaluation?.ratio ?? null;
+  const volumeCondition = {
+    ...createCondition(status, '거래량', evaluation?.reason || '검증된 거래량 비교 데이터 없음'),
+    evaluationStatus: evaluation?.status || 'UNKNOWN',
+    basis: evaluation?.basis || null,
+    asOf: evaluation?.asOf || null
+  };
 
   // =====================================
   // SUPPLY DEMAND
@@ -909,7 +846,7 @@ const evaluateMarketContext = (
 
   return {
     available:
-      availableCount > 0,
+      marketContext.complete !== false && availableCount > 0,
 
     availableCount,
 

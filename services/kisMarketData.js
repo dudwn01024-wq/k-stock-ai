@@ -23,6 +23,8 @@
 // CONFIG
 // ========================================
 
+const { numericVolume } = require('./volumeEvaluation');
+
 const KIS_BASE_URL =
   process.env.KIS_BASE_URL ||
   'https://openapi.koreainvestment.com:9443';
@@ -331,10 +333,12 @@ const isRateLimitError = (
 
 const runKisRequest =
   async (
-    requestFunction
+    requestFunction,
+    signal = null
   ) => {
     const execute =
       async () => {
+        signal?.throwIfAborted();
         const now =
           Date.now();
 
@@ -349,12 +353,11 @@ const runKisRequest =
         if (
           delay > 0
         ) {
-          await wait(
-            delay
-          );
+          await waitForVolumeRequest(wait(delay), signal);
         }
 
         try {
+          signal?.throwIfAborted();
           return await requestFunction();
         } finally {
           lastKisRequestAt =
@@ -697,7 +700,7 @@ const fetchDailyOHLCVChunk =
                 ),
 
               volume:
-                parseNumber(
+                numericVolume(
                   row.acml_vol
                 ),
 
@@ -1068,6 +1071,42 @@ const fetchKisDailyOHLCV =
 // EXPORT
 // ========================================
 
-module.exports = {
-  fetchKisDailyOHLCV
+// Read-only endpoints needed for volume evaluation; reuse token and rate limiter.
+const waitForVolumeRequest = (promise, signal) => {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const abort = () => { cleanup(); reject(new Error('VOLUME_TIMEOUT')); };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    promise.then((value) => { cleanup(); resolve(value); }, (error) => { cleanup(); reject(error); });
+  });
 };
+
+const requestKisVolumeData = async (kind, params, signal) => {
+  const endpoints = {
+    calendar: ['chk-holiday', 'CTCA0903R']
+  };
+  const endpoint = endpoints[kind];
+  if (!endpoint) throw new Error('Unsupported volume data request');
+  if (!signal) throw new Error('Volume lookup requires a deadline');
+  assertKisConfig();
+  signal?.throwIfAborted();
+  const token = await waitForVolumeRequest(getKisAccessToken(), signal);
+  const url = new URL(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/${endpoint[0]}`);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return waitForVolumeRequest(runKisRequest(async () => {
+    signal?.throwIfAborted();
+    const response = await fetch(url, {
+      method: 'GET', signal,
+      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${token}`,
+        appkey: KIS_APP_KEY, appsecret: KIS_APP_SECRET, tr_id: endpoint[1] }
+    });
+    if (!response.ok) throw new Error('Volume data HTTP error');
+    const data = await response.json();
+    if (data?.rt_cd !== '0') throw new Error('Volume data unavailable');
+    return data;
+  }, signal), signal);
+};
+
+module.exports = { fetchKisDailyOHLCV, requestKisVolumeData };

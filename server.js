@@ -15,6 +15,8 @@ const {
   calculateTradingStrategy
 } = require('./services/tradingStrategy');
 
+const { assessVolume } = require('./services/kisVolumeData');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -1066,7 +1068,7 @@ const calculateStrategy =
 
             volume:
               parseNumber(
-                item.accumulatedTradingVolume ||
+                item.accumulatedTradingVolume ??
                 item.volume
               )
           })
@@ -1097,9 +1099,6 @@ const calculateStrategy =
       rows[0]?.close ??
       null;
 
-    const currentVolume =
-      rows[0]?.volume ??
-      null;
 
     const ma5 =
       rows.length >= 5
@@ -1157,40 +1156,16 @@ const calculateStrategy =
           )
         : null;
 
-    const hasVolume20 =
-      rows.length >= 21;
-
-    const previous20ForVolume =
-      hasVolume20
-        ? rows.slice(
-            1,
-            21
-          )
-        : [];
-
-    const averageVolume20 =
-      hasVolume20
-        ? average(
-            previous20ForVolume.map(
-              (item) =>
-                item.volume
-            )
-          )
-        : null;
-
-    const volumeRatio =
-      Number.isFinite(
-        currentVolume
-      ) &&
-      Number.isFinite(
-        averageVolume20
-      ) &&
-      averageVolume20 > 0
-        ? round2(
-            currentVolume /
-            averageVolume20
-          )
-        : null;
+    const volumeAssessment = await assessVolume({
+      symbol, source: 'NAVER', policy: 'recommendation', priceDate: rows[0]?.date,
+      rows: data.map((item) => ({
+        date: item.localTradedAt || item.bizdate,
+        volume: item.accumulatedTradingVolume ?? item.volume
+      }))
+    });
+    const currentVolume = volumeAssessment.currentVolume;
+    const averageVolume20 = volumeAssessment.averageVolume20;
+    const volumeRatio = volumeAssessment.ratio;
 
     let foreignerNet =
       null;
@@ -1270,6 +1245,9 @@ const calculateStrategy =
         currentVolume,
         averageVolume20,
         volumeRatio,
+        volumeAssessment,
+        volumeStatus: volumeAssessment.status,
+        volumePassed: volumeAssessment.passed,
         foreignerNet,
         institutionNet,
         netSupplyTotal,
@@ -1334,16 +1312,7 @@ const calculateStrategy =
       ma5 >=
         ma20;
 
-    const volumePassed =
-      Number.isFinite(
-        currentVolume
-      ) &&
-      Number.isFinite(
-        averageVolume20
-      )
-        ? currentVolume >=
-          averageVolume20
-        : null;
+    const volumePassed = volumeAssessment.passed;
 
     const supplyPassed =
       Number.isFinite(
@@ -1477,6 +1446,8 @@ return {
   currentVolume,
   averageVolume20,
   volumeRatio,
+  volumeAssessment,
+  volumeStatus: volumeAssessment.status,
   foreignerNet,
   institutionNet,
   netSupplyTotal,
@@ -1946,6 +1917,12 @@ const assessLatestNews = (news) => {
 // RECOMMENDATION SCORE
 // ========================================
 
+const getRecommendationVolumeStatus = (strategy) => {
+  const status = strategy?.volumeAssessment?.status ?? strategy?.volumeStatus;
+  if (['PASS', 'FAIL', 'NEUTRAL', 'UNKNOWN'].includes(status)) return status;
+  return strategy?.volumePassed === true ? 'PASS' : strategy?.volumePassed === false ? 'FAIL' : 'UNKNOWN';
+};
+
 const getRecommendationScore =
   (
     strategy,
@@ -1969,8 +1946,7 @@ const getRecommendationScore =
     }
 
     if (
-      strategy.volumePassed ===
-      true
+      getRecommendationVolumeStatus(strategy) === 'PASS'
     ) {
       score += 1;
     }
@@ -2022,15 +1998,13 @@ const buildRecommendationReason =
     }
 
     if (
-      strategy.volumePassed ===
-      true
+      getRecommendationVolumeStatus(strategy) === 'PASS'
     ) {
       passed.push(
         '거래량'
       );
     } else if (
-      strategy.volumePassed ===
-      false
+      getRecommendationVolumeStatus(strategy) === 'FAIL'
     ) {
       failed.push(
         '거래량'
@@ -2075,6 +2049,9 @@ const buildRecommendationReason =
       passedConditions:
         passed,
 
+      pendingConditions: getRecommendationVolumeStatus(strategy) === 'UNKNOWN'
+        ? ['거래량 판단 보류'] : [],
+
       failedConditions:
         failed
     };
@@ -2091,12 +2068,12 @@ const getFinalRecommendationGrade =
     riskReward,
     newsAssessment
   ) => {
+    if (getRecommendationVolumeStatus(strategy) === 'UNKNOWN') return 'VOLUME_PENDING';
     // 기존 3개 기술 조건
     const baseTechnicalPassed =
       strategy?.trendPassed ===
         true &&
-      strategy?.volumePassed ===
-        true &&
+      getRecommendationVolumeStatus(strategy) === 'PASS' &&
       strategy?.supplyPassed ===
         true;
 
@@ -2234,6 +2211,8 @@ const buildRecommendationResult =
 
       grade,
 
+      pendingConditions: conditionReason.pendingConditions,
+
       passedConditions:
         conditionReason
           .passedConditions,
@@ -2282,6 +2261,8 @@ const buildRecommendationResult =
 
         volumeRatio:
           strategy.volumeRatio,
+        volumeAssessment: strategy.volumeAssessment,
+        volumeStatus: strategy.volumeStatus ?? 'UNKNOWN',
 
         foreignerNet:
           strategy.foreignerNet,
@@ -2335,6 +2316,8 @@ const rankRecommendationResults =
 
           WATCH_CANDIDATE:
             2,
+
+          VOLUME_PENDING: 1.5,
 
           EXCLUDED:
             1
@@ -3014,7 +2997,7 @@ ${JSON.stringify(
 {
   "summary": "현재 실제 데이터 기준 종합 분석",
   "technicalAnalysis": "현재가, MA5, MA20, 최근 고가/저가를 이용한 설명",
-  "volumeAnalysis": "현재 거래량과 20일 평균 거래량 비교 설명",
+  "volumeAnalysis": "volumeAssessment의 상태·비교 기준·사유만 설명. UNKNOWN은 거래량 부족이 아니며 일평균으로 장중 비율을 재계산하거나 추정하지 말 것",
   "supplyDemandAnalysis": "외국인/기관 순매수 데이터를 이용한 설명",
   "newsAnalysis": "suppliedNews에 포함된 최신 기사만 이용한 설명",
   "positiveFactors": [
@@ -3178,50 +3161,11 @@ app.get(
       // 최신 거래일은 제외
       // ==================================
 
-      const previous20Rows =
-        rows.length >= 21
-          ? rows.slice(
-              -21,
-              -1
-            )
-          : [];
-
-
-      const previous20Volumes =
-        previous20Rows
-          .map(
-            (item) =>
-              parseNumber(
-                item?.volume
-              )
-          )
-          .filter(
-            (value) =>
-              Number.isFinite(
-                value
-              )
-          );
-
-
-      const averageVolume20 =
-        previous20Volumes.length ===
-          20
-          ? previous20Volumes
-              .reduce(
-                (
-                  sum,
-                  value
-                ) =>
-                  sum + value,
-                0
-              ) / 20
-          : null;
-
-
-      const currentVolume =
-        parseNumber(
-          latestRow?.volume
-        );
+      const volumeAssessment = await assessVolume({
+        symbol, rows, source: 'KIS_OPEN_API', policy: 'advanced', priceDate: latestRow?.date
+      });
+      const currentVolume = volumeAssessment.currentVolume;
+      const averageVolume20 = volumeAssessment.averageVolume20;
 
 
       // ==================================
@@ -3359,6 +3303,7 @@ app.get(
       // ==================================
 
       const marketContextComplete =
+        volumeAssessment.status !== 'UNKNOWN' &&
         Number.isFinite(
           currentVolume
         ) &&
@@ -3380,6 +3325,7 @@ app.get(
 
 
       const rawMarketContext = {
+        volumeAssessment,
         volume:
           currentVolume,
 
@@ -3425,7 +3371,7 @@ app.get(
       const strategyMarketContext =
         marketContextComplete
           ? rawMarketContext
-          : {};
+          : { volumeAssessment, complete: false };
 
 
       // ==================================
@@ -3455,14 +3401,6 @@ app.get(
           ?.technicalAssessment
           ?.conditions
           ?.trend
-          ?.status;
-
-
-      const volumeStatus =
-        strategy
-          ?.marketAssessment
-          ?.conditions
-          ?.volume
           ?.status;
 
 
@@ -3530,20 +3468,9 @@ app.get(
 
         averageVolume20,
 
-        volumeRatio:
-          Number.isFinite(
-            currentVolume
-          ) &&
-          Number.isFinite(
-            averageVolume20
-          ) &&
-          averageVolume20 >
-            0
-            ? round2(
-                currentVolume /
-                averageVolume20
-              )
-            : null,
+        volumeRatio: volumeAssessment.ratio,
+        volumeAssessment,
+        volumeStatus: volumeAssessment.status,
 
         foreignerNet,
 
@@ -3560,14 +3487,7 @@ app.get(
               ? false
               : null,
 
-        volumePassed:
-          volumeStatus ===
-            'FAVORABLE'
-            ? true
-            : volumeStatus ===
-                'CAUTION'
-              ? false
-              : null,
+        volumePassed: volumeAssessment.passed,
 
         supplyPassed:
           supplyStatus ===
@@ -5062,6 +4982,8 @@ app.get(
             'WATCH_CANDIDATE'
         );
 
+      const pending = ranked.filter((item) => item.grade === 'VOLUME_PENDING');
+
       const excluded =
         ranked.filter(
           (item) =>
@@ -5089,6 +5011,9 @@ app.get(
 
         watchCount:
           watch.length,
+
+        pendingCount: pending.length,
+        pending,
 
         excludedCount:
           excluded.length,
@@ -5185,6 +5110,8 @@ app.get(
             'WATCH_CANDIDATE'
         );
 
+      const pending = ranked.filter((item) => item.grade === 'VOLUME_PENDING');
+
       // AI 분석 대상:
       // 1순위 = 최우선 후보
       // 2순위 = 추격 주의
@@ -5261,6 +5188,9 @@ app.get(
 
         watchCount:
           watch.length,
+
+        pendingCount: pending.length,
+        pending,
 
         priority,
 
@@ -5695,57 +5625,11 @@ const recentLow20 =
       // 최신 봉은 제외
       // ==================================
 
-      const previous20Rows =
-        rows.length >= 21
-          ? rows.slice(
-              -21,
-              -1
-            )
-          : [];
-
-
-      const previous20Volumes =
-        previous20Rows
-          .map(
-            (item) =>
-              safeNumber(
-                item?.volume
-              )
-          )
-          .filter(
-            (value) =>
-              Number.isFinite(
-                value
-              )
-          );
-
-
-      const averageVolume20 =
-        previous20Rows.length ===
-          20 &&
-        previous20Volumes.length ===
-          20
-          ? previous20Volumes
-              .reduce(
-                (
-                  sum,
-                  value
-                ) =>
-                  sum + value,
-                0
-              ) / 20
-          : null;
-
-
-      // ==================================
-      // 최신 실제 거래량
-      // KIS OHLCV 기준
-      // ==================================
-
-      const currentVolume =
-        safeNumber(
-          latestRow?.volume
-        );
+      const volumeAssessment = await assessVolume({
+        symbol, rows, source: 'KIS_OPEN_API', policy: 'advanced', priceDate: latestRow?.date
+      });
+      const currentVolume = volumeAssessment.currentVolume;
+      const averageVolume20 = volumeAssessment.averageVolume20;
 
 
       // ==================================
@@ -5838,6 +5722,7 @@ const recentLow20 =
       // ==================================
 
       const rawMarketContext = {
+        volumeAssessment,
 
         volume:
           currentVolume,
@@ -5887,6 +5772,7 @@ const recentLow20 =
       // ==================================
 
       const marketContextComplete =
+        volumeAssessment.status !== 'UNKNOWN' &&
         Number.isFinite(
           currentVolume
         ) &&
@@ -5916,7 +5802,7 @@ const recentLow20 =
       const strategyMarketContext =
         marketContextComplete
           ? rawMarketContext
-          : {};
+          : { volumeAssessment, complete: false };
 
 
       // ==================================
@@ -5970,21 +5856,8 @@ recentLow20,
 
           averageVolume20,
 
-          volumeRatio:
-            Number.isFinite(
-              currentVolume
-            ) &&
-            Number.isFinite(
-              averageVolume20
-            ) &&
-            averageVolume20 > 0
-              ? Number(
-                  (
-                    currentVolume /
-                    averageVolume20
-                  ).toFixed(2)
-                )
-              : null,
+          volumeRatio: volumeAssessment.ratio,
+          volumeAssessment,
 
           foreignerNet,
 

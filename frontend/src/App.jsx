@@ -31,6 +31,10 @@ import {
 
 const API_BASE_URL = 'https://k-stock-ai.onrender.com/api';
 
+const volumeStatusLabel = (status) => ({
+  PASS: '통과', FAIL: '부적합', NEUTRAL: '중립', UNKNOWN: '판단 보류'
+}[status] || '판단 보류');
+
 const POPULAR_STOCKS = [
   { name: '삼성전자', code: '005930' },
   { name: 'SK하이닉스', code: '000660' },
@@ -195,12 +199,6 @@ class RealStockBackendService {
       ?.trend
       ?.status;
 
-  const volumeStatus =
-    marketAssessment
-      ?.conditions
-      ?.volume
-      ?.status;
-
   const supplyStatus =
     marketAssessment
       ?.conditions
@@ -260,6 +258,9 @@ recentLow20:
       market?.volumeRatio ??
       null,
 
+    volumeStatus: market?.volumeAssessment?.status ?? 'UNKNOWN',
+    volumeAssessment: market?.volumeAssessment ?? null,
+
     foreignerNet,
 
     institutionNet,
@@ -273,12 +274,7 @@ recentLow20:
           ? false
           : null,
 
-    volumePassed:
-      volumeStatus === 'FAVORABLE'
-        ? true
-        : volumeStatus === 'CAUTION'
-          ? false
-          : null,
+    volumePassed: market?.volumeAssessment?.passed ?? null,
 
     supplyPassed:
       supplyStatus === 'FAVORABLE'
@@ -515,11 +511,13 @@ export default function App() {
     const priority = Array.isArray(result?.priority) ? result.priority : [];
     const chase = Array.isArray(result?.chase) ? result.chase : [];
     const watch = Array.isArray(result?.watch) ? result.watch : [];
+    const pending = Array.isArray(result?.pending) ? result.pending : [];
 
     const recommendations = [
       ...priority,
       ...chase,
-      ...watch
+      ...watch,
+      ...pending
     ];
 
     const normalizedResult = {
@@ -889,6 +887,9 @@ export default function App() {
                   <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                     관심 {recommendationData?.watchCandidateCount ?? 0}개
                   </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
+                    거래량 판단 보류 {recommendationData?.pendingCount ?? 0}개
+                  </span>
                 </div>
 
                 {recommendationAILoading && (
@@ -911,6 +912,7 @@ export default function App() {
                     const isPriority = item.grade === 'PRIORITY_CANDIDATE';
                     const isChaseCaution = item.grade === 'CHASE_CAUTION';
                     const isWatch = item.grade === 'WATCH_CANDIDATE';
+                    const isVolumePending = item.grade === 'VOLUME_PENDING';
                     const hasRiskReward = item.riskReward?.available === true;
                     const shouldShowAI = isPriority || isChaseCaution;
 
@@ -950,9 +952,9 @@ export default function App() {
                                     🟠 추격 주의
                                   </span>
                                 )}
-                                {isWatch && (
+                                {(isWatch || isVolumePending) && (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                                    🟡 관심 종목
+                                    {isVolumePending ? '거래량 판단 보류' : '🟡 관심 종목'}
                                   </span>
                                 )}
                               </div>
@@ -968,7 +970,7 @@ export default function App() {
                               추세 {item.strategy?.trendPassed === true ? '✅' : item.strategy?.trendPassed === false ? '❌' : '➖'}
                             </div>
                             <div className="bg-slate-900 rounded-lg p-2">
-                              거래량 {item.strategy?.volumePassed === true ? '✅' : item.strategy?.volumePassed === false ? '❌' : '➖'}
+                              거래량 {volumeStatusLabel(item.strategy?.volumeStatus)}
                             </div>
                             <div className="bg-slate-900 rounded-lg p-2">
                               수급 {item.strategy?.supplyPassed === true ? '✅' : item.strategy?.supplyPassed === false ? '❌' : '➖'}
@@ -1701,12 +1703,13 @@ export default function App() {
                 : 'text-slate-400'
           }`}
         >
-          {strategyData?.marketAssessment?.conditions?.volume?.label || '상태 없음'}
+          {volumeStatusLabel(strategyData?.volumeStatus)}
         </span>
 
         <p className="text-[11px] text-slate-500 mt-1">
-          {strategyData?.marketAssessment?.conditions?.volume?.detail ||
+          {strategyData?.volumeAssessment?.reason || strategyData?.marketAssessment?.conditions?.volume?.detail ||
             '데이터 없음'}
+          {strategyData?.volumeAssessment?.asOf && ` · ${strategyData.volumeAssessment.source} · ${strategyData.volumeAssessment.asOf}`}
         </p>
       </div>
 
