@@ -3695,6 +3695,14 @@ const analyzeStockWithGemini =
     news
   }) => {
 
+    // Only normalize missing values here; do not strip commas or internal spaces.
+    const parseAnalysisNumber = (value) => {
+      if (typeof value !== 'number' && typeof value !== 'string') return null;
+      if (typeof value === 'string' && value.trim() === '') return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : null;
+    };
+
     let riskReward;
 
 
@@ -3804,12 +3812,12 @@ const analyzeStockWithGemini =
 
         entryRiskPercent:
           Number.isFinite(
-            Number(
+            parseAnalysisNumber(
               strategy?.entryToStopRate
             )
           )
             ? Math.abs(
-                Number(
+                parseAnalysisNumber(
                   strategy.entryToStopRate
                 )
               )
@@ -3821,11 +3829,11 @@ const analyzeStockWithGemini =
 
         rewardGreaterThanRisk:
           Number.isFinite(
-            Number(
+            parseAnalysisNumber(
               strategy?.riskRewardRatio
             )
           )
-            ? Number(
+            ? parseAnalysisNumber(
                 strategy.riskRewardRatio
               ) >= 1
             : null,
@@ -3914,51 +3922,19 @@ const analyzeStockWithGemini =
 
 
     analysis.strategyExplanation.entryPrice =
-      Number.isFinite(
-        Number(
-          strategy?.entryPrice
-        )
-      )
-        ? Number(
-            strategy.entryPrice
-          )
-        : null;
+      parseAnalysisNumber(strategy?.entryPrice);
 
 
     analysis.strategyExplanation.targetPrice =
-      Number.isFinite(
-        Number(
-          strategy?.takeProfitPrice
-        )
-      )
-        ? Number(
-            strategy.takeProfitPrice
-          )
-        : null;
+      parseAnalysisNumber(strategy?.takeProfitPrice);
 
 
     analysis.strategyExplanation.stopLossPrice =
-      Number.isFinite(
-        Number(
-          strategy?.stopLossPrice
-        )
-      )
-        ? Number(
-            strategy.stopLossPrice
-          )
-        : null;
+      parseAnalysisNumber(strategy?.stopLossPrice);
 
 
     analysis.strategyExplanation.riskRewardRatio =
-      Number.isFinite(
-        Number(
-          strategy?.riskRewardRatio
-        )
-      )
-        ? Number(
-            strategy.riskRewardRatio
-          )
-        : null;
+      parseAnalysisNumber(strategy?.riskRewardRatio);
 
 
     return {

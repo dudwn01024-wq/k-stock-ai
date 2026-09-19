@@ -1,3 +1,4 @@
+import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search,
@@ -49,13 +50,14 @@ const TIMEFRAMES = [
 ];
 
 const formatKRW = (num) => {
-  if (num === null || num === undefined || Number.isNaN(Number(num))) return '데이터 없음';
-  return `${Number(num).toLocaleString('ko-KR')}원`;
+  const value = toNullableNumber(num);
+  if (value === null) return '데이터 없음';
+  return `${value.toLocaleString('ko-KR')}원`;
 };
 
 const formatNumberWithUnit = (num, unit = '') => {
-  if (num === null || num === undefined || Number.isNaN(Number(num))) return '데이터 없음';
-  const value = Number(num);
+  const value = toNullableNumber(num);
+  if (value === null) return '데이터 없음';
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
 
@@ -65,8 +67,8 @@ const formatNumberWithUnit = (num, unit = '') => {
 };
 
 const formatTradingValue = (num) => {
-  if (num === null || num === undefined || Number.isNaN(Number(num))) return '데이터 없음';
-  const value = Number(num);
+  const value = toNullableNumber(num);
+  if (value === null) return '데이터 없음';
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
 
@@ -77,7 +79,7 @@ const formatTradingValue = (num) => {
 };
 
 const getFlowColorClass = (value) => {
-  const num = Number(value);
+  const num = toNullableNumber(value);
   if (!Number.isFinite(num) || num === 0) return 'text-slate-300';
   return num > 0 ? 'text-red-400' : 'text-blue-400';
 };
@@ -95,7 +97,7 @@ const formatNewsDate = (value) => {
 };
 
 const getPriceBgClass = (changeRate) => {
-  const value = Number(changeRate);
+  const value = toNullableNumber(changeRate);
   if (!Number.isFinite(value) || value === 0) return 'bg-slate-800 text-slate-300';
   return value > 0
     ? 'bg-red-950/40 text-red-400 border border-red-800/40'
@@ -175,16 +177,16 @@ class RealStockBackendService {
     strategy?.marketAssessment || {};
 
   const foreignerNet =
-    market?.foreignerNet ?? null;
+    toNullableNumber(market?.foreignerNet);
 
   const institutionNet =
-    market?.institutionNet ?? null;
+    toNullableNumber(market?.institutionNet);
 
   const netSupplyTotal =
-    Number.isFinite(Number(foreignerNet)) &&
-    Number.isFinite(Number(institutionNet))
-      ? Number(foreignerNet) +
-        Number(institutionNet)
+    Number.isFinite(foreignerNet) &&
+    Number.isFinite(institutionNet)
+      ? foreignerNet +
+        institutionNet
       : null;
 
   const trendStatus =
@@ -654,7 +656,7 @@ export default function App() {
     [chartData]
   );
 
-  const changeRate = Number(quoteData?.changeRate || 0);
+  const changeRate = toNullableNumber(quoteData?.changeRate);
 
   const recommendationAIMap = useMemo(() => {
   const map = new Map();
@@ -1020,7 +1022,7 @@ export default function App() {
                               <div className="bg-slate-900 rounded-lg p-2.5">
                                 <span className="text-slate-500 block mb-1">남은 상승여력</span>
                                 <span className="text-emerald-300 font-mono font-semibold">
-                                  {Number.isFinite(Number(item.riskReward?.currentUpsidePercent))
+                                  {hasNumber(item.riskReward?.currentUpsidePercent)
                                     ? `${Number(item.riskReward.currentUpsidePercent).toFixed(2)}%`
                                     : '데이터 없음'}
                                 </span>
@@ -1028,7 +1030,7 @@ export default function App() {
                               <div className="bg-slate-900 rounded-lg p-2.5">
                                 <span className="text-slate-500 block mb-1">현재 위험</span>
                                 <span className="text-red-300 font-mono font-semibold">
-                                  {Number.isFinite(Number(item.riskReward?.currentDownsidePercent))
+                                  {hasNumber(item.riskReward?.currentDownsidePercent)
                                     ? `${Number(item.riskReward.currentDownsidePercent).toFixed(2)}%`
                                     : '데이터 없음'}
                                 </span>
@@ -1040,7 +1042,7 @@ export default function App() {
                                     ? 'text-emerald-300'
                                     : 'text-orange-300'
                                 }`}>
-                                  {Number.isFinite(Number(item.riskReward?.currentRiskRewardRatio))
+                                  {hasNumber(item.riskReward?.currentRiskRewardRatio)
                                     ? `${Number(item.riskReward.currentRiskRewardRatio).toFixed(2)} : 1`
                                     : '데이터 없음'}
                                 </span>
@@ -1048,7 +1050,7 @@ export default function App() {
                               <div className="bg-slate-900 rounded-lg p-2.5">
                                 <span className="text-slate-500 block mb-1">진입가 손익비</span>
                                 <span className="text-sky-300 font-mono font-semibold">
-                                  {Number.isFinite(Number(item.riskReward?.entryRiskRewardRatio))
+                                  {hasNumber(item.riskReward?.entryRiskRewardRatio)
                                     ? `${Number(item.riskReward.entryRiskRewardRatio).toFixed(2)} : 1`
                                     : '데이터 없음'}
                                 </span>
@@ -1216,12 +1218,12 @@ export default function App() {
                         <TrendingDown className="w-4 h-4" />
                       ) : null}
                       <span>
-                        {quoteData.priceChange !== null && quoteData.priceChange !== undefined
+                        {hasNumber(quoteData.priceChange)
                           ? `${Number(quoteData.priceChange) > 0 ? '+' : ''}${Number(quoteData.priceChange).toLocaleString('ko-KR')}원`
                           : '데이터 없음'}
                       </span>
                       <span>
-                        {quoteData.changeRate !== null && quoteData.changeRate !== undefined
+                        {hasNumber(quoteData.changeRate)
                           ? `(${Number(quoteData.changeRate) > 0 ? '+' : ''}${quoteData.changeRate}%)`
                           : ''}
                       </span>
@@ -1328,8 +1330,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-white">
-          {strategyData?.currentToEntryRate !== null &&
-          strategyData?.currentToEntryRate !== undefined
+          {hasNumber(strategyData?.currentToEntryRate)
             ? `${Number(strategyData.currentToEntryRate).toFixed(2)}%`
             : '데이터 없음'}
         </span>
@@ -1399,8 +1400,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-amber-300 mt-1 block">
-          {strategyData?.riskRewardRatio !== null &&
-          strategyData?.riskRewardRatio !== undefined
+          {hasNumber(strategyData?.riskRewardRatio)
             ? `${Number(strategyData.riskRewardRatio).toFixed(2)} : 1`
             : '데이터 없음'}
         </span>
@@ -1414,8 +1414,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-red-400">
-          {strategyData?.entryToTargetRate !== null &&
-          strategyData?.entryToTargetRate !== undefined
+          {hasNumber(strategyData?.entryToTargetRate)
             ? `+${Number(strategyData.entryToTargetRate).toFixed(2)}%`
             : '데이터 없음'}
         </span>
@@ -1427,8 +1426,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-blue-400">
-          {strategyData?.entryToStopRate !== null &&
-          strategyData?.entryToStopRate !== undefined
+          {hasNumber(strategyData?.entryToStopRate)
             ? `${Number(strategyData.entryToStopRate).toFixed(2)}%`
             : '데이터 없음'}
         </span>
@@ -1558,8 +1556,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {strategyData?.rsi14 !== null &&
-          strategyData?.rsi14 !== undefined
+          {hasNumber(strategyData?.rsi14)
             ? Number(strategyData.rsi14).toFixed(2)
             : '데이터 없음'}
         </span>
@@ -1571,16 +1568,14 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {strategyData?.macd?.macd !== null &&
-          strategyData?.macd?.macd !== undefined
+          {hasNumber(strategyData?.macd?.macd)
             ? Number(strategyData.macd.macd).toLocaleString('ko-KR')
             : '데이터 없음'}
         </span>
 
         <span className="text-[10px] text-slate-500 block mt-1">
           Signal{' '}
-          {strategyData?.macd?.signal !== null &&
-          strategyData?.macd?.signal !== undefined
+          {hasNumber(strategyData?.macd?.signal)
             ? Number(strategyData.macd.signal).toLocaleString('ko-KR')
             : '-'}
         </span>
@@ -1602,8 +1597,7 @@ export default function App() {
         </span>
 
         <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {strategyData?.bollingerBands?.position !== null &&
-          strategyData?.bollingerBands?.position !== undefined
+          {hasNumber(strategyData?.bollingerBands?.position)
             ? `${Number(strategyData.bollingerBands.position).toFixed(2)}%`
             : '데이터 없음'}
         </span>
@@ -1850,8 +1844,7 @@ export default function App() {
                   </span>
                 </div>
 
-                {pattern?.neckline !== null &&
-                  pattern?.neckline !== undefined && (
+                {hasNumber(pattern?.neckline) && (
                     <p className="text-[10px] text-slate-500 mt-1">
                       기준선 {formatKRW(pattern.neckline)}
                     </p>
@@ -2093,7 +2086,7 @@ export default function App() {
       진입 기준 손익비
     </span>
     <span className="text-sm font-bold font-mono text-yellow-300">
-      {Number.isFinite(Number(strategyData?.riskRewardRatio))
+      {hasNumber(strategyData?.riskRewardRatio)
         ? `${Number(strategyData.riskRewardRatio).toFixed(2)} : 1`
         : '데이터 없음'}
     </span>
@@ -2213,7 +2206,7 @@ export default function App() {
                           color: '#f8fafc'
                         }}
                         formatter={(value, name) => [
-                          value === null || value === undefined
+                          !hasNumber(value)
                             ? '데이터 없음'
                             : `${Number(value).toLocaleString('ko-KR')}${name === 'volume' ? '주' : '원'}`,
                           name === 'price' ? '종가' : '거래량'
