@@ -3157,8 +3157,7 @@ app.get(
 
 
       // ==================================
-      // 이전 20거래일 평균 거래량
-      // 최신 거래일은 제외
+      // B: WebSocket 전일 동시간 누적 거래량 비교 (실측 전 UNKNOWN 잠금)
       // ==================================
 
       const volumeAssessment = await assessVolume({
@@ -3309,7 +3308,7 @@ app.get(
         ) &&
 
         Number.isFinite(
-          averageVolume20
+          volumeAssessment.baselineVolume
         ) &&
 
         Number.isFinite(
@@ -5620,9 +5619,7 @@ const recentLow20 =
     : null;
 
       // ==================================
-      // 이전 20거래일 평균 거래량
-      //
-      // 최신 봉은 제외
+      // B: WebSocket 전일 동시간 누적 거래량 비교 (실측 전 UNKNOWN 잠금)
       // ==================================
 
       const volumeAssessment = await assessVolume({
@@ -5778,7 +5775,7 @@ const recentLow20 =
         ) &&
 
         Number.isFinite(
-          averageVolume20
+          volumeAssessment.baselineVolume
         ) &&
 
         Number.isFinite(

@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { evaluateVolume, classifyVolume, validateMinutePages, numericVolume, koreaClock } = require('../services/volumeEvaluation');
-const { createVolumeService, createRequestBudget, VOLUME_LIMITS } = require('../services/kisVolumeData');
+const { createVolumeService, createRealtimeVolumeAdapter, createRequestBudget, VOLUME_LIMITS } = require('../services/kisVolumeData');
 const { evaluateMarketContext, STRATEGY_RULES } = require('../services/tradingStrategy');
 
 // Synthetic fixtures only: every transport is injected, with no external calls.
@@ -193,12 +193,13 @@ test('Naver path never mixes KIS minute counts into its dated daily data', async
 });
 
 // Run actual server handlers, replacing only I/O (Express/network/AI).
-function server(time) {
+function server(time, realtimeProvider = null) {
   const handlers = new Map();
   const app = { use() {}, get(route, handler) { if (!handlers.has(route)) handlers.set(route, handler); }, listen() {} };
   const express = Object.assign(() => app, { json: () => () => {} });
   const mock = transport();
-  const service = createVolumeService(mock.request, () => at(time));
+  const service = realtimeProvider ? createRealtimeVolumeAdapter(realtimeProvider, () => at(time))
+    : createVolumeService(mock.request, () => at(time));
   const context = vm.createContext({
     require(name) {
       if (name === 'express') return express;
@@ -581,3 +582,65 @@ test('actual volume transport only permits a deadline-bound read-only calendar r
   assert.equal(calls[0].method, 'GET');
   assert.match(calls[0].url, /\/quotations\/chk-holiday\?/);
 });
+
+// Exercise real HTTP handlers through the production B adapter, not the legacy
+// REST evaluator. Only network/AI and the realtime snapshot provider are stubbed.
+for (const hasRealtime of [false, true]) {
+  const provider = { getSnapshot: symbol => hasRealtime ? {
+    symbol, businessDate: '20260918', lastTradeTime: '102959', receivedAt: at('10:30').toISOString(),
+    acmlVolume: 9000, previousSameTimeAcmlVolume: 3000, providedPreviousSameTimeRate: 300,
+    hourClassCode: '0', marketTreatmentClassCode: '0', newMarketOperationCode: '20',
+    connectionState: 'CONNECTED', subscriptionState: 'SUBSCRIBED', dataStatus: 'VALID', stale: false
+  } : null };
+  const check = assessment => {
+    assert.equal(assessment.status, 'UNKNOWN'); assert.equal(assessment.passed, null); assert.equal(assessment.ratio, null);
+    assert.equal(assessment.currentVolume, 1500); assert.equal(assessment.averageVolume20, 1000);
+    assert.equal(assessment.realtimeCurrentVolume, hasRealtime ? 9000 : null);
+    assert.equal(assessment.baselineVolume, hasRealtime ? 3000 : null);
+    assert.equal(assessment.reasonCode, 'VALIDATION_LOCKED');
+    assert.equal(assessment.evaluationSource, 'KIS_WEBSOCKET_KRX');
+    assert.match(assessment.reason, /판단 보류/); assert.doesNotMatch(assessment.reason, /거래량 부족/);
+  };
+  test(`B operating adapter recommendation HTTP: realtime=${hasRealtime}`, async () => {
+    const { handlers } = server('10:30', provider);
+    let body;
+    await handlers.get('/api/stock/recommendations')({ query: {} }, {
+      status() { return this; }, json(value) { body = value; }
+    });
+    assert.ok(body.pending.length > 0); assert.equal(body.candidateCount, 0);
+    for (const item of body.pending) {
+      assert.equal(item.strategy.currentVolume, 1500); assert.equal(item.strategy.averageVolume20, 1000);
+      check(item.strategy.volumeAssessment);
+      assert.equal(item.failedConditions.includes('거래량'), false);
+      assert.ok(item.pendingConditions.includes('거래량 판단 보류'));
+      assert.equal(item.grade, 'VOLUME_PENDING');
+      assert.ok(Object.hasOwn(item.strategy, 'foreignerNet'));
+      assert.ok(Object.hasOwn(item.strategy, 'institutionNet'));
+    }
+  });
+  for (const route of ['/api/kis/trading-strategy-test', '/api/stock/ai-analysis']) {
+    test(`B operating adapter ${route} HTTP: realtime=${hasRealtime}`, async () => {
+      const { handlers } = server('10:30', provider);
+      let body;
+      await handlers.get(route)({ query: { symbol: '005930' } }, {
+        status() { return this; }, json(value) { body = value; }
+      });
+      check(body.marketContext.volumeAssessment);
+      assert.equal(body.marketContext.volume, 1500); assert.equal(body.marketContext.averageVolume20, 1000);
+      assert.equal(body.marketContext.complete, false);
+      assert.ok(Object.hasOwn(body.marketContext, 'foreignerNet'));
+      assert.ok(Object.hasOwn(body.marketContext, 'institutionNet'));
+      assert.ok(Object.hasOwn(body.marketContext, 'newsAssessment'));
+      // Compare unchanged price/supply/news response fields with the established
+      // legacy fixture using exactly the same mocked market inputs.
+      let before;
+      await server('10:30').handlers.get(route)({ query: { symbol: '005930' } }, {
+        status() { return this; }, json(value) { before = value; }
+      });
+      for (const key of ['foreignerNet', 'institutionNet', 'newsAssessment']) {
+        assert.equal(JSON.stringify(body.marketContext[key]), JSON.stringify(before.marketContext[key]));
+      }
+      assert.equal(body.currentPrice, before.currentPrice);
+    });
+  }
+}

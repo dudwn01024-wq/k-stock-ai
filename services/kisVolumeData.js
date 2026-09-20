@@ -1,5 +1,6 @@
 const { requestKisVolumeData } = require('./kisMarketData');
-const { evaluateVolume, koreaClock } = require('./volumeEvaluation');
+const { evaluateVolume, koreaClock, evaluateRealtimeVolume, REALTIME_VALIDATION } = require('./volumeEvaluation');
+const { realtimeData } = require('./kisRealtimeData');
 
 const VOLUME_LIMITS = Object.freeze({ maxRequests: 1, timeoutMs: 1500 });
 
@@ -71,5 +72,27 @@ function createVolumeService(request = requestKisVolumeData, clock = () => new D
   return { assess };
 }
 
-const { assess: assessVolume } = createVolumeService();
-module.exports = { assessVolume, createVolumeService, createRequestBudget, VOLUME_LIMITS };
+// Keep the earlier REST safety evaluator for regression verification. Production
+// uses B only; missing WebSocket data never falls back to a daily-volume ratio.
+function createRealtimeVolumeAdapter(provider = realtimeData, clock = () => new Date()) {
+  return { assess: async (input = {}) => {
+    const now = clock();
+    const evaluation = evaluateRealtimeVolume({
+      snapshot: provider.getSnapshot(input.symbol), now, policy: input.policy,
+      priceDate: input.priceDate ?? null, priceSource: input.source ?? null,
+      validation: REALTIME_VALIDATION // Deliberately not read from input/env/provider.
+    });
+    // Reuse only the legacy observation extraction, never its ratio/status.
+    const observation = evaluateVolume({ rows: input.rows || [], source: input.source,
+      priceDate: input.priceDate, policy: input.policy, now });
+    return { ...evaluation,
+      realtimeCurrentVolume: evaluation.currentVolume,
+      evaluationSource: evaluation.source,
+      observationSource: input.source ?? null,
+      observationDate: observation.volumeDate,
+      currentVolume: observation.currentVolume,
+      averageVolume20: observation.averageVolume20 };
+  } };
+}
+const { assess: assessVolume } = createRealtimeVolumeAdapter();
+module.exports = { assessVolume, createVolumeService, createRealtimeVolumeAdapter, createRequestBudget, VOLUME_LIMITS };

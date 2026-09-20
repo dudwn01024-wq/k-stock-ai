@@ -122,4 +122,66 @@ function evaluateVolume({ rows = [], source, now = new Date(), openDay,
   };
 }
 
-module.exports = { evaluateVolume, classifyVolume, validateMinutePages, numericVolume, tradingDate, koreaClock, sessionAt };
+// B strategy: previous trading day's SAME-TIME cumulative volume, NOT a 20-day
+// average. Release requires a reviewed code change after real-session validation.
+// Neither environment variables nor HTTP input can unlock the production adapter.
+const REALTIME_VALIDATION = Object.freeze({ validated: false, maxAgeMs: null,
+  sessionCodes: Object.freeze([]) });
+
+function realtimeNumber(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && !/^\d+(?:\.\d+)?$/.test(value.trim())) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= Number.MAX_SAFE_INTEGER ? number : null;
+}
+
+function tradeTimestamp(date, time) {
+  if (typeof date !== 'string' || !/^\d{8}$/.test(date) || tradingDate(date) !== date ||
+      typeof time !== 'string' || !/^\d{6}$/.test(time) ||
+      Number(time.slice(0, 2)) > 23 || Number(time.slice(2, 4)) > 59 || Number(time.slice(4)) > 59) return null;
+  return Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4)}+09:00`);
+}
+
+function evaluateRealtimeVolume({ snapshot, now = new Date(), policy = 'advanced',
+  priceDate = null, priceSource = null, validation = REALTIME_VALIDATION } = {}) {
+  const s = snapshot || {};
+  const volume = realtimeNumber(s.acmlVolume);
+  const baseline = realtimeNumber(s.previousSameTimeAcmlVolume);
+  const timestamp = tradeTimestamp(s.businessDate, s.lastTradeTime);
+  const received = typeof s.receivedAt === 'string' ? Date.parse(s.receivedAt) : NaN;
+  const age = now.getTime() - received;
+  const tradeAge = timestamp === null ? NaN : now.getTime() - timestamp;
+  const sessionCode = `${s.hourClassCode}:${s.marketTreatmentClassCode}:${s.newMarketOperationCode}`;
+  let reasonCode = null;
+  if (validation.validated !== true) reasonCode = 'VALIDATION_LOCKED';
+  else if (s.connectionState !== 'CONNECTED') reasonCode = 'DISCONNECTED';
+  else if (s.subscriptionState !== 'SUBSCRIBED') reasonCode = 'NOT_SUBSCRIBED';
+  else if (tradingDate(s.businessDate) !== koreaClock(now).date || timestamp === null) reasonCode = 'DATE_OR_TIME_INVALID';
+  else if (priceDate !== null && tradingDate(priceDate) !== s.businessDate) reasonCode = 'PRICE_DATE_MISMATCH';
+  else if (volume === null || baseline === null) reasonCode = 'MISSING_VOLUME';
+  else if (baseline <= 0) reasonCode = 'ZERO_BASELINE';
+  else if (!Number.isSafeInteger(volume) || !Number.isSafeInteger(baseline) ||
+      !Number.isFinite(volume / baseline)) reasonCode = 'INVALID_VOLUME_RANGE';
+  else if (s.dataStatus !== 'VALID') reasonCode = 'INVALID_DATA';
+  else if (s.stale !== false || !Number.isFinite(validation.maxAgeMs) || validation.maxAgeMs <= 0 ||
+      !Number.isFinite(age) || age < 0 || age > validation.maxAgeMs ||
+      !Number.isFinite(tradeAge) || tradeAge < 0 || tradeAge > validation.maxAgeMs) reasonCode = 'STALE_OR_UNVERIFIED_AGE';
+  else if (koreaClock(now).weekend || !validation.sessionCodes?.includes(sessionCode)) reasonCode = 'SESSION_UNVERIFIED';
+  const result = reasonCode ? { status: 'UNKNOWN', passed: null, ratio: null }
+    : classifyVolume(volume, baseline, policy);
+  return { ...result, basis: 'PREVIOUS_TRADING_DAY_SAME_TIME', strategyVersion: 'B',
+    source: 'KIS_WEBSOCKET_KRX', priceSource, priceDate: tradingDate(priceDate),
+    currentVolume: volume, baselineVolume: baseline, averageVolume20: null,
+    sampleCount: reasonCode ? 0 : 1, volumeDate: tradingDate(s.businessDate),
+    sourceDate: tradingDate(s.businessDate), sourceTime: s.lastTradeTime ?? null,
+    fetchedAt: s.receivedAt ?? null, evaluationTime: now.toISOString(), asOf: s.lastTradeTime ?? null,
+    providedPreviousSameTimeRate: realtimeNumber(s.providedPreviousSameTimeRate),
+    validationStatus: validation.validated === true ? 'VALIDATED' : 'UNVERIFIED',
+    completionStatus: 'INTRADAY_SNAPSHOT', completionEvidence: null,
+    session: reasonCode ? 'UNKNOWN' : 'REGULAR', reasonCode,
+    reason: reasonCode ? `거래량 판단 보류: 실시간 거래량 검증 필요 (${reasonCode})`
+      : `전일 동시간 누적 거래량 대비 ${result.ratio}배 (${result.status})` };
+}
+
+module.exports = { evaluateVolume, classifyVolume, validateMinutePages, numericVolume, tradingDate, koreaClock, sessionAt,
+  evaluateRealtimeVolume, REALTIME_VALIDATION, realtimeNumber, tradeTimestamp };
