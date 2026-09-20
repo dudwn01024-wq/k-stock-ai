@@ -36,6 +36,7 @@ test('actual backend chart response passes through frontend service into chart m
   const start = backend.lastIndexOf('app.get(', backend.indexOf("'/api/stock/chart'"));
   const end = backend.indexOf('\napp.', start + 1);
   const ctx = vm.createContext({
+    ...require('../services/dataFreshness'),
     app: { get: (route, handler) => { if(route === '/api/stock/chart') ctx.handler = handler; } },
     validateSymbol: () => true, NAVER_HEADERS: {}, console,
     average: values => values.reduce((a,b) => a+b, 0) / values.length,

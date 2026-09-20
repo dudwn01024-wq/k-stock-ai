@@ -1,3 +1,4 @@
+const { dataFreshness } = require('./dataFreshness');
 // ========================================
 // KIS MARKET DATA SERVICE
 // 한국투자증권 실제 OHLCV 전용
@@ -670,9 +671,11 @@ const fetchDailyOHLCVChunk =
             : [];
 
 
+        const receivedAt = new Date().toISOString();
         return rows
           .map(
             (row) => ({
+              dataMetadata: dataFreshness({ source: 'KIS', date: row.stck_bsop_date, receivedAt }),
               date:
                 row.stck_bsop_date,
 

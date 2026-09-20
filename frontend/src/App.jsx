@@ -208,6 +208,7 @@ class RealStockBackendService {
       ?.status;
 
   return {
+    dataMetadata: payload?.dataMetadata ?? null,
     // 기존 App.jsx와 호환
     symbol,
 
@@ -420,6 +421,14 @@ recentLow20:
   }
 }
 
+const describeDataMetadata = (metadata) => {
+  const received = metadata?.receivedAt;
+  const time = received && Number.isFinite(Date.parse(received))
+    ? new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(received))
+    : '미확인';
+  return `출처: ${metadata?.source ?? '미확인'} · 기준일: ${metadata?.sourceBusinessDate ?? '미확인'} · 원본 시각: ${metadata?.sourceTimestamp ?? '미확인'} · 수신(KST): ${time} · 최신 여부 확인 필요`;
+};
+
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('삼성전자');
   const [activeSymbol, setActiveSymbol] = useState('005930');
@@ -583,7 +592,7 @@ export default function App() {
     console.error('Recommendations Error:', error);
     setRecommendationError(
       error?.message ||
-      '오늘의 추천 종목을 불러오지 못했습니다.'
+      '수집 데이터 기반 추천 종목을 불러오지 못했습니다.'
     );
     setRecommendationLoading(false);
     setRecommendationAILoading(false);
@@ -810,7 +819,7 @@ export default function App() {
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-400" />
-                  오늘의 AI 추천 종목
+                  수집 데이터 기반 AI 추천 종목
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
@@ -957,6 +966,9 @@ export default function App() {
                                 )}
                               </div>
                               <div className="text-[11px] text-slate-500 font-mono">{item.symbol}</div>
+                              <p className="text-[11px] text-slate-400">가격 — {describeDataMetadata(item.dataMetadata?.price)}</p>
+                              <p className="text-[11px] text-slate-400">전략 일봉 — {describeDataMetadata(item.strategy?.dataMetadata?.price)}</p>
+                              <p className="text-[11px] text-slate-400">수급 — {describeDataMetadata(item.strategy?.dataMetadata?.supply)}</p>
                             </div>
                             <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${scoreClass}`}>
                               조건 {item.score ?? 0}/{item.maxScore ?? 3}
@@ -1196,6 +1208,14 @@ export default function App() {
         {!loading && quoteData && activeTab === 'detail' && (
           <div className="space-y-6">
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
+              <div className="text-xs text-slate-400 mb-3 space-y-1">
+                <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
+                <p>거래량 — {describeDataMetadata(quoteData?.dataMetadata?.volume)}</p>
+                <p>수급 — {describeDataMetadata(quoteData?.dataMetadata?.supply)}</p>
+                <p>상세 일봉 — {describeDataMetadata(strategyData?.dataMetadata?.daily)}</p>
+                <p>{quoteData?.dataMetadata?.dateConsistency === 'MISMATCH' || strategyData?.dataMetadata?.dateConsistency === 'MISMATCH'
+                  ? '데이터 기준일 불일치: 서로 다른 날짜의 값이 포함되어 있습니다.' : '항목별 기준일과 최신성은 별도 확인이 필요합니다.'}</p>
+              </div>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3">
@@ -2157,9 +2177,10 @@ export default function App() {
                     <BarChart2 className="w-4 h-4 text-emerald-400" />
                     실제 주가 차트
                   </h3>
-                  <p className="text-xs text-slate-400">Render 백엔드에서 조회된 실제 일봉 데이터입니다.</p>
+                  <p className="text-xs text-slate-400">조회된 일봉 데이터입니다. 최신 여부 확인이 필요합니다.</p>
                 </div>
 
+                <p className="text-xs text-slate-400">마지막 일봉 — {describeDataMetadata(chartData.at(-1)?.dataMetadata)}</p>
                 <div className="flex items-center bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto">
                   {TIMEFRAMES.map((tf) => (
                     <button
@@ -2278,6 +2299,7 @@ export default function App() {
                       <span>출처: {item.publisher || '언론사 정보 없음'}</span>
                       <span>{formatNewsDate(item.date)}</span>
                     </div>
+                    <p className="text-[11px] text-slate-500">{describeDataMetadata(item.dataMetadata)}</p>
                   </div>
                 ))}
               </div>
@@ -2300,7 +2322,7 @@ export default function App() {
               <p className="text-slate-400">Current API Base URL</p>
               <code className="text-emerald-400 break-all">{API_BASE_URL}</code>
               <p className="text-slate-500 pt-2">
-                현재 연결 기능: 종목 검색 / 현재가 / 거래량 / 거래대금 / 외국인·기관 순매수 / 일봉 차트 / 뉴스 / 매매전략 / AI 종합 분석 / 오늘의 추천 종목 / 추천 후보 AI 뉴스 분석
+                현재 연결 기능: 종목 검색 / 현재가 / 거래량 / 거래대금 / 외국인·기관 순매수 / 일봉 차트 / 뉴스 / 매매전략 / AI 종합 분석 / 수집 데이터 기반 추천 종목 / 추천 후보 AI 뉴스 분석
               </p>
             </div>
           </section>
