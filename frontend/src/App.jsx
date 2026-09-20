@@ -452,7 +452,7 @@ export default function App() {
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
 
   const loadRealStockData = useCallback(
-    async (symbol, name, timeframe = chartTimeframe, refresh = false) => {
+    async (symbol, name, timeframe = '1M', refresh = false) => {
       if (refresh) setIsRefreshing(true);
       else setLoading(true);
 
@@ -496,7 +496,7 @@ export default function App() {
         setAiLoading(false);
       }
     },
-    [backendService, chartTimeframe]
+    [backendService]
   );
 
   useEffect(() => {
@@ -647,7 +647,7 @@ export default function App() {
     () =>
       chartData.map((item) => ({
         date: item.date,
-        price: item.close,
+        price: toNullableNumber(item.price),
         open: item.open,
         high: item.high,
         low: item.low,
