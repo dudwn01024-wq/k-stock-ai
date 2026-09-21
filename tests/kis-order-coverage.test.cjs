@@ -1,0 +1,34 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict');
+const {parseMockOrderQuery,composeOrderCoverage}=require('../services/kisOrderCoverage');
+const {parseMockPages}=require('../services/kisAccountReadOnly');
+const {mapUnfilledDisplaySnapshot}=require('../services/kisUnfilledReadOnly');
+const environment='KIS_LIVE';
+const raw={pdno:'005930',sll_buy_dvsn_cd:'02',odno:'MOCK01',psbl_qty:'0',rsvn_ord_seq:'MOCK01',ord_rsvn_qty:'1',ord_rsvn_unpr:'100'};
+const page=(operation,rows=[],state='D')=>({operation,environment,provenance:'MOCK_FIXTURE',headers:{tr_cont:state},body:{rt_cd:'0',output:rows,ctx_area_fk100:'mock',ctx_area_nk100:'cursor',ctx_area_fk200:'mock',ctx_area_nk200:'cursor'}});
+const query=(operation,rows=[],extra={})=>parseMockOrderQuery({operation,environment,provenance:'MOCK_FIXTURE',startDate:'20260922',endDate:'20260922',pages:[page(operation,rows)],...extra});
+const daily=(rows=[],extra={})=>mapUnfilledDisplaySnapshot({environment,unfilledOrders:parseMockPages({operation:'UNFILLED_ORDERS',environment,pages:[{operation:'UNFILLED_ORDERS',environment,headers:{tr_cont:'D'},body:{rt_cd:'0',output1:rows},...extra}]})});
+const compose=extra=>composeOrderCoverage({environment,...extra});
+test('all unqueried distinct from empty',()=>{const r=compose();assert.equal(r.dailyUnfilledState,'NOT_QUERIED');assert.equal(r.revisableCancelableState,'NOT_QUERIED');assert.equal(r.reservationQueryState,'NOT_QUERIED');assert.equal(r.dailyUnfilledCandidate,null);});
+test('daily only never coverage complete',()=>{const r=compose({dailyUnfilledCandidate:daily()});assert.equal(r.dailyUnfilledComplete,true);assert.equal(r.orderCoverageComplete,false);assert.ok(r.reasonCodes.includes('RESERVATION_NOT_QUERIED'));assert.ok(r.reasonCodes.includes('REVISABLE_CANCELABLE_NOT_QUERIED'));});
+test('all complete still display only, separate empty lists',()=>{const r=compose({dailyUnfilledCandidate:daily(),revisableCancelableCandidate:query('REVISABLE_CANCELABLE'),reservationCandidate:query('RESERVATION')});for(const k of ['dailyUnfilledComplete','revisableCancelableComplete','reservationQueryComplete'])assert.equal(r[k],true);for(const k of ['orderCoverageComplete','pendingOrdersAuthoritative','snapshotComplete','riskReady'])assert.equal(r[k],false);assert.equal(r.readiness,'RISK_NOT_READY');assert.equal(r.usage,'DISPLAY_ONLY');assert.equal(r.businessDate,null);assert.equal(r.sourceTimestamp,null);});
+test('psbl quantity is not pending quantity; no dedup or reservation merge',()=>{const r=compose({revisableCancelableCandidate:query('REVISABLE_CANCELABLE',[raw,raw]),reservationCandidate:query('RESERVATION',[raw])});assert.equal(r.revisableCancelableCandidate.length,2);assert.equal(r.revisableCancelableCandidate[0].revisableCancelableQuantity,0);assert.equal(r.revisableCancelableCandidate[0].remainingQuantity,undefined);assert.equal(r.reservationOrdersCandidate.length,1);assert.ok(r.reasonCodes.includes('OVERLAP_IDENTITY_UNVERIFIED'));assert.equal(r.pendingOrders,undefined);});
+for(const operation of ['REVISABLE_CANCELABLE','RESERVATION']) {
+  for(const state of ['F','M','Z'])test(operation+' incomplete '+state,()=>{const q=query(operation,[],{pages:[page(operation,[],state)]});assert.equal(q.complete,false);assert.equal(q.rows,null);});
+  test(operation+' repeated continuation',()=>{const q=query(operation,[],{pages:[page(operation,[],'F'),page(operation,[],'M')]});assert.ok(q.reasonCodes.includes('CONTINUATION_KEYS_REPEATED'));});
+  test(operation+' final page',()=>assert.equal(query(operation,[],{pages:[page(operation,[],'F'),page(operation,[],'E')]}).complete,true));
+  test(operation+' max pages',()=>assert.equal(query(operation,[],{maxPages:1,pages:[page(operation,[],'F'),page(operation)]}).complete,false));
+  test(operation+' mid page failure',()=>{const p=page(operation);p.body.rt_cd='1';assert.equal(query(operation,[],{pages:[page(operation,[],'F'),p]}).complete,false);});
+}
+for(const value of [null,'',-1,NaN,Infinity,'bad'])test('invalid numeric '+String(value),()=>assert.equal(query('REVISABLE_CANCELABLE',[{...raw,psbl_qty:value}]).status,'INVALID'));
+for(const provenance of ['KIS_NETWORK','PAPER'])test('reject provenance '+provenance,()=>assert.equal(query('RESERVATION',[],{provenance}).status,'INVALID'));
+for(const environment of ['KIS_VTS','APP_PAPER'])test('unsupported query environment '+environment,()=>assert.equal(query('RESERVATION',[],{environment}).status,'INVALID'));
+test('mixed environment invalidates daily as well',()=>{const r=compose({dailyUnfilledCandidate:daily(),reservationCandidate:query('RESERVATION',[],{environment:'KIS_VTS'})});assert.equal(r.dailyUnfilledComplete,false);assert.equal(r.dailyUnfilledCandidate,null);});
+test('forged complete object rejected',()=>assert.equal(compose({revisableCancelableCandidate:{environment,provenance:'MOCK_FIXTURE',fixtureOnly:true,status:'COMPLETE',rows:[]}}).revisableCancelableState,'INVALID'));
+test('wrong operation slot rejected',()=>assert.equal(compose({reservationCandidate:query('REVISABLE_CANCELABLE')}).reservationQueryState,'INVALID'));
+test('invalid daily rows not complete empty',()=>{const r=compose({dailyUnfilledCandidate:daily([{pdno:'005930'}])});assert.equal(r.dailyUnfilledState,'INVALID');assert.equal(r.dailyUnfilledCandidate,null);});
+test('incomplete daily not complete empty',()=>assert.equal(compose({dailyUnfilledCandidate:daily([],{headers:{tr_cont:'F'}})}).dailyUnfilledState,'INCOMPLETE'));
+test('explicit query window calendar validation',()=>assert.equal(query('RESERVATION',[],{startDate:'20260230'}).status,'INVALID'));
+test('allowlist projection drops sensitive extras and cursors',()=>{const r=compose({reservationCandidate:query('RESERVATION',[{...raw,CANO:'DUMMY_SECRET',appkey:'DUMMY_SECRET',rawResponse:'DUMMY_SECRET',ctac_tlno:'DUMMY_SECRET'}])});const s=JSON.stringify(r);assert.ok(!s.includes('DUMMY_SECRET'));assert.ok(!s.includes('cursor'));assert.ok(!s.includes('ctx_area'));});
+test('reservation metadata remains optional candidates, no fill id',()=>{const q=query('RESERVATION',[{...raw,rsvn_ord_rcit_dt:'20260922',rsvn_ord_rcit_tmd:'123456',rsvn_end_dt:'20260923',prcs_rslt:'01'}]);assert.equal(q.rows[0].receiptDate,'20260922');assert.equal(q.rows[0].receiptTime,'123456');assert.equal(q.rows[0].eventId,undefined);});
+test('module import graph has no network or ledger or paper connection',()=>{const fs=require('node:fs');const text=fs.readFileSync(require.resolve('../services/kisOrderCoverage'),'utf8');assert.ok(!/fetch\(|axios|https?\.request|liveRiskLedger|riskManager|paperTrading|process\.env/.test(text));});
