@@ -16,7 +16,9 @@ function mapAccountCandidates({environment,balance,unfilledOrders} = {}) {
     if (!result.complete) { reasons.push('INCOMPLETE_PAGINATION',...result.reasonCodes); return false; }
     return true;
   };
-  const balanceOK = accept(balance,'BALANCE'), ordersOK = accept(unfilledOrders,'UNFILLED_ORDERS');
+  const balanceOK = accept(balance,'BALANCE');
+  const ordersOK = unfilledOrders == null
+    ? (reasons.push('PENDING_ORDERS_NOT_QUERIED'),false) : accept(unfilledOrders,'UNFILLED_ORDERS');
   const positions = balanceOK ? balance.rows.map(row=>{
     const position = {symbol:row.pdno,quantity:row.hldg_qty,marketValue:row.evlu_amt};
     if (Object.values(position).includes(null) || (position.quantity === 0 && position.marketValue !== 0))
