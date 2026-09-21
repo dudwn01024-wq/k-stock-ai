@@ -61,7 +61,7 @@ test('advanced volume thresholds and neutral band remain unchanged',()=>{
 
 // Real server route handlers, real strategy functions; only external I/O and chart
 // calculation inputs are synthetic. No listening socket or provider request occurs.
-function server({productionVolume=false,missingSupply=false,missingVolume=false,missingTrend=false,missingNews=false,priceRows=null,kisLoader=null,serverSource=source}={}) {
+function server({productionVolume=false,rawSnapshot=null,missingSupply=false,missingVolume=false,missingTrend=false,missingNews=false,priceRows=null,kisLoader=null,serverSource=source,aiAnalysis={summary:"fixture"}}={}) {
   const routes=new Map(),prompts=[];
   const app={use(){},listen(){},get(route,handler){if(!routes.has(route))routes.set(route,handler);}};
   const express=()=>app;express.json=()=>()=>{};
@@ -70,7 +70,7 @@ function server({productionVolume=false,missingSupply=false,missingVolume=false,
     require:name=>{
       if(name==='express')return express;if(name==='cors')return ()=>()=>{};if(name==='dotenv')return {config(){}};
       if(name==='./services/volumeEvaluation')return require('../services/volumeEvaluation');
-      if(name==='./services/kisVolumeData' && productionVolume)return {assessVolume:require('../services/kisVolumeData').createRealtimeVolumeAdapter({getSnapshot:()=>null},()=>new Date('2026-09-18T10:30:00+09:00')).assess};
+      if(name==='./services/kisVolumeData' && productionVolume)return {assessVolume:require('../services/kisVolumeData').createRealtimeVolumeAdapter({getSnapshot:()=>rawSnapshot},()=>new Date('2026-09-18T10:30:00+09:00')).assess};
       if(name==='./services/kisVolumeData')return {assessVolume:async input=>{
         const observed=evaluateVolume({...input,now:new Date('2026-09-18T10:30:00+09:00')});
         return {...observed,...syntheticB(observed.currentVolume,observed.averageVolume20,input.policy)};
@@ -83,7 +83,7 @@ function server({productionVolume=false,missingSupply=false,missingVolume=false,
     },
     fetch:async(url,opts)=>{
       let body;
-      if(url.includes('generativelanguage')) {prompts.push(JSON.parse(opts.body).contents[0].parts[0].text);body={candidates:[{content:{parts:[{text:'{"summary":"fixture"}'}]}}]};}
+      if(url.includes('generativelanguage')) {prompts.push(JSON.parse(opts.body).contents[0].parts[0].text);body={candidates:[{content:{parts:[{text:JSON.stringify(aiAnalysis)}]}}]};}
       else if(url.includes('/basic')) body={closePrice:100,stockName:'Fixture',highPrice:120,lowPrice:90,accumulatedTradingVolume:150,accumulatedTradingValue:15000};
       else if(url.includes('/integration'))body={dealTrendInfos:[{foreignerPureBuyQuant:1,organPureBuyQuant:missingSupply?null:1}]};
       else if(url.includes('/price?'))body=priceRows || [...rows].reverse().map(r=>({bizdate:r.date,closePrice:r.close,highPrice:r.high,lowPrice:r.low,volume:r.volume}));
@@ -290,3 +290,57 @@ test('integrated production AI lock passes DATA_INSUFFICIENT, not entry',async()
  assert.match(s.prompts[0],/DATA_INSUFFICIENT/);assert.doesNotMatch(s.prompts[0],/ENTRY_CANDIDATE/);
  assert.match(s.prompts[0],/UNKNOWN은 거래량 부족이 아니며/);
 });
+
+// Strategy authority HTTP regressions: all provider and AI calls are mocked.
+test('screening API keeps role without granting entry authority',async()=>{
+  const r=await server().ctx.recommend({symbol:'005930',name:'Fixture'});
+  assert.equal(r.decisionRole,'SCREENING');assert.equal(r.strategy.decisionRole,'SCREENING');
+  assert.equal(engine.isEntryAllowed(r),false);assert.equal(engine.isEntryAllowed(r.strategy),false);
+});
+test('individual AI uses ENTRY_GATE and overwrites invented AI status and prices',async()=>{
+  const s=server({aiAnalysis:{strategyExplanation:{signal:'BUY',entryPrice:999,targetPrice:999,stopLossPrice:999,decisionRole:'SCREENING'}}});
+  const detail=await s.call('/api/kis/trading-strategy-test');
+  const r=await s.call('/api/stock/ai-analysis');
+  assert.equal(r.strategy.decisionRole,'ENTRY_GATE');
+  assert.equal(r.analysis.strategyExplanation.decisionRole,'ENTRY_GATE');
+  assert.equal(r.analysis.strategyExplanation.signal,detail.strategy.finalAssessment.status);
+  for(const [key,field] of [['entryPrice','entryPrice'],['targetPrice','takeProfitPrice'],['stopLossPrice','stopLossPrice']])
+    assert.equal(r.analysis.strategyExplanation[key],detail.strategy[field]);
+  assert.match(s.prompts[0],/ENTRY_GATE/);
+  assert.ok(r.quote && r.chartAnalysis && r.marketContext && r.dataMetadata && r.news);
+});
+test('AI cannot turn insufficient detailed strategy into BUY',async()=>{
+  const r=await server({missingVolume:true,aiAnalysis:{strategyExplanation:{signal:'BUY',entryPrice:999}}}).call('/api/stock/ai-analysis');
+  assert.equal(r.analysis.strategyExplanation.signal,'DATA_INSUFFICIENT');
+  assert.equal(engine.isEntryAllowed(r.strategy),false);
+});
+test('screening calculations and prices match pre-authority version',async()=>{
+  const oldSource=execFileSync('git',['show','HEAD:server.js'],{encoding:'utf8'});
+  const before=await server({serverSource:oldSource}).ctx.recommend({symbol:'005930',name:'Fixture'});
+  const after=await server().ctx.recommend({symbol:'005930',name:'Fixture'});
+  for(const key of ['score','maxScore','grade'])assert.equal(after[key],before[key]);
+  for(const key of ['signal','tradeSignal','entryPrice','takeProfitPrice','stopLossPrice','trendPassed','volumePassed','supplyPassed'])
+    assert.equal(after.strategy[key],before.strategy[key]);
+
+});
+
+for (const rawSnapshot of [null, {symbol:'005930',businessDate:'20260918',lastTradeTime:'103000',
+ acmlVolume:1500000,previousSameTimeAcmlVolume:1000000,providedPreviousSameTimeRate:150,
+ hourClassCode:'0',marketTreatmentClassCode:'',receivedAt:'2026-09-18T01:30:00.000Z',
+ connectionState:'CONNECTED',subscriptionState:'SUBSCRIBED',connectionGeneration:1,currentConnectionGeneration:1,dataStatus:'VALID',stale:false}]) {
+ test('locked B adapter and authority gates agree with '+(rawSnapshot?'valid raw snapshot':'no realtime'),async()=>{
+  if(rawSnapshot) assert.equal(require('../services/volumeEvaluation').evaluateRealtimeVolume({snapshot:rawSnapshot,now:new Date('2026-09-18T10:30:00+09:00'),validation:{validated:true,maxAgeMs:10000,sessionCodes:['0']}}).status,'PASS');
+  const s=server({productionVolume:true,rawSnapshot,aiAnalysis:{strategyExplanation:{signal:'ENTRY_CANDIDATE',entryPrice:999}}});
+  const recommendation=await s.ctx.recommend({symbol:'005930',name:'Fixture'});
+  assert.equal(recommendation.decisionRole,'SCREENING');assert.equal(recommendation.grade,'VOLUME_PENDING');
+  assert.equal(engine.isEntryAllowed(recommendation),false);
+  for (const route of ['/api/kis/trading-strategy-test','/api/stock/ai-analysis']) {
+   const r=await s.call(route);assert.equal(r.strategy.decisionRole,'ENTRY_GATE');blocked(r.strategy);
+   assert.equal(engine.isEntryAllowed(r.strategy),false);
+   assert.equal(engine.isEntryAllowed({...r.strategy,finalAssessment:{status:'ENTRY_CANDIDATE'}}),false);
+   assert.equal(r.marketContext.volume,150);assert.equal(r.marketContext.averageVolume20,100);
+   assert.equal(r.marketContext.volumeAssessment.ratio,null);
+   if(r.analysis){assert.equal(r.analysis.strategyExplanation.signal,'DATA_INSUFFICIENT');assert.equal(r.analysis.strategyExplanation.entryPrice,r.strategy.entryPrice);}
+  }
+ });
+}

@@ -206,6 +206,7 @@ class RealStockBackendService {
       ?.status;
 
   return {
+    decisionRole: strategy?.decisionRole ?? null,
     dataMetadata: payload?.dataMetadata ?? null,
     // 기존 App.jsx와 호환
     symbol,
@@ -817,10 +818,10 @@ export default function App() {
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-emerald-400" />
-                  수집 데이터 기반 AI 추천 종목
+                  분석 후보 · 스크리닝
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
+                  후보 등급은 매수 허가가 아닙니다. 추천과 상세는 조회 시점이 다를 수 있으므로 각 기준일·수신시각을 확인하세요. 최종 진입 조건은 별도로 조회한 상세 전략에서 확인합니다. 50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
                 </p>
               </div>
           {recommendationData && (
@@ -995,18 +996,18 @@ export default function App() {
                           {item.strategy?.tradeSignal && (
   <div className="mb-3 flex items-center justify-between rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2">
     <span className="text-xs text-slate-400">
-      매매 신호
+      스크리닝 가격 위치
     </span>
 
     <span className="text-sm font-bold text-white">
       {item.strategy.tradeSignal === 'BUY'
-        ? '🟢 매수 신호'
+        ? '🟢 스크리닝 진입가 도달 · 상세 확인 필요'
         : item.strategy.tradeSignal === 'WAIT_FOR_ENTRY'
-          ? '🟡 매수 대기'
+          ? '🟡 스크리닝 진입가 대기'
           : item.strategy.tradeSignal === 'TAKE_PROFIT'
-            ? '🔴 익절 신호'
+            ? '🔴 스크리닝 목표가 도달'
             : item.strategy.tradeSignal === 'STOP'
-              ? '🔵 손절 신호'
+              ? '🔵 스크리닝 손절선 도달'
               : '⚪ 관망'}
     </span>
   </div>
@@ -1292,11 +1293,11 @@ export default function App() {
     <div>
       <h3 className="text-base font-semibold text-white flex items-center gap-2">
         <Target className="w-4 h-4 text-emerald-400" />
-        매매전략 및 고급 차트 분석
+        최종 진입 조건 · 상세 전략
       </h3>
 
       <p className="text-xs text-slate-400 mt-1">
-        KIS 실제 OHLCV와 실제 거래량·수급·뉴스를 기반으로 프로그램이 계산한 결과입니다.
+        KIS 실제 OHLCV와 실제 거래량·수급·뉴스를 기반으로 별도 계산합니다. 진입 조건 충족은 전략상 후보이며 실제 주문 허가나 실행을 의미하지 않습니다.
       </p>
     </div>
 
@@ -1319,7 +1320,7 @@ export default function App() {
         <Clock className="w-3.5 h-3.5" />
       )}
 
-      {strategyData?.finalAssessment?.label || '판정 데이터 없음'}
+      {({ ENTRY_CANDIDATE: '진입 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '판정 데이터 없음'}
     </span>
   </div>
 
@@ -1345,7 +1346,7 @@ export default function App() {
                   : 'text-slate-300'
           }`}
         >
-          {strategyData?.finalAssessment?.label || '데이터 없음'}
+          {({ ENTRY_CANDIDATE: '진입 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '데이터 없음'}
         </span>
       </div>
 

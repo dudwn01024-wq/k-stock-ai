@@ -951,6 +951,7 @@ const calculateStrategy =
   async (symbol) => {
     const emptyResult =
       () => ({
+        decisionRole: 'SCREENING',
         symbol,
 
         currentPrice:
@@ -1467,6 +1468,7 @@ if (
 }
 
 return {
+  decisionRole: 'SCREENING',
   dataMetadata,
   symbol,
   currentPrice,
@@ -2231,6 +2233,7 @@ const buildRecommendationResult =
       );
 
     return {
+      decisionRole: 'SCREENING',
       symbol:
         stock.symbol,
 
@@ -2282,6 +2285,7 @@ const buildRecommendationResult =
 
       dataMetadata: quote.dataMetadata ?? null,
       strategy: {
+        decisionRole: 'SCREENING',
         dataMetadata: strategy.dataMetadata ?? null,
         ma5:
           strategy.ma5,
@@ -3029,6 +3033,7 @@ const buildGeminiPrompt =
 9. 투자 수익을 보장하는 표현을 사용하지 않는다.
 10. 출력은 반드시 JSON만 반환한다.
 
+개별 분석의 최종 판정은 상세 ENTRY_GATE 전략의 finalAssessment이다. 추천 SCREENING 결과로 대체하지 마라. 상태와 가격을 재결정하지 말고 전달된 상세 전략을 설명만 하라.
 분석 대상 실제 데이터:
 
 ${JSON.stringify(
@@ -3876,6 +3881,7 @@ const analyzeStockWithGemini =
     }
 
 
+    analysis.strategyExplanation.decisionRole = strategy?.decisionRole ?? null;
     analysis.strategyExplanation.signal =
       strategy
         ?.finalAssessment
@@ -4009,7 +4015,8 @@ const buildRecommendationGeminiPrompt =
       );
 
     return `
-너는 K-Stock AI 추천 종목 설명 AI다.
+너는 K-Stock AI 스크리닝 후보 설명 AI다.
+SCREENING은 분석 후보 탐색이며 주문 허가가 아니다. 최종 진입 조건은 별도 조회한 상세 ENTRY_GATE 전략만 판단한다.
 날짜 안전 규칙: sourceBusinessDate 또는 sourceTimestamp가 없으면 해당 날짜 또는 시각은 미확인이다. freshnessStatus가 UNKNOWN이면 최신 여부 미확인이다. 오늘·현재·실시간 데이터라고 가정하지 마라. receivedAt으로 원본 날짜를 대체하지 마라. 날짜 불일치를 명시하고 날짜를 생성하지 마라.
 
 중요:
@@ -4891,116 +4898,7 @@ app.get(
 // API - INDIVIDUAL STOCK AI ANALYSIS
 // ========================================
 
-app.get(
-  '/api/stock/ai-analysis',
-  async (req, res) => {
-    try {
-      const symbol =
-        String(
-          req.query.symbol || ''
-        ).trim();
 
-      if (!validateSymbol(symbol)) {
-        return res.status(400).json({
-          error:
-            '올바른 6자리 종목코드가 필요합니다.'
-        });
-      }
-
-      if (!GEMINI_API_KEY) {
-        return res.status(503).json({
-          error:
-            'Gemini API key가 설정되어 있지 않습니다.'
-        });
-      }
-
-      const [
-        quote,
-        strategy,
-        news
-      ] =
-        await Promise.all([
-          fetchStockQuoteData(
-            symbol
-          ),
-
-          calculateStrategy(
-            symbol
-          ),
-
-          fetchStockNewsBySymbol(
-            symbol
-          ).catch(
-            (error) => {
-              console.warn(
-                `[K-Stock AI] AI analysis news fetch failed for ${symbol}:`,
-                error.message
-              );
-
-              return [];
-            }
-          )
-        ]);
-
-      const result =
-        await analyzeStockWithGemini({
-          quote,
-          strategy,
-          news
-        });
-
-      return res.json({
-        symbol,
-
-        stockName:
-          quote.stockName,
-
-        quote,
-
-        strategy,
-
-        riskReward:
-          result.riskReward,
-
-        news,
-
-        newsAssessment:
-          assessLatestNews(
-            news
-          ),
-
-        analysis:
-          result.analysis,
-
-        modelUsed:
-          result.modelUsed,
-
-        attemptUsed:
-          result.attemptUsed,
-
-        fetchedAt:
-          new Date().toISOString()
-      });
-    } catch (error) {
-      console.error(
-        '[K-Stock AI] AI analysis API error:',
-        error
-      );
-
-      return res.status(500).json({
-        error:
-          'AI 종합 분석을 완료하지 못했습니다.',
-
-        details:
-          Array.isArray(
-            error?.details
-          )
-            ? error.details
-            : undefined
-      });
-    }
-  }
-);
 
 // ========================================
 // API - 50 STOCK RECOMMENDATION SCAN
