@@ -20,6 +20,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
+// Paper router owns its body limit and local-only boundary before global JSON parsing.
+app.use('/api/paper', require('./services/paperApi').createPaperRouter({allowLocalMutations: process.env.NODE_ENV !== 'production'}));
 app.use(express.json());
 
 const NAVER_HEADERS = {

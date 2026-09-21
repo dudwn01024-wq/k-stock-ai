@@ -1,3 +1,4 @@
+import PaperPanel from './PaperPanel.jsx';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -813,6 +814,8 @@ export default function App() {
             연결 정보
           </button>
         </div>
+
+        <button onClick={() => setActiveTab('paper')} className="border border-amber-500 text-amber-300 rounded px-3 py-2 mb-4">모의투자 / PAPER</button>
 
         {!loading && activeTab === 'detail' && (
           <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
@@ -2314,6 +2317,8 @@ export default function App() {
             )}
           </section>
         )}
+
+        {activeTab === 'paper' && <PaperPanel apiBase={['localhost','127.0.0.1','[::1]'].includes(window.location.hostname) ? 'http://localhost:5000/api/paper' : API_BASE_URL + '/paper'} />}
 
         {activeTab === 'backend' && (
           <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">

@@ -1,0 +1,46 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const {createPaperTrading,evaluatePaperExitSignal}=require('../services/paperTrading');
+const {buildRiskContext,evaluateRiskWithSnapshots}=require('../services/accountSnapshot');
+const {calculateTradingStrategy}=require('../services/tradingStrategy');
+// Explicit synthetic capital, prices, policy and timestamps. Never live market data.
+const stamp=()=>({source:'MOCK_EXECUTION',sourceTimestamp:'2026-09-21T10:00:00+09:00',businessDate:'2026-09-21',receivedAt:null});
+const initial=()=>{const m={...stamp(),snapshotId:'MOCK-INITIAL',complete:true,currency:'KRW'};return {
+ accountSnapshot:{...m,equity:10000,availableCash:10000},portfolioSnapshot:{...m,positions:[],pendingOrders:[]},
+ dailyRiskState:{...m,lossAmount:0,consecutiveLosses:0}};};
+const strategy=()=>calculateTradingStrategy({symbol:'005930',currentPrice:100,chartAnalysis:{ma5:100,ma20:99,ma60:98,rsi14:50,
+ macd:{macd:2,signal:1,histogram:1},bollingerBands:{position:50},atr14:10,supportResistance:{nearestSupport:{price:100},nearestResistance:{price:120}}},
+ marketContext:{volume:150,averageVolume20:100,foreignerNet:1,institutionNet:1,newsAssessment:{hasCautionSignal:false}}});
+const policy=()=>({enabled:true,maxInvestmentPerSymbol:1000,maxOrderAmount:1000,maxDailyLoss:100,maxHoldings:3,
+ preventDuplicatePosition:true,preventDuplicatePendingOrder:true,maxConsecutiveLosses:3,maxExposureRatio:0.5});
+const book=()=>createPaperTrading({sessionId:'MOCK',initialSnapshots:initial()});
+const proposal=(p,patch={})=>{const snapshots=p.getSnapshots(stamp()),s=strategy(),rules=policy();const i={...snapshots,strategyResult:s,symbol:s.symbol,proposedQuantity:4,proposedEntryPrice:100,policy:rules};return {
+ eventId:'CREATE-BUY-1',clientOrderId:'BUY-1',strategyResult:s,riskResult:evaluateRiskWithSnapshots(i),snapshots,policy:rules,quantity:4,proposedEntryPrice:100,...patch};};
+const fill=(eventId,fillPrice=100,fillQuantity=4)=>({...stamp(),eventId,validated:true,fillPrice,fillQuantity});
+const opened=()=>{const p=book();assert.equal(p.createEntryOrder(proposal(p)).allowed,true);assert.equal(p.fillPaperOrder('BUY-1',fill('F1')).allowed,true);return p;};
+
+
+const express=require('express');
+const {createPaperRouter}=require('../services/paperApi');
+const raw=()=>({symbol:'005930',currentPrice:100,chartAnalysis:{ma5:100,ma20:99,ma60:98,rsi14:50,macd:{macd:2,signal:1,histogram:1},bollingerBands:{position:50},atr14:10,supportResistance:{nearestSupport:{price:100},nearestResistance:{price:120}}},marketContext:{volume:150,averageVolume20:100,foreignerNet:1,institutionNet:1,newsAssessment:{hasCautionSignal:false}}});
+async function api(t,enabled=true){const app=express();app.use('/api/paper',createPaperRouter({allowLocalMutations:enabled}));const server=await new Promise(resolve=>{const v=app.listen(0,'127.0.0.1',()=>resolve(v));});t.after(()=>new Promise(resolve=>{server.closeAllConnections();server.close(resolve);}));
+ const call=(path,body,extra={})=>new Promise((resolve,reject)=>{const request=require('node:http').request({hostname:'127.0.0.1',port:server.address().port,path:'/api/paper'+path,method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Paper-Operation':'TEST_ONLY',...extra}},res=>{let text='';res.on('data',b=>text+=b);res.on('end',()=>{try{resolve({code:res.statusCode,body:JSON.parse(text)});}catch(e){reject(e);}});});request.on('error',reject);request.end(body?JSON.stringify({mode:'PAPER',...body}):undefined);});
+ return {call,init:rules=>call('/session',{sessionId:'MOCK',initialSnapshots:initial(),policy:rules??policy()}),order:patch=>call('/orders',{eventId:'CREATE',clientOrderId:'BUY',quantity:4,proposedEntryPrice:100,strategyInput:raw(),snapshotRequest:stamp(),...patch})};}
+test('status defaults PAPER MEMORY_ONLY and disabled mutations',async t=>{const a=await api(t,false),r=await a.call('/status');assert.equal(r.body.mode,'PAPER');assert.equal(r.body.persistence,'MEMORY_ONLY');assert.equal(r.body.mutationsAllowed,false);assert.equal((await a.init()).code,403);});
+test('local explicitly configured mock creates PENDING through real gates',async t=>{const a=await api(t);assert.equal((await a.init()).code,201);const r=await a.order();assert.equal(r.code,200);assert.equal(r.body.order.status,'PENDING');assert.equal((await a.call('/orders')).body.items.length,1);});
+test('missing configuration never creates cash or orders',async t=>{const a=await api(t);assert.equal((await a.order()).code,409);assert.equal((await a.call('/positions')).body.items.length,0);});
+test('forged strategy/risk/snapshot cannot bypass raw strategy validation',async t=>{const a=await api(t);await a.init();const r=await a.order({strategyInput:{},strategyResult:strategy(),riskResult:{allowed:true},snapshots:initial()});assert.equal(r.code,422);assert.equal((await a.call('/orders')).body.items.length,0);});
+test('risk rejection cannot be overridden in request',async t=>{const a=await api(t);await a.init({...policy(),maxOrderAmount:1});assert.equal((await a.order({policy:policy(),riskResult:{allowed:true}})).code,422);});
+test('partial/full explicit fill and read positions/events',async t=>{const a=await api(t);await a.init();await a.order();let r=await a.call('/orders/BUY/fill',{...fill('F1',90,1),testEvent:true});assert.equal(r.body.order.status,'PARTIALLY_FILLED');r=await a.call('/orders/BUY/fill',{...fill('F2',100,3),testEvent:true});assert.equal(r.body.order.status,'FILLED');assert.equal(r.body.order.averageFillPrice,97.5);assert.equal((await a.call('/positions')).body.items[0].quantity,4);assert.equal((await a.call('/events')).body.items.length,3);assert.equal((await a.call('/orders/BUY/fill',{...fill('F3'),testEvent:true})).code,422);});
+for(const action of ['cancel','reject'])test(action+' and terminal event rejection',async t=>{const a=await api(t);await a.init();await a.order();const b={...stamp(),eventId:'END'};assert.equal((await a.call('/orders/BUY/'+action,b)).code,200);assert.equal((await a.call('/orders/BUY/'+action,b)).code,422);assert.equal((await a.call('/orders/BUY/fill',{...fill('F'),testEvent:true})).code,422);});
+for(const price of [null,0,-1,'100'])test('invalid fill value '+String(price),async t=>{const a=await api(t);await a.init();await a.order();assert.equal((await a.call('/orders/BUY/fill',{...fill('F',price),testEvent:true})).code,422);const o=(await a.call('/orders')).body.items[0];assert.equal(o.averageFillPrice,null);assert.equal(o.filledQuantity,0);});
+test('test confirmation and original timestamp mandatory',async t=>{const a=await api(t);await a.init();await a.order();assert.equal((await a.call('/orders/BUY/fill',fill('F'))).code,422);assert.equal((await a.call('/orders/BUY/fill',{...fill('F'),testEvent:true,sourceTimestamp:null})).code,422);});
+for(const headers of [{Origin:'https://evil.example'},{Host:'evil.example'},{'X-Forwarded-For':'203.0.113.1'}])test('nonlocal/proxy browser request denied '+JSON.stringify(headers),async t=>{const a=await api(t);const r=await a.call('/session',{sessionId:'MOCK',initialSnapshots:initial(),policy:policy()},headers);assert.equal(r.code,403);assert.equal(r.body.mode,'PAPER');});
+test('missing PAPER confirmation rejected and session cannot reset',async t=>{const a=await api(t);assert.equal((await a.call('/session',{mode:'LIVE'})).code,400);await a.init();assert.equal((await a.init()).code,409);});
+test('UI labels paper and null safely; server mounts separate route',()=>{const ui=fs.readFileSync(require.resolve('../frontend/src/PaperPanel.jsx'),'utf8'),server=fs.readFileSync(require.resolve('../server.js'),'utf8');assert.match(ui,/모의투자 \/ PAPER/);assert.match(ui,/MEMORY_ONLY/);assert.match(ui,/value===null\|\|value===undefined/);assert.doesNotMatch(ui,/실제 주문 완료/);assert.match(server,/app.use\('\/api\/paper'/);const source=fs.readFileSync(require.resolve('../services/paperApi'),'utf8');assert.doesNotMatch(source,/kisMarketData|kisRealtimeData|fetch\(|axios|DATABASE_URL|GEMINI/);});
+test('POST custom header mandatory even from local',async t=>{const a=await api(t);assert.equal((await a.call('/session',{sessionId:'MOCK',initialSnapshots:initial(),policy:policy()},{'X-Paper-Operation':''})).code,400);});
+test('malformed initial snapshots are rejected without echoing request',async t=>{const a=await api(t);const r=await a.call('/session',{sessionId:'MOCK',initialSnapshots:null,policy:policy(),rawPayload:'DO_NOT_ECHO'});assert.equal(r.code,400);assert.equal(r.body.mode,'PAPER');assert.equal(JSON.stringify(r.body).includes('DO_NOT_ECHO'),false);});
+test('oversized request stays bounded and returns PAPER error',async t=>{const a=await api(t);const r=await a.call('/session',{padding:'x'.repeat(34000)});assert.equal(r.code,400);assert.equal(r.body.mode,'PAPER');});
