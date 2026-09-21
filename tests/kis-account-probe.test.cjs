@@ -98,3 +98,39 @@ test('import graph excludes env/log/storage/Risk/PAPER and native fetch never ru
   let count=0;const execution=exported.createFakeProbeExecution(async()=>++count===1?reply({access_token:'DUMMY_TOKEN'}):reply(body()));
   assert.equal((await execution.createRunner().runBalance(config())).provenance,'MOCK_FIXTURE');assert.equal(forbiddenCalls,0);
 });
+
+test('business failure reports only bounded codes without interpreting msg_cd',async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd:'TEST1234',
+    msg1:'DUMMY_SECRET DUMMY_TOKEN 00000000',raw:{private:'PRIVATE_ACCOUNT_BODY'}}));
+  const r=await f.run(config());
+  assert.equal(r.errorCode,'BALANCE_RESPONSE_FAILED');assert.equal(r.httpStatus,200);
+  assert.equal(r.kisRtCd,'1');assert.equal(r.kisMsgCd,'TEST1234');
+  assert.equal(r.safeFailureCategory,'KIS_BUSINESS_ERROR');assert.equal(r.riskReady,false);
+  for(const value of ['msg1','raw','DUMMY_SECRET','DUMMY_TOKEN','00000000','PRIVATE_ACCOUNT_BODY'])assert.ok(!JSON.stringify(r).includes(value));
+  assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
+});
+for(const msg_cd of ['DUMMY_SECRET','00000000','TEST1234\nPRIVATE','TEST1234 PRIVATE',{code:'TEST1234'}])test('unsafe diagnostic code is suppressed '+JSON.stringify(msg_cd),async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'PRIVATE_RT',msg_cd,msg1:'PRIVATE_MESSAGE'}));
+  const r=await f.run(config());assert.equal(r.kisRtCd,null);assert.equal(r.kisMsgCd,null);
+  assert.ok(!JSON.stringify(r).includes('PRIVATE'));assert.equal(f.calls.length,2);
+});
+test('credential matching even a code-shaped diagnostic is suppressed',async()=>{
+  const c=config();c.auth.appKey='TEST1234';
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd:'TEST1234'}));
+  assert.equal((await f.run(c)).kisMsgCd,null);
+});
+test('HTTP failure exposes status only and never parses error bodies',async()=>{
+  let reads=0;
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):{status:403,json:()=>{reads++;throw Error('PRIVATE');}});
+  const r=await f.run(config());assert.equal(r.httpStatus,403);assert.equal(r.safeFailureCategory,'HTTP_ERROR');
+  assert.equal(r.kisRtCd,null);assert.equal(r.kisMsgCd,null);assert.equal(reads,0);assert.equal(f.calls.length,2);
+});
+test('successful result and fixed first-page parameters remain unchanged',async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({...body(),msg_cd:'TEST0000',msg1:'PRIVATE_MESSAGE'}));
+  const r=await f.run(config());assert.equal(r.probeCompleted,true);assert.equal(r.httpStatus,200);
+  assert.equal(r.kisRtCd,'0');assert.equal(r.kisMsgCd,'TEST0000');assert.equal(r.safeFailureCategory,null);
+  assert.equal(r.riskReady,false);assert.equal(r.positionCount,1);assert.ok(!JSON.stringify(r).includes('PRIVATE_MESSAGE'));
+  assert.deepEqual(Object.fromEntries(new URL(f.calls[1].url).searchParams),{
+    CANO:'00000000',ACNT_PRDT_CD:'00',AFHR_FLPR_YN:'N',OFL_YN:'',INQR_DVSN:'02',UNPR_DVSN:'01',
+    FUND_STTL_ICLD_YN:'N',FNCG_AMT_AUTO_RDPT_YN:'N',PRCS_DVSN:'00',CTX_AREA_FK100:'',CTX_AREA_NK100:''});
+});

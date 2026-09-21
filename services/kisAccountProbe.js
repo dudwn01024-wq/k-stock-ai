@@ -11,7 +11,7 @@ const freeze = v => { if (v && typeof v === 'object') {Object.values(v).forEach(
 // No clock/config/environment reads or network requests occur during import.
 function scope(http, provenance) {
   let used = false;
-  const summary = (errorCode, fields = {}) => freeze({requestSucceeded:false,responseShapeValid:false,
+  const baseSummary = (errorCode, fields = {}) => freeze({requestSucceeded:false,responseShapeValid:false,
     output1Present:false,output2Present:false,paginationState:'UNKNOWN',positionCount:null,
     numericFieldTypesValid:false,missingFieldCategories:[],...fields,errorCode,probeCompleted:errorCode===null,
     provenance,usage:'DISPLAY_ONLY',readiness:'RISK_NOT_READY',riskReady:false,
@@ -19,6 +19,11 @@ function scope(http, provenance) {
     reasonCodes:[...(errorCode ? [errorCode] : []),'EQUITY_POLICY_UNVERIFIED','AVAILABLE_CASH_SEMANTICS_UNVERIFIED',
       'ACCOUNT_TIMESTAMP_UNVERIFIED','ACCOUNT_BUSINESS_DATE_UNVERIFIED','DAILY_RISK_UNAVAILABLE']});
   const createRunner = () => Object.freeze({runBalance:async config => {
+    // Codes only: never provider messages, request details, or raw bodies.
+    const diagnostics={httpStatus:null,kisRtCd:null,kisMsgCd:null};
+    const summary=(errorCode,fields={})=>baseSummary(errorCode,{...diagnostics,
+      safeFailureCategory:errorCode===null?null:errorCode==='BALANCE_RESPONSE_FAILED'?'KIS_BUSINESS_ERROR':
+        errorCode==='HTTP_FAILED'?'HTTP_ERROR':'UNKNOWN',...fields});
     if (config?.KIS_ACCOUNT_READ_ENABLED !== 'true') return summary('ACCOUNT_READ_DISABLED');
     if (config?.KIS_ACCOUNT_PROBE_ENABLED !== 'true') return summary('PROBE_NOT_APPROVED');
     const environment = config?.environment;
@@ -40,6 +45,7 @@ function scope(http, provenance) {
     const contract=getReadOnlyContract({operation:'BALANCE',environment});
     const controller=new AbortController();let timer;
     const checkResponse = (response, expected) => {
+      diagnostics.httpStatus=Number.isInteger(response?.status) && response.status>=100 && response.status<=599 ? response.status : null;
       if (response?.redirected || (response?.status >= 300 && response?.status < 400) || (response?.url && response.url !== expected)) throw Error('REDIRECT_BLOCKED');
       if (response?.status !== 200) throw Error('HTTP_FAILED');
     };
@@ -65,6 +71,12 @@ function scope(http, provenance) {
       checkResponse(r,expected);
       const body=await r.json();
       if(controller.signal.aborted)return summary('PROBE_TIMEOUT');
+      // Unknown formats stay null; msg_cd is not interpreted as an account/auth diagnosis.
+      const safeCode=(value,pattern)=>typeof value==='string' && pattern.test(value) &&
+        ![appKey,appSecret,token,cano,productCode].some(secret=>secret &&
+          (value===secret || (secret.length>=4 && value.includes(secret)))) ? value : null;
+      diagnostics.kisRtCd=safeCode(body?.rt_cd,/^[0-9]$/);
+      diagnostics.kisMsgCd=safeCode(body?.msg_cd,/^(?:[A-Z]{4}[0-9]{4}|[A-Z]{3}[0-9]{5})$/);
       if(body?.rt_cd !== '0')return summary('BALANCE_RESPONSE_FAILED');
       const code=r.headers?.get('tr_cont');
       const shape={requestSucceeded:true,output1Present:Array.isArray(body.output1),output2Present:Array.isArray(body.output2),
