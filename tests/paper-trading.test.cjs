@@ -114,6 +114,6 @@ test('out-of-day or reversed event rejected and memory has no restart recovery',
 test('module dependency whitelist prevents real account/order/network access',()=>{
  let calls=0;const forbidden=()=>{calls++;throw Error('Forbidden I/O');};const module={exports:{}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../services/paperTrading'),'utf8'),{module,require:name=>{
- assert.ok(['./accountSnapshot','./riskManager','./tradingStrategy'].includes(name));return require('../services/'+name.slice(2));},fetch:forbidden,setTimeout:forbidden,process:new Proxy({},{get:forbidden})});
+ assert.ok(['./accountSnapshot','./riskManager','./tradingStrategy','./paperTradingState'].includes(name));return require('../services/'+name.slice(2));},fetch:forbidden,setTimeout:forbidden,process:new Proxy({},{get:forbidden})});
  const p=module.exports.createPaperTrading({sessionId:'MOCK',initialSnapshots:initial()});p.createEntryOrder(proposal(p));p.fillPaperOrder('BUY-1',fill('F'));assert.equal(calls,0);
 });
