@@ -2,6 +2,7 @@
 
 // Pure fixture decoder. No transport, credentials, environment access or ledger import.
 const {sourceDate} = require('./dataFreshness');
+const mockResults = new WeakSet();
 const freeze = value => {
   if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); }
   return value;
@@ -66,12 +67,13 @@ function parseMockTradeHistory(options = {}) {
   const {operation,environment,provenance,pages,maxPages=20}=options ?? {};
   let pageCount=0;
   const candidates=[], keys=new Set(), records=new Set();
-  const finish=error=>freeze({operation:known(operation,environment)?operation:null,
+  const finish=error=>{ const result=freeze({operation:known(operation,environment)?operation:null,
     environment:known(operation,environment)?environment:null,
     provenance:provenance==='MOCK_FIXTURE'?'MOCK_FIXTURE':null,fixtureOnly:true,
     pageCount,historyComplete:!error,candidates:error?null:candidates,
     businessDate:null,sourceTimestamp:null,readiness:'DISPLAY_ONLY',status:'LEDGER_INPUT_NOT_READY',
     ledgerComplete:false,ledgerInputReady:false,riskReady:false,reasonCodes:[...blockers,...(error?[error]:[])]});
+    mockResults.add(result); return result; };
   if (!options || Object.keys(options).some(k=>!['operation','environment','provenance','pages','maxPages'].includes(k)) ||
       !known(operation,environment)) return finish('READ_ONLY_CONTRACT_INVALID');
   if (provenance!=='MOCK_FIXTURE') return finish('PROVENANCE_REJECTED');
@@ -101,4 +103,4 @@ function parseMockTradeHistory(options = {}) {
   }
   return finish(pageCount>=maxPages?'MAX_PAGES_EXCEEDED':'INCOMPLETE_PAGINATION');
 }
-module.exports={getTradeHistoryContract,parseMockTradeHistory};
+module.exports={getTradeHistoryContract,parseMockTradeHistory,isMockTradeHistoryResult:value=>mockResults.has(value)};
