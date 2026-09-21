@@ -13,6 +13,18 @@ flags `KIS_ACCOUNT_READ_ENABLED` and `KIS_ACCOUNT_PROBE_ENABLED` must equal
 environment-tagged auth/account configuration, and timeoutMs. Credentials are
 trusted internal configuration, never browser/user request overrides.
 
+VTS retains the existing `baseUrl`, environment-tagged `auth` and `account` shape.
+LIVE additionally requires both `KIS_LIVE_ACCOUNT_READ_ENABLED` and
+`KIS_LIVE_ACCOUNT_PROBE_ENABLED` to equal the string `"true"`, before any HTTP.
+For LIVE, replace generic baseUrl/auth/account with these dedicated config keys:
+`KIS_LIVE_BASE_URL`, `KIS_LIVE_APP_KEY`, `KIS_LIVE_APP_SECRET`, `KIS_LIVE_CANO`,
+`KIS_LIVE_ACNT_PRDT_CD`. The common flags, `environment: "KIS_LIVE"` and explicit
+`timeoutMs` remain mandatory. Generic credentials or mixed VTS/LIVE config keys
+are rejected, even when dedicated LIVE values are also present. There is no
+environment-variable reader or fallback. A future approved local loader must
+map only the dedicated namespace. Names alone cannot establish that a credential
+was issued for LIVE; trusted configuration provenance must be verified separately.
+
 No operation argument is accepted. Only fixed BALANCE GET and token POST are
 implemented. Query parameters are fixed to the first-page stock balance query.
 Environment labels validate configuration consistency, not broker ownership of

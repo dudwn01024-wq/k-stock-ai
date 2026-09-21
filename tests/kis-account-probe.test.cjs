@@ -38,7 +38,10 @@ test('fixed token POST and balance GET, no sensitive report fields',async()=>{
   const serialized=JSON.stringify(r);for(const privateValue of ['DUMMY_KEY','DUMMY_SECRET','DUMMY_TOKEN','00000000','005930','123456','654321','531','CANO','Authorization','appkey','appsecret'])assert.ok(!serialized.includes(privateValue));
 });
 test('LIVE configuration is exercised only through fake path',async()=>{
-  const f=fake(),c=config();c.environment='KIS_LIVE';c.auth.environment=c.account.environment=c.environment;c.baseUrl='https://openapi.koreainvestment.com:9443';
+  const f=fake(),c={KIS_ACCOUNT_READ_ENABLED:'true',KIS_ACCOUNT_PROBE_ENABLED:'true',environment:'KIS_LIVE',
+    KIS_LIVE_ACCOUNT_READ_ENABLED:'true',KIS_LIVE_ACCOUNT_PROBE_ENABLED:'true',
+    KIS_LIVE_BASE_URL:'https://openapi.koreainvestment.com:9443',KIS_LIVE_APP_KEY:'DUMMY_LIVE_KEY',
+    KIS_LIVE_APP_SECRET:'DUMMY_LIVE_SECRET',KIS_LIVE_CANO:'00000000',KIS_LIVE_ACNT_PRDT_CD:'00',timeoutMs:200};
   assert.equal((await f.run(c)).provenance,'MOCK_FIXTURE');assert.equal(f.calls[1].options.headers.tr_id,'TTTC8434R');
 });
 test('runner recreation and concurrency cannot reset execution budget',async()=>{

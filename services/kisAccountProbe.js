@@ -29,13 +29,22 @@ function scope(http, provenance) {
     if (config?.KIS_ACCOUNT_PROBE_ENABLED !== 'true') return summary('PROBE_NOT_APPROVED');
     const environment = config?.environment;
     if (!Object.hasOwn(bases,environment ?? '')) return summary('ENVIRONMENT_INVALID');
-    if (config.baseUrl !== bases[environment]) return summary('BASE_URL_INVALID');
-    const auth = config.auth, account = config.account;
+    const live=environment==='KIS_LIVE';
+    if(live && config.KIS_LIVE_ACCOUNT_READ_ENABLED!=='true')return summary('LIVE_ACCOUNT_READ_DISABLED');
+    if(live && config.KIS_LIVE_ACCOUNT_PROBE_ENABLED!=='true')return summary('LIVE_PROBE_NOT_APPROVED');
+    const commonKeys=['KIS_ACCOUNT_READ_ENABLED','KIS_ACCOUNT_PROBE_ENABLED','environment','timeoutMs'];
+    // LIVE accepts only dedicated names. Generic/VTS settings cannot supply fallbacks.
+    const liveKeys=['KIS_LIVE_ACCOUNT_READ_ENABLED','KIS_LIVE_ACCOUNT_PROBE_ENABLED',
+      'KIS_LIVE_BASE_URL','KIS_LIVE_APP_KEY','KIS_LIVE_APP_SECRET','KIS_LIVE_CANO','KIS_LIVE_ACNT_PRDT_CD'];
+    if(live && !only(config,[...commonKeys,...liveKeys]))return summary('CONFIG_INVALID');
+    if ((live?config.KIS_LIVE_BASE_URL:config.baseUrl) !== bases[environment]) return summary('BASE_URL_INVALID');
+    const auth = live?{environment,appKey:config.KIS_LIVE_APP_KEY,appSecret:config.KIS_LIVE_APP_SECRET}:config.auth;
+    const account = live?{environment,cano:config.KIS_LIVE_CANO,productCode:config.KIS_LIVE_ACNT_PRDT_CD}:config.account;
     if (!only(auth,['environment','appKey','appSecret']) || auth.environment !== environment || !text(auth.appKey) || !text(auth.appSecret)) return summary('AUTH_CONFIG_INVALID');
     if (!only(account,['environment','cano','productCode']) || account.environment !== environment ||
         !/^\d{8}$/.test(account.cano ?? '') || typeof account.cano !== 'string' ||
         typeof account.productCode !== 'string' || !/^\d{2}$/.test(account.productCode)) return summary('ACCOUNT_CONFIG_INVALID');
-    if (!only(config,['KIS_ACCOUNT_READ_ENABLED','KIS_ACCOUNT_PROBE_ENABLED','environment','baseUrl','auth','account','timeoutMs'])) return summary('CONFIG_INVALID');
+    if (!live && !only(config,[...commonKeys,'baseUrl','auth','account'])) return summary('CONFIG_INVALID');
     // Explicit total deadline, bounded by a technical one-shot ceiling, no default.
     if (!Number.isSafeInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > 60000) return summary('TIMEOUT_CONFIG_INVALID');
     if (used) return summary('PROBE_BUDGET_EXHAUSTED');
