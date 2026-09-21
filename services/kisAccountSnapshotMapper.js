@@ -16,7 +16,8 @@ function mapAccountCandidates({environment,balance,unfilledOrders} = {}) {
     if (!result.complete) { reasons.push('INCOMPLETE_PAGINATION',...result.reasonCodes); return false; }
     return true;
   };
-  const balanceOK = accept(balance,'BALANCE');
+  const balanceOK = balance == null
+    ? (reasons.push('BALANCE_NOT_QUERIED'),false) : accept(balance,'BALANCE');
   const ordersOK = unfilledOrders == null
     ? (reasons.push('PENDING_ORDERS_NOT_QUERIED'),false) : accept(unfilledOrders,'UNFILLED_ORDERS');
   const positions = balanceOK ? balance.rows.map(row=>{
