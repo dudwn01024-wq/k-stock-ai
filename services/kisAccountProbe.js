@@ -78,20 +78,19 @@ function scope(http, provenance) {
       const safeCode=(value,pattern)=>typeof value==='string' && pattern.test(value) && !sensitiveMatch(value) ? value : null;
       diagnostics.kisRtCd=safeCode(body?.rt_cd,/^[0-9]$/);
       diagnostics.kisMsgCdPresent=!!(object(body) && Object.hasOwn(body,'msg_cd'));
-      // First failing check wins. Never return the value, even when accepted.
+      // First failing check wins. Only bounded, non-sensitive codes may be returned.
       const rejectionReason=value=>{
         if(!diagnostics.kisMsgCdPresent)return 'MISSING';
         if(typeof value!=='string')return 'NOT_STRING';
         if(value.length===0)return 'EMPTY';
         if(value.length>32)return 'TOO_LONG';
         if(/[^A-Za-z0-9_-]/.test(value))return 'INVALID_CHARACTERS';
-        if(!/[A-Za-z]/.test(value))return 'MISSING_LETTER';
-        if(!/[0-9]/.test(value))return 'MISSING_DIGIT';
         if(sensitiveMatch(value))return 'SENSITIVE_VALUE_MATCH';
         return 'NONE';
       };
       diagnostics.kisMsgCdRejectionReason=rejectionReason(body?.msg_cd);
       diagnostics.kisMsgCdFormatAccepted=diagnostics.kisMsgCdRejectionReason==='NONE';
+      if(diagnostics.kisMsgCdFormatAccepted)diagnostics.kisMsgCd=body.msg_cd;
       if(body?.rt_cd !== '0')return summary('BALANCE_RESPONSE_FAILED');
       const code=r.headers?.get('tr_cont');
       const shape={requestSucceeded:true,output1Present:Array.isArray(body.output1),output2Present:Array.isArray(body.output2),
