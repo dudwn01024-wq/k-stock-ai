@@ -20,7 +20,7 @@ function scope(http, provenance) {
       'ACCOUNT_TIMESTAMP_UNVERIFIED','ACCOUNT_BUSINESS_DATE_UNVERIFIED','DAILY_RISK_UNAVAILABLE']});
   const createRunner = () => Object.freeze({runBalance:async config => {
     // Codes only: never provider messages, request details, or raw bodies.
-    const diagnostics={httpStatus:null,kisRtCd:null,kisMsgCd:null};
+    const diagnostics={httpStatus:null,kisRtCd:null,kisMsgCd:null,kisMsgCdPresent:false,kisMsgCdFormatAccepted:false};
     const summary=(errorCode,fields={})=>baseSummary(errorCode,{...diagnostics,
       safeFailureCategory:errorCode===null?null:errorCode==='BALANCE_RESPONSE_FAILED'?'KIS_BUSINESS_ERROR':
         errorCode==='HTTP_FAILED'?'HTTP_ERROR':'UNKNOWN',...fields});
@@ -76,7 +76,11 @@ function scope(http, provenance) {
         ![appKey,appSecret,token,cano,productCode].some(secret=>secret &&
           (value===secret || (secret.length>=4 && value.includes(secret)))) ? value : null;
       diagnostics.kisRtCd=safeCode(body?.rt_cd,/^[0-9]$/);
-      diagnostics.kisMsgCd=safeCode(body?.msg_cd,/^(?:[A-Z]{4}[0-9]{4}|[A-Z]{3}[0-9]{5})$/);
+      diagnostics.kisMsgCdPresent=object(body) && Object.hasOwn(body,'msg_cd');
+      // 1..32 ASCII code characters, at least one letter and digit; no whitespace.
+      // Acceptance includes credential filtering, not just syntax validation.
+      diagnostics.kisMsgCd=safeCode(body?.msg_cd,/^(?=[A-Za-z0-9_-]{1,32}(?![\s\S]))(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+(?![\s\S])/);
+      diagnostics.kisMsgCdFormatAccepted=diagnostics.kisMsgCd!==null;
       if(body?.rt_cd !== '0')return summary('BALANCE_RESPONSE_FAILED');
       const code=r.headers?.get('tr_cont');
       const shape={requestSucceeded:true,output1Present:Array.isArray(body.output1),output2Present:Array.isArray(body.output2),

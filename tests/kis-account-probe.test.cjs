@@ -134,3 +134,29 @@ test('successful result and fixed first-page parameters remain unchanged',async(
     CANO:'00000000',ACNT_PRDT_CD:'00',AFHR_FLPR_YN:'N',OFL_YN:'',INQR_DVSN:'02',UNPR_DVSN:'01',
     FUND_STTL_ICLD_YN:'N',FNCG_AMT_AUTO_RDPT_YN:'N',PRCS_DVSN:'00',CTX_AREA_FK100:'',CTX_AREA_NK100:''});
 });
+
+for(const msg_cd of ['EGW00123','AB12','Code_12-AB'])test('bounded alphanumeric code accepted '+msg_cd,async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd}));
+  const r=await f.run(config());assert.equal(r.kisMsgCd,msg_cd);
+  assert.equal(r.kisMsgCdPresent,true);assert.equal(r.kisMsgCdFormatAccepted,true);
+  assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
+});
+test('absent message code distinguished from present rejected code',async()=>{
+  for(const fields of [{},{msg_cd:null},{msg_cd:''},{msg_cd:123}]){
+    const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',...fields}));
+    const r=await f.run(config());assert.equal(r.kisMsgCd,null);
+    assert.equal(r.kisMsgCdPresent,Object.hasOwn(fields,'msg_cd'));assert.equal(r.kisMsgCdFormatAccepted,false);
+  }
+});
+for(const msg_cd of ['AB12\n','AB12\r','AB12 PRIVATE','AB12<private>','AB12한글','A1'+'A'.repeat(31),'DUMMY_TOKEN','00000000'])test('rejected message code returns flags only '+JSON.stringify(msg_cd),async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd,msg1:'PRIVATE_MESSAGE'}));
+  const r=await f.run(config());assert.equal(r.kisMsgCd,null);
+  assert.equal(r.kisMsgCdPresent,true);assert.equal(r.kisMsgCdFormatAccepted,false);
+  assert.ok(!JSON.stringify(r).includes('PRIVATE_MESSAGE'));
+});
+test('code-shaped credential still rejected with presence flags',async()=>{
+  const c=config();c.auth.appSecret='SECRET12';
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd:'SECRET12'}));
+  const r=await f.run(c);assert.equal(r.kisMsgCd,null);assert.equal(r.kisMsgCdPresent,true);
+  assert.equal(r.kisMsgCdFormatAccepted,false);assert.ok(!JSON.stringify(r).includes('SECRET12'));
+});
