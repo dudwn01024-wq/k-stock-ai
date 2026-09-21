@@ -5,6 +5,7 @@ const {mapAccountCandidates}=require('./kisAccountSnapshotMapper');
 const {createMockAccountTransport}=require('./kisAccountTransport');
 
 const environments=['KIS_LIVE','KIS_VTS'];
+const displayCandidates=new WeakSet();
 const only=(value,keys)=>value && typeof value==='object' && !Array.isArray(value) && Object.keys(value).every(key=>keys.includes(key));
 // Candidates are never risk inputs. Unknown price semantics remain null exposure.
 function project(environment,candidate,queryComplete,reasons=[],provenance='MOCK_FIXTURE') {
@@ -18,13 +19,15 @@ function project(environment,candidate,queryComplete,reasons=[],provenance='MOCK
     })));
     if(pendingOrders?.some(row=>row.remainingNotional===null))reasons.push('ORDER_EXPOSURE_UNKNOWN');
   }
-  return Object.freeze({environment:environments.includes(environment)?environment:null,
+  const result=Object.freeze({environment:environments.includes(environment)?environment:null,
     mode:provenance==='KIS_NETWORK'?'UNFILLED_DISPLAY_ONLY':'MOCK_UNFILLED_DISPLAY_ONLY',provenance,fixtureOnly:provenance==='MOCK_FIXTURE',
     usage:'DISPLAY_ONLY',readiness:'RISK_NOT_READY',riskReady:false,valid:false,
     snapshotComplete:false,complete:false,unfilledQueryComplete:queryComplete,
     pendingOrders,sourceTimestamp:null,receivedAt:null,businessDate:null,freshnessStatus:'UNKNOWN',
     equity:null,availableCash:null,lossAmount:null,consecutiveLosses:null,
     reasonCodes:Object.freeze([...new Set([...reasons,'UNFILLED_RISK_COVERAGE_UNVERIFIED','DISPLAY_SNAPSHOT_INCOMPLETE'])])});
+  displayCandidates.add(result);
+  return result;
 }
 
 // Pure fixture projection. Parser-owned provenance cannot be overwritten by callers.
@@ -66,4 +69,5 @@ function createMockUnfilledTransport(options = {}) {
     return Object.freeze({ok:!invalid,errorCode:invalid?'PENDING_ORDER_FIELDS_INVALID':null,...candidate});
   }});
 }
-module.exports={mapUnfilledDisplaySnapshot,createMockUnfilledTransport};
+const isUnfilledDisplayCandidate=value=>displayCandidates.has(value);
+module.exports={mapUnfilledDisplaySnapshot,createMockUnfilledTransport,isUnfilledDisplayCandidate};

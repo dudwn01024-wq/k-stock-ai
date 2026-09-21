@@ -1,6 +1,7 @@
 'use strict';
 const {isParsedResult}=require('./kisAccountReadOnly');
 const {mapAccountCandidates}=require('./kisAccountSnapshotMapper');
+const displayCandidates=new WeakSet();
 
 // Pure projection of parser-owned results. No transport, environment, clocks,
 // storage, Risk Manager or PAPER imports. Provenance is a decoder label, not
@@ -18,7 +19,7 @@ function buildLiveDisplaySnapshot(input = {}) {
   const positions=candidate && !positionInvalid ? candidate.positions : null;
   const reasons=candidate?[...candidate.reasonCodes]:['ENVIRONMENT_OR_CONTRACT_MISMATCH','PENDING_ORDERS_NOT_QUERIED'];
   reasons.push('DISPLAY_SNAPSHOT_INCOMPLETE');
-  return Object.freeze({
+  const result=Object.freeze({
     mode:provenance==='KIS_NETWORK'?'LIVE_DISPLAY_ONLY':provenance==='MOCK_FIXTURE'?'MOCK_LIVE_DISPLAY_ONLY':'UNKNOWN',
     environment:accepted?'KIS_LIVE':null,provenance,fixtureOnly:provenance===null?null:provenance==='MOCK_FIXTURE',
     source:candidate?.source??null,usage:'DISPLAY_ONLY',readiness:'RISK_NOT_READY',
@@ -28,5 +29,8 @@ function buildLiveDisplaySnapshot(input = {}) {
     sourceTimestamp:null,receivedAt:null,businessDate:null,lossAmount:null,consecutiveLosses:null,
     reasonCodes:Object.freeze([...new Set(reasons)])
   });
+  displayCandidates.add(result);
+  return result;
 }
-module.exports={buildLiveDisplaySnapshot};
+const isBalanceDisplayCandidate=value=>displayCandidates.has(value);
+module.exports={buildLiveDisplaySnapshot,isBalanceDisplayCandidate};

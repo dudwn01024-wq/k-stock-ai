@@ -109,6 +109,6 @@ test('module graph has no network, env, Risk, PAPER, storage or order capability
       require:id=>Object.hasOwn(modules,id.slice(2))?modules[id.slice(2)]:forbidden(),fetch:forbidden,
       process:new Proxy({},{get:forbidden}),console:{log:forbidden,error:forbidden},AbortController,setTimeout,clearTimeout});modules[name]=module.exports;
   }
-  assert.deepEqual(Object.keys(modules.kisUnfilledReadOnly),['mapUnfilledDisplaySnapshot','createMockUnfilledTransport']);
+  assert.deepEqual(Object.keys(modules.kisUnfilledReadOnly),['mapUnfilledDisplaySnapshot','createMockUnfilledTransport','isUnfilledDisplayCandidate']);
   assert.equal(modules.kisUnfilledReadOnly.mapUnfilledDisplaySnapshot({environment:'KIS_LIVE'}).riskReady,false);assert.equal(forbiddenCalls,0);
 });
