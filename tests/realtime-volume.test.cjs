@@ -453,3 +453,56 @@ test('production adapter repeatedly refuses raw data regardless of generation or
  const adapter=createRealtimeVolumeAdapter({getSnapshot:()=>snapshot},()=>now);
  for(const g of [1,2]){snapshot={...snapshot,connectionGeneration:g};const r=await adapter.assess({symbol:'005930',historicalVolume:1,averageVolume20:1,validation:verified});unknown(r);assert.equal(r.reasonCode,'VALIDATION_LOCKED');}
 });
+
+// Synthetic dated REST observations: evaluation dates cannot rewrite source values.
+const restFixture = () => Array.from({length:21},(_,i)=>({
+  date:new Date(Date.UTC(2026,7,29+i)).toISOString().slice(0,10).replaceAll('-',''),
+  volume:i===20?1500:1000
+}));
+const observeREST = (rows, time='2026-09-19T10:00:00+09:00', snapshot=null) =>
+  createRealtimeVolumeAdapter({getSnapshot:()=>snapshot},()=>new Date(time))
+    .assess({symbol:'005930',rows,source:'KIS_OPEN_API',policy:'advanced'});
+for(const date of ['2026-09-18','2026-09-19','2026-09-20','2026-09-21'])
+  test('REST observation survives evaluation date '+date,async()=>{
+    const r=await observeREST(restFixture(),date+'T10:00:00+09:00');
+    assert.equal(r.currentVolume,1500);assert.equal(r.averageVolume20,1000);
+    assert.equal(r.observationBusinessDate,'2026-09-18');assert.equal(r.observationDate,'20260918');
+    assert.equal(r.observationFreshnessStatus,'UNKNOWN');unknown(r);
+  });
+test('new source day moves observation and excludes itself from previous average',async()=>{
+  const rows=restFixture();rows.push({date:'20260921',volume:2000});const r=await observeREST(rows);
+  assert.equal(r.currentVolume,2000);assert.equal(r.averageVolume20,1025);assert.equal(r.observationBusinessDate,'2026-09-21');unknown(r);
+});
+for(const volume of [0,null]) test('latest REST volume '+volume+' is never replaced by an older row',async()=>{
+ const rows=restFixture();rows.at(-1).volume=volume;const r=await observeREST(rows);
+ assert.equal(r.currentVolume,volume);assert.equal(r.observationBusinessDate,'2026-09-18');assert.equal(r.averageVolume20,1000);unknown(r);
+});
+for(const date of [null,'202609-18','20260230']) test('ambiguous REST date '+date+' remains unavailable',async()=>{
+ const rows=restFixture();rows.at(-1).date=date;const r=await observeREST(rows);
+ assert.equal(r.currentVolume,null);assert.equal(r.observationBusinessDate,null);unknown(r);
+});
+test('REST duplicate dates cannot select an arbitrary observation',async()=>{
+ const rows=restFixture();rows.push({...rows.at(-1),volume:9999});assert.equal((await observeREST(rows)).currentVolume,null);
+});
+test('REST source ordering is independent of array position',async()=>{
+ const a=await observeREST(restFixture()),b=await observeREST(restFixture().reverse());
+ for(const k of ['currentVolume','averageVolume20','observationBusinessDate'])assert.equal(a[k],b[k]);
+});
+test('REST observations never unlock valid raw realtime data or become its denominator',async()=>{
+ const r=await observeREST(restFixture(),'2026-09-18T10:30:05+09:00',good());unknown(r);
+ assert.equal(r.reasonCode,'VALIDATION_LOCKED');assert.equal(r.realtimeCurrentVolume,1500000);
+ assert.equal(r.baselineVolume,1000000);assert.equal(r.currentVolume,1500);assert.equal(r.averageVolume20,1000);
+ assert.equal(REALTIME_VALIDATION.validated,false);assert.equal(REALTIME_VALIDATION.maxAgeMs,null);
+});
+test('omitted latest incomplete KIS row keeps its original date without older fallback',async()=>{
+ const rows=restFixture();rows.pop();rows.latestSourceIntegrity={sourceBusinessDate:'2026-09-18',complete:false,missingFields:['volume']};
+ const r=await observeREST(rows);assert.equal(r.currentVolume,null);assert.equal(r.observationBusinessDate,'2026-09-18');assert.equal(r.averageVolume20,1000);unknown(r);
+});
+test('up to twenty available prior source days form a display average',async()=>{
+ const rows=restFixture().slice(-3);const r=await observeREST(rows);assert.equal(r.currentVolume,1500);assert.equal(r.averageVolume20,1000);unknown(r);
+});
+
+test('empty normalized KIS rows retain known incomplete source date',async()=>{
+ const rows=[];rows.latestSourceIntegrity={sourceBusinessDate:'2026-09-18',complete:false,missingFields:['volume']};
+ const r=await observeREST(rows);assert.equal(r.currentVolume,null);assert.equal(r.averageVolume20,null);assert.equal(r.observationBusinessDate,'2026-09-18');unknown(r);
+});

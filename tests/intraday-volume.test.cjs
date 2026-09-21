@@ -287,7 +287,7 @@ test('real KIS daily mapper never turns blank volume into zero', async () => {
     const context = vm.createContext({
       module: { exports: {} }, URL, Date, setTimeout,
       process: { env: { KIS_APP_KEY: 'fixture', KIS_APP_SECRET: 'fixture' } },
-      require: () => require('../services/volumeEvaluation'),
+      require: name => require('../services/'+name.slice(2)),
       fetch: async (url) => ({ ok: true, json: async () => String(url).includes('tokenP')
         ? { access_token: 'fixture-token', expires_in: 3600 }
         : { rt_cd: '0', output2: rows().map((row, index) => ({
@@ -540,7 +540,7 @@ test('open-day Y without official session hours never assumes a regular session'
 function kisTransportFixture(fetch) {
   const context = vm.createContext({ module: { exports: {} }, URL, Date, setTimeout,
     process: { env: { KIS_APP_KEY: 'fixture', KIS_APP_SECRET: 'fixture' } },
-    require: () => require('../services/volumeEvaluation'), fetch });
+    require: name => require('../services/'+name.slice(2)), fetch });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../services/kisMarketData.js'), 'utf8') +
     '\ncachedAccessToken = "fixture-token"; cachedTokenExpiresAt = Date.now() + 3600000;' +
     '\nthis.queue = runKisRequest; this.queueDone = () => kisRequestQueue;', context);

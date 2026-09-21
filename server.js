@@ -1,3 +1,4 @@
+const { dataFreshness, dateConsistency, sourceDate } = require('./services/dataFreshness');
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -525,6 +526,13 @@ const fetchStockQuoteData =
     const basicData =
       await basicResponse.json();
 
+    const basicReceivedAt = new Date().toISOString();
+    const priceMetadata = dataFreshness({ source: 'Naver basic',
+      date: basicData.localTradedAt ?? basicData.bizdate ?? null,
+      timestamp: basicData.localTradedAt ?? null, receivedAt: basicReceivedAt });
+    let volumeMetadata = { ...priceMetadata };
+    let supplyMetadata = dataFreshness({ source: 'Naver integration' });
+
     const currentPrice =
       parseNumber(
         basicData.closePrice ||
@@ -547,9 +555,9 @@ const fetchStockQuoteData =
 
     let volume =
       parseNumber(
-        basicData.accumulatedTradingVolume ||
-        basicData.volume ||
-        basicData.tradingVolume ||
+        basicData.accumulatedTradingVolume ??
+        basicData.volume ??
+        basicData.tradingVolume ??
         basicData.executedVolume
       );
 
@@ -629,9 +637,10 @@ const fetchStockQuoteData =
             ) {
               volume =
                 parseNumber(
-                  latest.accumulatedTradingVolume ||
+                  latest.accumulatedTradingVolume ??
                   latest.volume
                 );
+              volumeMetadata = dataFreshness({ source: 'Naver daily price', date: latest.localTradedAt ?? latest.bizdate ?? null, timestamp: latest.localTradedAt ?? null, receivedAt: new Date().toISOString() });
             }
 
             if (
@@ -757,6 +766,7 @@ const fetchStockQuoteData =
               latestTrend.organPureBuyQuant
             );
 
+          supplyMetadata = dataFreshness({ source: 'Naver integration', date: latestTrend.localTradedAt ?? latestTrend.tradeDate ?? latestTrend.bizdate ?? latestTrend.date ?? latestTrend.localDate ?? null, timestamp: latestTrend.localTradedAt ?? null, receivedAt: new Date().toISOString() });
           supplyDate =
             latestTrend.localTradedAt ||
             latestTrend.tradeDate ||
@@ -798,6 +808,8 @@ const fetchStockQuoteData =
       institutionSell:
         null,
 
+      dataMetadata: { price: priceMetadata, volume: volumeMetadata, supply: supplyMetadata,
+        dateConsistency: dateConsistency([priceMetadata, volumeMetadata, supplyMetadata]) },
       supplyDate
     };
   };
@@ -851,6 +863,7 @@ const fetchStockNewsBySymbol =
         data.items;
     }
 
+    const receivedAt = new Date().toISOString();
     return rawList.map(
       (item) => {
         const rawTitle =
@@ -902,6 +915,8 @@ const fetchStockNewsBySymbol =
         }
 
         return {
+          dataMetadata: dataFreshness({ source: 'Naver news',
+            timestamp: item.datetime ?? item.createdAt ?? item.date ?? null, receivedAt }),
           id:
             articleId,
 
@@ -1032,7 +1047,7 @@ const calculateStrategy =
       );
     }
 
-    const data =
+    let data =
       await priceResponse.json();
 
     if (
@@ -1042,14 +1057,26 @@ const calculateStrategy =
       return emptyResult();
     }
 
+    const datedRows = data.map(item => {
+      const localDate = sourceDate(item?.localTradedAt) ??
+        dataFreshness({ timestamp: item?.localTradedAt }).sourceTimestamp?.slice(0, 10) ?? null;
+      const businessDate = sourceDate(item?.bizdate);
+      return { item, date: localDate && businessDate && localDate !== businessDate ? null : localDate ?? businessDate };
+    });
+    if (datedRows.some(row => !row.date) || new Set(datedRows.map(row => row.date)).size !== datedRows.length) return emptyResult();
+    data = datedRows.sort((a, b) => b.date.localeCompare(a.date))
+      .map(row => ({ ...row.item, strategyBusinessDate: row.date }));
+    const latestRequired = [data[0]?.closePrice, data[0]?.highPrice, data[0]?.lowPrice,
+      data[0]?.accumulatedTradingVolume ?? data[0]?.volume];
+    if (latestRequired.some(value => !Number.isFinite(parseNumber(value)))) return emptyResult();
+
+    const receivedAt = new Date().toISOString();
+    let supplyMetadata = dataFreshness({ source: 'Naver integration' });
     const rows =
       data
         .map(
           (item) => ({
-            date:
-              item.localTradedAt ||
-              item.bizdate ||
-              null,
+            date: item.strategyBusinessDate,
 
             close:
               parseNumber(
@@ -1188,6 +1215,7 @@ const calculateStrategy =
         if (
           latestTrend
         ) {
+          supplyMetadata = dataFreshness({ source: 'Naver integration', date: latestTrend.localTradedAt ?? latestTrend.tradeDate ?? latestTrend.bizdate ?? latestTrend.date ?? latestTrend.localDate ?? null, timestamp: latestTrend.localTradedAt ?? null, receivedAt: new Date().toISOString() });
           foreignerNet =
             parseNumber(
               latestTrend.foreignerPureBuyQuant
@@ -1206,6 +1234,9 @@ const calculateStrategy =
       }
     }
 
+    const dailyMetadata = dataFreshness({ source: 'Naver daily price', date: rows[0]?.date ?? null, receivedAt });
+    const dataMetadata = { price: dailyMetadata, volume: dailyMetadata, supply: supplyMetadata,
+      dateConsistency: dateConsistency([dailyMetadata, supplyMetadata]) };
     const netSupplyTotal =
       Number.isFinite(
         foreignerNet
@@ -1236,6 +1267,7 @@ const calculateStrategy =
     ) {
       return {
         ...emptyResult(),
+        dataMetadata,
 
         currentPrice,
         ma5,
@@ -1327,7 +1359,7 @@ const calculateStrategy =
       supplyPassed === true;
 
     let signal =
-      'WAIT';
+      [trendPassed, volumePassed, supplyPassed].some(value => value === null) ? 'INSUFFICIENT_DATA' : 'WAIT';
 
     let entryPrice =
       null;
@@ -1414,7 +1446,7 @@ const calculateStrategy =
       }
     }
 
-    let tradeSignal = 'WAIT';
+    let tradeSignal = signal === 'INSUFFICIENT_DATA' ? 'INSUFFICIENT_DATA' : 'WAIT';
 
 if (
   signal === 'BUY_CANDIDATE' &&
@@ -1435,6 +1467,7 @@ if (
 }
 
 return {
+  dataMetadata,
   symbol,
   currentPrice,
   ma5,
@@ -1980,6 +2013,9 @@ const buildRecommendationReason =
   ) => {
     const passed = [];
     const failed = [];
+    const unknown = [['추세', strategy.trendPassed], ['거래량', strategy.volumePassed],
+      ['수급', strategy.supplyPassed], ['뉴스', newsAssessment?.newsPassed]]
+      .filter(([, value]) => typeof value !== 'boolean').map(([label]) => label);
 
     if (
       strategy.trendPassed ===
@@ -2046,6 +2082,7 @@ const buildRecommendationReason =
     }
 
     return {
+      unknownConditions: unknown,
       passedConditions:
         passed,
 
@@ -2176,6 +2213,13 @@ const buildRecommendationResult =
         strategy
       );
 
+    // Keep scores/price calculations unchanged; missing observations cannot retain BUY labels.
+    const requiredDataMissing = conditionReason.unknownConditions.length > 0;
+    if (requiredDataMissing) {
+      strategy.signal = 'INSUFFICIENT_DATA';
+      strategy.tradeSignal = 'INSUFFICIENT_DATA';
+    }
+
     // 최종 등급:
     // 기술조건 + 뉴스 + 손익비
     const grade =
@@ -2205,6 +2249,8 @@ const buildRecommendationResult =
 
       score,
 
+      requiredDataStatus: requiredDataMissing ? 'INSUFFICIENT_DATA' : 'VALID',
+      unknownConditions: conditionReason.unknownConditions,
       // 기존 3점 → 뉴스 포함 4점
       maxScore:
         4,
@@ -2234,7 +2280,9 @@ const buildRecommendationResult =
           10
         ),
 
+      dataMetadata: quote.dataMetadata ?? null,
       strategy: {
+        dataMetadata: strategy.dataMetadata ?? null,
         ma5:
           strategy.ma5,
 
@@ -2947,6 +2995,7 @@ const buildGeminiPrompt =
                   item.publisher ||
                   null,
 
+                dataMetadata: item.dataMetadata ?? null,
                 date:
                   item.date ||
                   null,
@@ -2964,6 +3013,8 @@ const buildGeminiPrompt =
 
     return `
 너는 K-Stock AI의 국내주식 분석 보조 AI다.
+
+날짜 안전 규칙: sourceBusinessDate 또는 sourceTimestamp가 없으면 해당 날짜 또는 시각은 미확인이다. freshnessStatus가 UNKNOWN이면 최신 여부 미확인이다. 오늘·현재·실시간 데이터라고 가정하지 마라. receivedAt은 수신 시각일 뿐이다. 날짜 불일치를 명시하고 날짜를 생성하지 마라.
 
 매우 중요한 규칙:
 
@@ -2995,7 +3046,7 @@ ${JSON.stringify(
 다음 JSON 형식으로만 답한다.
 
 {
-  "summary": "현재 실제 데이터 기준 종합 분석",
+  "summary": "제공 데이터와 확인된 기준일에 따른 종합 분석",
   "technicalAnalysis": "현재가, MA5, MA20, 최근 고가/저가를 이용한 설명",
   "volumeAnalysis": "volumeAssessment의 상태·비교 기준·사유만 설명. UNKNOWN은 거래량 부족이 아니며 일평균으로 장중 비율을 재계산하거나 추정하지 말 것",
   "supplyDemandAnalysis": "외국인/기관 순매수 데이터를 이용한 설명",
@@ -3365,12 +3416,8 @@ app.get(
       };
 
 
-      // 데이터가 모두 있을 때만
-      // 종합 매매판정에 사용
-      const strategyMarketContext =
-        marketContextComplete
-          ? rawMarketContext
-          : { volumeAssessment, complete: false };
+      // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
+      const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
       // ==================================
@@ -3386,7 +3433,8 @@ app.get(
           chartAnalysis,
 
           marketContext:
-            strategyMarketContext
+            strategyMarketContext,
+          sourceIntegrity: rows.latestSourceIntegrity
         });
 
 
@@ -3424,6 +3472,7 @@ app.get(
 
 
       const strategyForAI = {
+        dataMetadata: { quote: quote.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null },
         ...strategy,
 
         // 기존 AI prompt 호환값
@@ -3535,6 +3584,8 @@ app.get(
         quote,
 
         chartAnalysis,
+        dataMetadata: { quote: quote?.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null,
+          dateConsistency: dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata]) },
 
         marketContext: {
           complete:
@@ -3904,6 +3955,7 @@ const buildRecommendationGeminiPrompt =
           failedConditions:
             candidate.failedConditions,
 
+          dataMetadata: candidate.dataMetadata ?? null,
           strategy:
             candidate.strategy,
 
@@ -3938,6 +3990,7 @@ const buildRecommendationGeminiPrompt =
                         item.publisher ||
                         null,
 
+                      dataMetadata: item.dataMetadata ?? null,
                       date:
                         item.date ||
                         null,
@@ -3957,6 +4010,7 @@ const buildRecommendationGeminiPrompt =
 
     return `
 너는 K-Stock AI 추천 종목 설명 AI다.
+날짜 안전 규칙: sourceBusinessDate 또는 sourceTimestamp가 없으면 해당 날짜 또는 시각은 미확인이다. freshnessStatus가 UNKNOWN이면 최신 여부 미확인이다. 오늘·현재·실시간 데이터라고 가정하지 마라. receivedAt으로 원본 날짜를 대체하지 마라. 날짜 불일치를 명시하고 날짜를 생성하지 마라.
 
 중요:
 최종 추천 등급은 backend가 이미 결정했다.
@@ -4542,10 +4596,12 @@ app.get(
         );
       }
 
+      const chartReceivedAt = new Date().toISOString();
       const descendingRows =
         rawData
           .map(
             (item) => ({
+              dataMetadata: dataFreshness({ source: 'Naver daily price', date: item.localTradedAt ?? item.bizdate ?? null, timestamp: item.localTradedAt ?? null, receivedAt: chartReceivedAt }),
               date:
                 item.localTradedAt ||
                 item.bizdate ||
@@ -5445,7 +5501,8 @@ app.get(
       if (
         value === null ||
         value === undefined ||
-        value === ''
+        (typeof value !== 'number' && typeof value !== 'string') ||
+        (typeof value === 'string' && value.trim() === '')
       ) {
         return null;
       }
@@ -5790,16 +5847,9 @@ const recentLow20 =
           'boolean';
 
 
-      // 데이터가 완전할 때만
-      // 종합판정 엔진에 전달
-      //
-      // 부족하면 {}
-      // → TECHNICAL_ONLY 처리
+      // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
 
-      const strategyMarketContext =
-        marketContextComplete
-          ? rawMarketContext
-          : { volumeAssessment, complete: false };
+      const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
       // ==================================
@@ -5815,7 +5865,8 @@ const recentLow20 =
           chartAnalysis,
 
           marketContext:
-            strategyMarketContext
+            strategyMarketContext,
+          sourceIntegrity: rows.latestSourceIntegrity
         });
 
 
@@ -5834,6 +5885,8 @@ const recentLow20 =
         dataPoints:
           rows.length,
 
+        dataMetadata: { quote: quote?.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null,
+          dateConsistency: dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata]) },
         latestChartDate:
           chartAnalysis
             ?.latestDate ??

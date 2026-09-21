@@ -1,5 +1,7 @@
 const { requestKisVolumeData } = require('./kisMarketData');
 const { evaluateVolume, koreaClock, evaluateRealtimeVolume, REALTIME_VALIDATION } = require('./volumeEvaluation');
+const { sourceDate, dataFreshness } = require('./dataFreshness');
+const { numericVolume } = require('./volumeEvaluation');
 const { realtimeData } = require('./kisRealtimeData');
 
 const VOLUME_LIMITS = Object.freeze({ maxRequests: 1, timeoutMs: 1500 });
@@ -72,6 +74,37 @@ function createVolumeService(request = requestKisVolumeData, clock = () => new D
   return { assess };
 }
 
+// Display observations only. Neither evaluation time nor WebSocket values select rows.
+function restVolumeObservation(rows = [], policy = 'advanced') {
+  const empty = { currentVolume: null, averageVolume20: null, observationBusinessDate: null };
+  if (!Array.isArray(rows)) return empty;
+  if (!rows.length) return { ...empty,
+    observationBusinessDate: sourceDate(rows.latestSourceIntegrity?.sourceBusinessDate) };
+  const dated = rows.map(row => {
+    const date = sourceDate(row?.date) ??
+      dataFreshness({ timestamp: row?.date }).sourceTimestamp?.slice(0, 10) ?? null;
+    const metadataDate = sourceDate(row?.dataMetadata?.sourceBusinessDate);
+    return { row, date: date && metadataDate && date !== metadataDate ? null : date ?? metadataDate };
+  });
+  // An undated or duplicate row makes the latest source row ambiguous.
+  if (dated.some(item => !item.date) || new Set(dated.map(item => item.date)).size !== dated.length) return empty;
+  dated.sort((a, b) => b.date.localeCompare(a.date));
+  const integrity = rows.latestSourceIntegrity;
+  const integrityDate = sourceDate(integrity?.sourceBusinessDate);
+  if (integrity && !integrityDate) return empty;
+  // KIS may omit an incomplete source row from the numeric OHLCV array.
+  // Its integrity marker must prevent an older row becoming the latest observation.
+  const latestDate = integrityDate && integrityDate > dated[0].date ? integrityDate : dated[0].date;
+  const latest = dated.find(item => item.date === latestDate);
+  const previous = dated.filter(item => item.date < latestDate).slice(0, 20);
+  const volumes = previous.map(item => numericVolume(item.row.volume));
+  const average = volumes.length && volumes.every(value => value !== null)
+    ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
+  return { currentVolume: numericVolume(latest?.row.volume),
+    averageVolume20: average === null ? null : policy === 'recommendation' ? Math.round(average) : average,
+    observationBusinessDate: latestDate };
+}
+
 // Keep the earlier REST safety evaluator for regression verification. Production
 // uses B only; missing WebSocket data never falls back to a daily-volume ratio.
 function createRealtimeVolumeAdapter(provider = realtimeData, clock = () => new Date()) {
@@ -82,17 +115,18 @@ function createRealtimeVolumeAdapter(provider = realtimeData, clock = () => new 
       priceDate: input.priceDate ?? null, priceSource: input.source ?? null,
       validation: REALTIME_VALIDATION // Deliberately not read from input/env/provider.
     });
-    // Reuse only the legacy observation extraction, never its ratio/status.
-    const observation = evaluateVolume({ rows: input.rows || [], source: input.source,
-      priceDate: input.priceDate, policy: input.policy, now });
+    // REST values are display observations only; never inputs to the B evaluation.
+    const observation = restVolumeObservation(input.rows, input.policy);
     return { ...evaluation,
       realtimeCurrentVolume: evaluation.currentVolume,
       evaluationSource: evaluation.source,
       observationSource: input.source ?? null,
-      observationDate: observation.volumeDate,
+      observationDate: observation.observationBusinessDate?.replaceAll('-', '') ?? null,
+      observationBusinessDate: observation.observationBusinessDate,
+      observationFreshnessStatus: 'UNKNOWN',
       currentVolume: observation.currentVolume,
       averageVolume20: observation.averageVolume20 };
   } };
 }
 const { assess: assessVolume } = createRealtimeVolumeAdapter();
-module.exports = { assessVolume, createVolumeService, createRealtimeVolumeAdapter, createRequestBudget, VOLUME_LIMITS };
+module.exports = { restVolumeObservation, assessVolume, createVolumeService, createRealtimeVolumeAdapter, createRequestBudget, VOLUME_LIMITS };
