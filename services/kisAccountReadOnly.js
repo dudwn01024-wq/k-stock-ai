@@ -96,4 +96,5 @@ const parseMockPages = options => parsePages(options);
 // Pure decoder only, no authorization or HTTP. Transport determines provenance;
 // callers must never treat parser provenance as an authorization credential.
 const parseNetworkBalance = (environment, page) => parsePages({operation:'BALANCE',environment,pages:[page],maxPages:1},'KIS_NETWORK');
-module.exports = {READ_ONLY_OPERATIONS,getReadOnlyContract,parseMockPages,parseNetworkBalance,isParsedResult};
+const parseNetworkUnfilled = (environment, page) => parsePages({operation:'UNFILLED_ORDERS',environment,pages:[page],maxPages:1},'KIS_NETWORK');
+module.exports = {READ_ONLY_OPERATIONS,getReadOnlyContract,parseMockPages,parseNetworkBalance,parseNetworkUnfilled,isParsedResult};

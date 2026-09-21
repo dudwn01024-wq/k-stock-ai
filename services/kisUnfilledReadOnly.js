@@ -7,7 +7,7 @@ const {createMockAccountTransport}=require('./kisAccountTransport');
 const environments=['KIS_LIVE','KIS_VTS'];
 const only=(value,keys)=>value && typeof value==='object' && !Array.isArray(value) && Object.keys(value).every(key=>keys.includes(key));
 // Candidates are never risk inputs. Unknown price semantics remain null exposure.
-function project(environment,candidate,queryComplete,reasons=[]) {
+function project(environment,candidate,queryComplete,reasons=[],provenance='MOCK_FIXTURE') {
   let pendingOrders=null;
   if(queryComplete && Array.isArray(candidate?.pendingOrders)) {
     const invalid=candidate.pendingOrders.some(row=>row.symbol===null || row.side===null || row.quantity===null || row.orderPrice===null);
@@ -19,7 +19,7 @@ function project(environment,candidate,queryComplete,reasons=[]) {
     if(pendingOrders?.some(row=>row.remainingNotional===null))reasons.push('ORDER_EXPOSURE_UNKNOWN');
   }
   return Object.freeze({environment:environments.includes(environment)?environment:null,
-    mode:'MOCK_UNFILLED_DISPLAY_ONLY',provenance:'MOCK_FIXTURE',fixtureOnly:true,
+    mode:provenance==='KIS_NETWORK'?'UNFILLED_DISPLAY_ONLY':'MOCK_UNFILLED_DISPLAY_ONLY',provenance,fixtureOnly:provenance==='MOCK_FIXTURE',
     usage:'DISPLAY_ONLY',readiness:'RISK_NOT_READY',riskReady:false,valid:false,
     snapshotComplete:false,complete:false,unfilledQueryComplete:queryComplete,
     pendingOrders,sourceTimestamp:null,receivedAt:null,businessDate:null,freshnessStatus:'UNKNOWN',
@@ -33,10 +33,10 @@ function mapUnfilledDisplaySnapshot(input = {}) {
   if(!only(input,['environment','unfilledOrders']) || !environments.includes(environment))
     return project(null,null,false,['ENVIRONMENT_OR_CONTRACT_MISMATCH']);
   if(result==null)return project(environment,null,false,['PENDING_ORDERS_NOT_QUERIED']);
-  if(!isParsedResult(result) || result.operation!=='UNFILLED_ORDERS' || result.environment!==environment || result.provenance!=='MOCK_FIXTURE')
+  if(!isParsedResult(result) || result.operation!=='UNFILLED_ORDERS' || result.environment!==environment || !['MOCK_FIXTURE','KIS_NETWORK'].includes(result.provenance))
     return project(environment,null,false,['ENVIRONMENT_OR_CONTRACT_MISMATCH']);
   const candidate=mapAccountCandidates({environment,unfilledOrders:result});
-  return project(environment,candidate,result.complete,[...candidate.reasonCodes]);
+  return project(environment,candidate,result.complete,[...candidate.reasonCodes],result.provenance);
 }
 
 // No production fetch, credentials, account number, environment reader or endpoint
