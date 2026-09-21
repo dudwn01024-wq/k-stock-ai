@@ -45,7 +45,7 @@ const project = (row, operation) => operation === 'BALANCE'
 // output2,ctx_area_fk100,ctx_area_nk100}}. Never log or retain the raw response.
 // Continuation tokens are opaque state, NOT safe logging fields. Summary pages
 // are kept separately: account-wide amounts must never be summed across pages.
-function parseMockPages(options = {}) {
+function parsePages(options = {}, provenance = 'MOCK_FIXTURE') {
   const {operation,environment,pages,maxPages = 20} = options ?? {};
   let pageCount = 0;
   const rows = [], summaryCandidates = [], seen = new Set();
@@ -53,7 +53,7 @@ function parseMockPages(options = {}) {
   const finish = reason => {
     const result = freeze({operation:validContract(operation,environment) ? operation : null,
       environment:environments.includes(environment) ? environment : null,
-      fixtureOnly:true, complete:reason === null, pageCount,
+      provenance, fixtureOnly:provenance === 'MOCK_FIXTURE', complete:reason === null, pageCount,
       rows:reason === null ? rows : null, summaryCandidates:reason === null ? summaryCandidates : null,
       continuation, reasonCodes:reason ? [reason] : []});
     parsedResults.add(result);
@@ -92,4 +92,8 @@ function parseMockPages(options = {}) {
   return finish(pageCount >= maxPages ? 'MAX_PAGES_EXCEEDED' : 'MORE_PAGES_REQUIRED');
 }
 const isParsedResult = value => parsedResults.has(value);
-module.exports = {READ_ONLY_OPERATIONS,getReadOnlyContract,parseMockPages,isParsedResult};
+const parseMockPages = options => parsePages(options);
+// Pure decoder only, no authorization or HTTP. Transport determines provenance;
+// callers must never treat parser provenance as an authorization credential.
+const parseNetworkBalance = (environment, page) => parsePages({operation:'BALANCE',environment,pages:[page],maxPages:1},'KIS_NETWORK');
+module.exports = {READ_ONLY_OPERATIONS,getReadOnlyContract,parseMockPages,parseNetworkBalance,isParsedResult};

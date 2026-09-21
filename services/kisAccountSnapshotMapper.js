@@ -5,10 +5,12 @@ const {isParsedResult} = require('./kisAccountReadOnly');
 // PAPER, clocks, environment configuration, authentication or network modules.
 function mapAccountCandidates({environment,balance,unfilledOrders} = {}) {
   const reasons = ['EQUITY_POLICY_UNVERIFIED','AVAILABLE_CASH_SEMANTICS_UNVERIFIED',
-    'ACCOUNT_TIMESTAMP_UNVERIFIED','ACCOUNT_BUSINESS_DATE_UNVERIFIED','DAILY_RISK_UNAVAILABLE','MOCK_ONLY'];
+    'ACCOUNT_TIMESTAMP_UNVERIFIED','ACCOUNT_BUSINESS_DATE_UNVERIFIED','DAILY_RISK_UNAVAILABLE'];
+  const provenance = isParsedResult(balance) ? balance.provenance : isParsedResult(unfilledOrders) ? unfilledOrders.provenance : 'MOCK_FIXTURE';
+  if (provenance === 'MOCK_FIXTURE') reasons.push('MOCK_ONLY');
   const accept = (result, operation) => {
     if (!['KIS_LIVE','KIS_VTS'].includes(environment) || !isParsedResult(result) ||
-        result.environment !== environment || result.operation !== operation) {
+        result.environment !== environment || result.operation !== operation || result.provenance !== provenance) {
       reasons.push('ENVIRONMENT_OR_CONTRACT_MISMATCH'); return false;
     }
     if (!result.complete) { reasons.push('INCOMPLETE_PAGINATION',...result.reasonCodes); return false; }
@@ -34,7 +36,7 @@ function mapAccountCandidates({environment,balance,unfilledOrders} = {}) {
     return Object.freeze({symbol:row.pdno,side,quantity,orderPrice,remainingNotional});
   }) : null;
   return Object.freeze({environment:['KIS_LIVE','KIS_VTS'].includes(environment) ? environment : null,
-    source:'KIS_MOCK_FIXTURE',fixtureOnly:true,readiness:'RISK_NOT_READY',usage:'DISPLAY_ONLY',
+    source:provenance === 'KIS_NETWORK' ? 'KIS_NETWORK' : 'KIS_MOCK_FIXTURE',provenance,fixtureOnly:provenance === 'MOCK_FIXTURE',readiness:'RISK_NOT_READY',usage:'DISPLAY_ONLY',
     valid:false,complete:false,riskReady:false,freshnessStatus:'UNKNOWN',
     equity:null,availableCash:null,sourceTimestamp:null,receivedAt:null,businessDate:null,
     lossAmount:null,consecutiveLosses:null,
