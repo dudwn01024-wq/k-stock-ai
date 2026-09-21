@@ -106,7 +106,7 @@ test('news path preserves article fields and never treats publication time as a 
 });
 
 test('actual recommendation daily/supply path preserves metadata without changing observations', async () => {
-  const ctx=vm.createContext({dataFreshness,dateConsistency,NAVER_HEADERS:{},console,
+  const ctx=vm.createContext({dataFreshness,dateConsistency,sourceDate,NAVER_HEADERS:{},console,
     getLatestDealTrend:data=>data.dealTrendInfos[0],
     average:values=>values.reduce((a,b)=>a+b,0)/values.length,
     round2:value=>Number(value.toFixed(2)),

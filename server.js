@@ -1,4 +1,4 @@
-const { dataFreshness, dateConsistency } = require('./services/dataFreshness');
+const { dataFreshness, dateConsistency, sourceDate } = require('./services/dataFreshness');
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
@@ -553,9 +553,9 @@ const fetchStockQuoteData =
 
     let volume =
       parseNumber(
-        basicData.accumulatedTradingVolume ||
-        basicData.volume ||
-        basicData.tradingVolume ||
+        basicData.accumulatedTradingVolume ??
+        basicData.volume ??
+        basicData.tradingVolume ??
         basicData.executedVolume
       );
 
@@ -635,7 +635,7 @@ const fetchStockQuoteData =
             ) {
               volume =
                 parseNumber(
-                  latest.accumulatedTradingVolume ||
+                  latest.accumulatedTradingVolume ??
                   latest.volume
                 );
               volumeMetadata = dataFreshness({ source: 'Naver daily price', date: latest.localTradedAt ?? latest.bizdate ?? null, timestamp: latest.localTradedAt ?? null, receivedAt: new Date().toISOString() });
@@ -1045,7 +1045,7 @@ const calculateStrategy =
       );
     }
 
-    const data =
+    let data =
       await priceResponse.json();
 
     if (
@@ -1055,16 +1055,26 @@ const calculateStrategy =
       return emptyResult();
     }
 
+    const datedRows = data.map(item => {
+      const localDate = sourceDate(item?.localTradedAt) ??
+        dataFreshness({ timestamp: item?.localTradedAt }).sourceTimestamp?.slice(0, 10) ?? null;
+      const businessDate = sourceDate(item?.bizdate);
+      return { item, date: localDate && businessDate && localDate !== businessDate ? null : localDate ?? businessDate };
+    });
+    if (datedRows.some(row => !row.date) || new Set(datedRows.map(row => row.date)).size !== datedRows.length) return emptyResult();
+    data = datedRows.sort((a, b) => b.date.localeCompare(a.date))
+      .map(row => ({ ...row.item, strategyBusinessDate: row.date }));
+    const latestRequired = [data[0]?.closePrice, data[0]?.highPrice, data[0]?.lowPrice,
+      data[0]?.accumulatedTradingVolume ?? data[0]?.volume];
+    if (latestRequired.some(value => !Number.isFinite(parseNumber(value)))) return emptyResult();
+
     const receivedAt = new Date().toISOString();
     let supplyMetadata = dataFreshness({ source: 'Naver integration' });
     const rows =
       data
         .map(
           (item) => ({
-            date:
-              item.localTradedAt ||
-              item.bizdate ||
-              null,
+            date: item.strategyBusinessDate,
 
             close:
               parseNumber(
@@ -1083,7 +1093,7 @@ const calculateStrategy =
 
             volume:
               parseNumber(
-                item.accumulatedTradingVolume ||
+                item.accumulatedTradingVolume ??
                 item.volume
               )
           })
@@ -1380,7 +1390,7 @@ const calculateStrategy =
       supplyPassed === true;
 
     let signal =
-      'WAIT';
+      [trendPassed, volumePassed, supplyPassed].some(value => value === null) ? 'INSUFFICIENT_DATA' : 'WAIT';
 
     let entryPrice =
       null;
@@ -1467,7 +1477,7 @@ const calculateStrategy =
       }
     }
 
-    let tradeSignal = 'WAIT';
+    let tradeSignal = signal === 'INSUFFICIENT_DATA' ? 'INSUFFICIENT_DATA' : 'WAIT';
 
 if (
   signal === 'BUY_CANDIDATE' &&
@@ -2027,6 +2037,9 @@ const buildRecommendationReason =
   ) => {
     const passed = [];
     const failed = [];
+    const unknown = [['추세', strategy.trendPassed], ['거래량', strategy.volumePassed],
+      ['수급', strategy.supplyPassed], ['뉴스', newsAssessment?.newsPassed]]
+      .filter(([, value]) => typeof value !== 'boolean').map(([label]) => label);
 
     if (
       strategy.trendPassed ===
@@ -2095,6 +2108,7 @@ const buildRecommendationReason =
     }
 
     return {
+      unknownConditions: unknown,
       passedConditions:
         passed,
 
@@ -2222,6 +2236,13 @@ const buildRecommendationResult =
         strategy
       );
 
+    // Keep scores/price calculations unchanged; missing observations cannot retain BUY labels.
+    const requiredDataMissing = conditionReason.unknownConditions.length > 0;
+    if (requiredDataMissing) {
+      strategy.signal = 'INSUFFICIENT_DATA';
+      strategy.tradeSignal = 'INSUFFICIENT_DATA';
+    }
+
     // 최종 등급:
     // 기술조건 + 뉴스 + 손익비
     const grade =
@@ -2251,6 +2272,8 @@ const buildRecommendationResult =
 
       score,
 
+      requiredDataStatus: requiredDataMissing ? 'INSUFFICIENT_DATA' : 'VALID',
+      unknownConditions: conditionReason.unknownConditions,
       // 기존 3점 → 뉴스 포함 4점
       maxScore:
         4,
@@ -3448,12 +3471,8 @@ app.get(
       };
 
 
-      // 데이터가 모두 있을 때만
-      // 종합 매매판정에 사용
-      const strategyMarketContext =
-        marketContextComplete
-          ? rawMarketContext
-          : {};
+      // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
+      const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
       // ==================================
@@ -3469,7 +3488,8 @@ app.get(
           chartAnalysis,
 
           marketContext:
-            strategyMarketContext
+            strategyMarketContext,
+          sourceIntegrity: rows.latestSourceIntegrity
         });
 
 
@@ -5552,7 +5572,8 @@ app.get(
       if (
         value === null ||
         value === undefined ||
-        value === ''
+        (typeof value !== 'number' && typeof value !== 'string') ||
+        (typeof value === 'string' && value.trim() === '')
       ) {
         return null;
       }
@@ -5943,16 +5964,9 @@ const recentLow20 =
           'boolean';
 
 
-      // 데이터가 완전할 때만
-      // 종합판정 엔진에 전달
-      //
-      // 부족하면 {}
-      // → TECHNICAL_ONLY 처리
+      // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
 
-      const strategyMarketContext =
-        marketContextComplete
-          ? rawMarketContext
-          : {};
+      const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
       // ==================================
@@ -5968,7 +5982,8 @@ const recentLow20 =
           chartAnalysis,
 
           marketContext:
-            strategyMarketContext
+            strategyMarketContext,
+          sourceIntegrity: rows.latestSourceIntegrity
         });
 
 

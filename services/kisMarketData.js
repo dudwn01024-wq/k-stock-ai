@@ -1,4 +1,4 @@
-const { dataFreshness } = require('./dataFreshness');
+const { dataFreshness, sourceDate } = require('./dataFreshness');
 // ========================================
 // KIS MARKET DATA SERVICE
 // 한국투자증권 실제 OHLCV 전용
@@ -147,7 +147,8 @@ const parseNumber = (
   if (
     value === null ||
     value === undefined ||
-    value === ''
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && value.trim() === '')
   ) {
     return null;
   }
@@ -168,16 +169,13 @@ const parseNumber = (
 };
 
 
-const cloneRows = (
-  rows
-) =>
-  Array.isArray(rows)
-    ? rows.map(
-        (row) => ({
-          ...row
-        })
-      )
-    : [];
+const cloneRows = (rows) => {
+  const copy = Array.isArray(rows) ? rows.map(row => ({ ...row })) : [];
+  if (rows?.latestSourceIntegrity) copy.latestSourceIntegrity = {
+    ...rows.latestSourceIntegrity, missingFields: [...rows.latestSourceIntegrity.missingFields]
+  };
+  return copy;
+};
 
 
 const getKoreaToday =
@@ -672,12 +670,12 @@ const fetchDailyOHLCVChunk =
 
 
         const receivedAt = new Date().toISOString();
-        return rows
+        const normalized = rows
           .map(
             (row) => ({
               dataMetadata: dataFreshness({ source: 'KIS', date: row.stck_bsop_date, receivedAt }),
               date:
-                row.stck_bsop_date,
+                sourceDate(row.stck_bsop_date)?.replaceAll('-', '') ?? null,
 
               open:
                 parseNumber(
@@ -712,8 +710,13 @@ const fetchDailyOHLCVChunk =
               source:
                 'KIS_OPEN_API'
             })
-          )
-          .filter(
+          );
+        const requiredFields = ['open', 'high', 'low', 'close', 'volume'];
+        const datesVerified = normalized.length > 0 && normalized.every(row => row.date) &&
+          new Set(normalized.map(row => row.date)).size === normalized.length;
+        const latest = datesVerified ? [...normalized].sort((a, b) => b.date.localeCompare(a.date))[0] : null;
+        const missingFields = latest ? requiredFields.filter(field => !Number.isFinite(latest[field])) : ['date'];
+        const result = normalized.filter(
             (row) =>
               row.date &&
               Number.isFinite(
@@ -738,6 +741,12 @@ const fetchDailyOHLCVChunk =
                 b.date
               )
           );
+        result.latestSourceIntegrity = {
+          sourceBusinessDate: latest ? sourceDate(latest.date) : null,
+          complete: datesVerified && missingFields.length === 0,
+          missingFields
+        };
+        return result;
       }
 
 
@@ -807,6 +816,8 @@ const loadKisDailyOHLCV =
     const allRows =
       new Map();
 
+    let latestSourceIntegrity = null;
+
 
     let currentEndDate =
       endDate;
@@ -835,6 +846,9 @@ const loadKisDailyOHLCV =
           endDate:
             currentEndDate
         });
+
+      // The first request covers the latest source date. Later pages are historical.
+      if (latestSourceIntegrity === null) latestSourceIntegrity = rows.latestSourceIntegrity;
 
 
       if (
@@ -888,7 +902,7 @@ const loadKisDailyOHLCV =
     }
 
 
-    return [
+    const result = [
       ...allRows.values()
     ]
       .sort(
@@ -900,6 +914,10 @@ const loadKisDailyOHLCV =
       .slice(
         -maxBars
       );
+    result.latestSourceIntegrity = latestSourceIntegrity ?? {
+      sourceBusinessDate: null, complete: false, missingFields: ['date']
+    };
+    return result;
   };
 
 

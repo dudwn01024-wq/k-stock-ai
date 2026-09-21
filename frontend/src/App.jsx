@@ -966,6 +966,9 @@ export default function App() {
                                 )}
                               </div>
                               <div className="text-[11px] text-slate-500 font-mono">{item.symbol}</div>
+                              {item.requiredDataStatus === 'INSUFFICIENT_DATA' && (
+                                <p className="text-xs text-amber-300">판단 보류 / 데이터 부족: {(item.unknownConditions || []).join(', ')}</p>
+                              )}
                               <p className="text-[11px] text-slate-400">가격 — {describeDataMetadata(item.dataMetadata?.price)}</p>
                               <p className="text-[11px] text-slate-400">전략 일봉 — {describeDataMetadata(item.strategy?.dataMetadata?.price)}</p>
                               <p className="text-[11px] text-slate-400">수급 — {describeDataMetadata(item.strategy?.dataMetadata?.supply)}</p>

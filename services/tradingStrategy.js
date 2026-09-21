@@ -38,7 +38,8 @@ const toNumber = (value) => {
   if (
     value === null ||
     value === undefined ||
-    value === ''
+    (typeof value !== 'number' && typeof value !== 'string') ||
+    (typeof value === 'string' && value.trim() === '')
   ) {
     return null;
   }
@@ -613,11 +614,11 @@ const evaluateTechnicalConditions = ({
     list.filter(
       (item) =>
         item.status ===
-          'NEUTRAL' ||
-        item.status ===
-          'UNAVAILABLE'
+          'NEUTRAL'
     ).length;
 
+
+  const missingRequired = ['trend', 'rsi', 'macd', 'bollinger'].filter(key => conditions[key].status === 'UNAVAILABLE');
 
   let status =
     'MIXED';
@@ -647,8 +648,9 @@ const evaluateTechnicalConditions = ({
 
 
   return {
-    status,
-    label,
+    status: missingRequired.length ? 'DATA_INSUFFICIENT' : status,
+    label: missingRequired.length ? '데이터 부족' : label,
+    missingRequired,
 
     favorableCount,
     cautionCount,
@@ -774,7 +776,7 @@ const evaluateMarketContext = (
   if (
     !Number.isFinite(
       foreignerNet
-    ) &&
+    ) ||
     !Number.isFinite(
       institutionNet
     )
@@ -909,7 +911,9 @@ const evaluateMarketContext = (
 
   return {
     available:
-      availableCount > 0,
+      availableCount === list.length,
+
+    missingRequired: Object.entries(conditions).filter(([, condition]) => condition.status === 'UNAVAILABLE').map(([key]) => key),
 
     availableCount,
 
@@ -1214,22 +1218,12 @@ const buildFinalAssessment = ({
   riskRewardAssessment,
   executionAssessment
 }) => {
-  if (
-    !marketAssessment
-      ?.available
-  ) {
-    return {
-      status:
-        'TECHNICAL_ONLY',
-
-      label:
-        '기술분석만 완료',
-
-      reason:
-        '거래량·수급·뉴스 데이터가 아직 전략 엔진에 연결되지 않아 최종 종합판정은 하지 않습니다.'
-    };
+  if (!marketAssessment?.available || technicalAssessment?.status === 'DATA_INSUFFICIENT' ||
+      executionAssessment?.status === 'DATA_INSUFFICIENT' || !riskRewardAssessment?.available) {
+    return { status: 'DATA_INSUFFICIENT', label: '판단 보류 / 데이터 부족',
+      missingRequired: [...(technicalAssessment?.missingRequired || []), ...(marketAssessment?.missingRequired || [])],
+      reason: '필수 가격·기술지표·거래량·수급·기존 뉴스 위험평가가 불완전하여 진입 후보를 생성하지 않습니다.' };
   }
-
 
   if (
     executionAssessment
@@ -1425,12 +1419,19 @@ const calculateTradingStrategy = ({
   symbol = null,
   currentPrice,
   chartAnalysis,
-  marketContext = {}
+  marketContext = {},
+  sourceIntegrity = null
 }) => {
   const empty =
     createEmptyStrategy(
       symbol
     );
+
+  if (sourceIntegrity && sourceIntegrity.complete !== true) {
+    return { ...empty, sourceIntegrity,
+      finalAssessment: { ...empty.finalAssessment,
+        reason: '원본 최신 일봉의 날짜 또는 필수값을 검증할 수 없어 판단을 보류합니다.' } };
+  }
 
 
   const price =
@@ -1668,7 +1669,8 @@ const calculateTradingStrategy = ({
   return {
     symbol,
 
-    available: true,
+    available: finalAssessment.status !== 'DATA_INSUFFICIENT',
+    sourceIntegrity,
 
     currentPrice:
       roundPrice(
