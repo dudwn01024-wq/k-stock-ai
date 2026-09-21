@@ -251,7 +251,54 @@ test('official 46-field positional fixture is independent of parser index consta
   const row = parseTrades('0|H0STCNT0|001|' + values.join('^'))[0];
   assert.deepEqual(row, { symbol: '005930', lastTradeTime: '103004', acmlVolume: 1500000,
     businessDate: '20260918', newMarketOperationCode: '20', previousSameTimeAcmlVolume: 1000000,
-    providedPreviousSameTimeRate: 150, hourClassCode: '0', marketTreatmentClassCode: '0' });
+    providedPreviousSameTimeRate: 150, hourClassCode: '0', marketTreatmentClassCode: '0', schema: 'LEGACY_46', UNKNOWN_EXTRA_FIELD: null });
+});
+
+// Independent positions for the explicitly observed trailing-field schema.
+function schemaRecord(width, index=0, extra='2') {
+  const f=Array(width).fill('0');
+  f[0]=index%2?'000660':'005930';f[1]='103004';f[13]=String(1500000+index);
+  f[33]='20260918';f[34]='20';f[41]='1000000';f[42]='150.00';f[43]='0';f[44]='';
+  if(width>45)f[45]='70000';if(width>46)f[46]=extra;
+  return f.join('^');
+}
+for(const width of [46,47]) for(const count of [1,2,3,4,6]) {
+  test(`${width} schema separates ${count} records without shifting important offsets`,()=>{
+    const rows=parseTrades(wire(...Array.from({length:count},(_,i)=>schemaRecord(width,i))));
+    assert.equal(rows.length,count);
+    rows.forEach((r,i)=>{
+      assert.equal(r.schema,width===46?'LEGACY_46':'OBSERVED_47');
+      assert.equal(r.symbol,i%2?'000660':'005930');assert.equal(r.lastTradeTime,'103004');
+      assert.equal(r.acmlVolume,1500000+i);assert.equal(r.businessDate,'20260918');
+      assert.equal(r.previousSameTimeAcmlVolume,1000000);assert.equal(r.providedPreviousSameTimeRate,150);
+      assert.equal(r.hourClassCode,'0');assert.equal(r.marketTreatmentClassCode,'');
+      assert.equal(r.UNKNOWN_EXTRA_FIELD,width===46?null:'2');
+    });
+  });
+}
+for(const width of [45,48]) test(`unverified ${width}-field schema is rejected`,()=>{
+  assert.equal(parseTrades(wire(schemaRecord(width))),null);
+  assert.equal(parseTrades(wire(schemaRecord(width),schemaRecord(width))),null);
+});
+test('wrong record count and mixed 46/47 record lengths are rejected',()=>{
+  assert.equal(parseTrades(wire(schemaRecord(47)).replace('|001|','|002|')),null);
+  assert.equal(parseTrades(wire(schemaRecord(46),schemaRecord(47))),null);
+});
+test('extra field is preserved verbatim, never used for ratio, session or unlocking',()=>{
+  for(const value of ['2','999','','UNVERIFIED']) {
+    const r=parseTrades(wire(schemaRecord(47,0,value)))[0];assert.equal(r.UNKNOWN_EXTRA_FIELD,value);
+    const snapshot={...good(),...r};
+    // Explicit synthetic session contract only, not a production setting.
+    const result=evaluateRealtimeVolume({snapshot,now,validation:{...verified,sessionCodes:['0::20']}});
+    assert.equal(result.ratio,1.5);
+    unknown(evaluateRealtimeVolume({snapshot,now}));
+    unknown(evaluateRealtimeVolume({snapshot,now,validation:verified})); // Empty session remains unverified.
+  }
+  assert.equal(REALTIME_VALIDATION.validated,false);
+});
+test('47-field parser retains missing numeric data and actual zero distinctly',()=>{
+  const f=schemaRecord(47).split('^');f[13]='';assert.equal(parseTrades(wire(f.join('^')))[0].acmlVolume,null);
+  f[13]='0';assert.equal(parseTrades(wire(f.join('^')))[0].acmlVolume,0);
 });
 
 test('approval adapter only calls official authentication endpoint and does not expose response errors', async () => {

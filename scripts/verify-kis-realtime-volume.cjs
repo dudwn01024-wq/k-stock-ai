@@ -1,10 +1,73 @@
 'use strict';
 
 // Diagnostic only. Never imports server.js or changes the production validation profile.
-const { createRealtimeService, parseTrades } = require('../services/kisRealtimeData');
+const { createRealtimeService, parseTrades, getTradeSchema, FIELD_COUNT, FIELDS } = require('../services/kisRealtimeData');
 const { koreaClock, realtimeNumber, tradeTimestamp } = require('../services/volumeEvaluation');
 const SYMBOLS = Object.freeze(['005930', '000660']);
-const MAX_MS = 15 * 60 * 1000;
+const MAX_MS = 3 * 60 * 1000;
+
+// Count transport events separately from parsed/validated samples. Never retain raw frames.
+function createFrameDiagnostics() {
+  const counts = { totalFrames: 0, jsonControlFrames: 0, pingpongFrames: 0, subscribeAckFrames: 0,
+    realtimeDataFrames: 0, realtimeTradeFrames: 0, unknownFrames: 0, parseSuccess: 0, parseFailure: 0 };
+  const symbolFrames = Object.fromEntries(SYMBOLS.map(symbol => [symbol, 0]));
+  const failures = [];
+  return {
+    inspect(payload, binary) {
+      counts.totalFrames++;
+      const raw = payload.toString();
+      if (!binary && raw.trimStart().startsWith('{')) {
+        counts.jsonControlFrames++;
+        try {
+          const control = JSON.parse(raw);
+          if (control.header?.tr_id === 'PINGPONG') counts.pingpongFrames++;
+          if (control.header?.tr_id === 'H0STCNT0' && SYMBOLS.includes(control.header?.tr_key) && control.body?.rt_cd === '0') {
+            counts.subscribeAckFrames++;
+            return { rows: [], ackSymbol: control.header.tr_key };
+          }
+        } catch { counts.unknownFrames++; }
+        return { rows: [] };
+      }
+      const parts = raw.split('|');
+      if (!['0', '1'].includes(parts[0])) { counts.unknownFrames++; return { rows: [] }; }
+      counts.realtimeDataFrames++;
+      if (parts[1] !== 'H0STCNT0') { counts.unknownFrames++; return { rows: [] }; }
+      counts.realtimeTradeFrames++;
+      const parsedCount = /^\d+$/.test(parts[2] || '') ? Number(parts[2]) : NaN;
+      const count = Number.isSafeInteger(parsedCount) ? parsedCount : null;
+      const fields = parts.length === 4 ? parts[3].split('^') : [];
+      const width = count > 0 && fields.length % count === 0 ? fields.length / count : null;
+      const observed = new Set();
+      // Diagnostic boundary hypothesis only; never replaces the production parser.
+      if (parts[0] === '0' && count > 0 && count <= 1000) {
+        for (let i = 0; i < (width ? count : 1); i++) {
+          const symbol = fields[i * (width || FIELD_COUNT) + FIELDS.symbol];
+          if (SYMBOLS.includes(symbol)) observed.add(symbol);
+        }
+      }
+      for (const symbol of observed) symbolFrames[symbol]++;
+      let reason = binary ? 'BINARY_FRAME' : parts[0] !== '0' ? 'ENCRYPTED_FRAME' :
+        parts.length !== 4 ? 'FRAME_SEGMENT_COUNT' : count === null || count < 1 || count > 1000 ? 'RECORD_COUNT_INVALID' :
+        !getTradeSchema(count, fields.length) ? 'FIELD_COUNT_MISMATCH' : null;
+      let rows = null;
+      if (!reason) {
+        try { rows = parseTrades(raw); if (!rows) reason = 'PARSER_REJECTED'; }
+        catch { reason = 'PARSER_EXCEPTION'; }
+      }
+      if (reason) {
+        counts.parseFailure++;
+        if (failures.length < 5) failures.push({ frameType: parts[0], trId: 'H0STCNT0', recordCount: count,
+          frameLength: raw.length, fieldCount: fields.length, fieldsPerRecord: width,
+          symbols: [...observed], parseSucceeded: false, reason });
+      } else counts.parseSuccess++;
+      return { rows: rows || [] };
+    },
+    summary(sampleCount) {
+      return { ...counts, symbolTradeFrames: { ...symbolFrames }, parseFailureDetails: [...failures], sampleCount,
+        causeCategory: sampleCount > 0 ? 'D' : counts.realtimeTradeFrames === 0 ? 'A' : counts.parseSuccess === 0 ? 'B' : 'C' };
+    }
+  };
+}
 
 const liveRequested = args => args.length === 1 && args[0] === '--live';
 
@@ -12,7 +75,7 @@ const volume = value => {
   const n = realtimeNumber(value);
   return Number.isSafeInteger(n) ? n : null;
 };
-const publicCode = value => typeof value === 'string' && /^\d{1,2}$/.test(value) ? value : null;
+const publicCode = value => value === '' ? '' : typeof value === 'string' && /^\d{1,2}$/.test(value) ? value : null;
 function analyze(row, previous = null) {
   const current = volume(row.acmlVolume), denominator = volume(row.previousSameTimeAcmlVolume);
   const rate = realtimeNumber(row.providedPreviousSameTimeRate);
@@ -95,6 +158,7 @@ async function run({ clock = () => new Date(), live = false,
   serviceFactory = createRealtimeService, socketFactory, write = line => console.log(line),
   schedule = setTimeout, cancel = clearTimeout, signals = process, durationMs = MAX_MS } = {}) {
   const report = createReport();
+  const frames = createFrameDiagnostics();
   let service, timer, connections = 0, finished = false, finish;
   let connectionOpened = false;
   const acknowledgements = new Set();
@@ -106,6 +170,7 @@ async function run({ clock = () => new Date(), live = false,
     signals.removeListener('SIGINT', interrupt); signals.removeListener('SIGTERM', interrupt);
     try { service?.stop(); } catch { reason = 'CLEANUP_ERROR'; } finally {
       const summary = report.summary(connections, reason);
+      Object.assign(summary, frames.summary(summary.symbols.reduce((sum, item) => sum + item.samples, 0)));
       summary.connectionOpened = connectionOpened;
       summary.subscriptionAcknowledgements = [...acknowledgements];
       output(summary); resolve(summary);
@@ -135,20 +200,11 @@ async function run({ clock = () => new Date(), live = false,
       const ws = makeSocket(url); connections++;
       ws.on('open', () => { if (!finished) connectionOpened = true; });
       ws.on('message', (payload, binary) => {
-        if (finished || binary) return;
+        if (finished) return;
         try {
-          // Reuse the production schema; never log raw frames (including ACK/auth).
-          const raw = payload.toString();
-          // ACK reporting only; subscription protocol remains in the existing service.
-          if (raw.startsWith('{')) {
-            const ack = JSON.parse(raw);
-            if (ack.header?.tr_id === 'H0STCNT0' && SYMBOLS.includes(ack.header?.tr_key) && ack.body?.rt_cd === '0') {
-              acknowledgements.add(ack.header.tr_key);
-            }
-            return;
-          }
-          const rows = parseTrades(raw);
-          if (rows) for (const row of rows) observe(row);
+          const { rows, ackSymbol } = frames.inspect(payload, binary);
+          if (ackSymbol) acknowledgements.add(ackSymbol);
+          for (const row of rows) observe(row);
         } catch { /* No raw exception text can reach output. */ }
       });
       return ws;
@@ -165,4 +221,4 @@ if (require.main === module) {
     console.error('검증 도구 종료: UNKNOWN'); process.exitCode = 1;
   });
 }
-module.exports = { analyze, createReport, run, liveRequested, SYMBOLS, MAX_MS };
+module.exports = { analyze, createReport, createFrameDiagnostics, run, liveRequested, SYMBOLS, MAX_MS };

@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { analyze, createReport, run, liveRequested, SYMBOLS, MAX_MS } = require('../scripts/verify-kis-realtime-volume.cjs');
+const { analyze, createReport, createFrameDiagnostics, run, liveRequested, SYMBOLS, MAX_MS } = require('../scripts/verify-kis-realtime-volume.cjs');
 const { FIELDS, FIELD_COUNT, createRealtimeService } = require('../services/kisRealtimeData');
 const { REALTIME_VALIDATION } = require('../services/volumeEvaluation');
 const now = new Date('2026-09-18T10:30:05+09:00');
@@ -67,12 +67,86 @@ function harness(extra = {}) {
   return { promise, timers, signals, socket, output, subscriptions, stops: () => stops, factories: () => factories,
     fire(ms) { const [id, item] = [...timers].find(([, t]) => t.ms === ms); timers.delete(id); item.fn(); } };
 }
-test('maximum duration is capped to 15 minutes; cleanup removes timers/listeners and both subscriptions only', async () => {
+test('maximum duration is capped to 3 minutes; cleanup removes timers/listeners and both subscriptions only', async () => {
+  assert.equal(MAX_MS,180000);
   const h = harness({ durationMs: MAX_MS * 10 });
   assert.deepEqual(h.subscriptions, SYMBOLS); h.fire(MAX_MS);
   assert.equal((await h.promise).reason, 'MAX_DURATION'); assert.equal(h.stops(), 1);
   assert.equal(h.timers.size, 0); assert.equal(h.socket.listenerCount('message'), 0);
   assert.equal(h.signals.listenerCount('SIGINT'), 0); assert.equal(h.signals.listenerCount('SIGTERM'), 0);
+});
+
+// Independent official positions, not a frame built from the parser's own offsets.
+function tradeFrame(symbols=['005930'], width=46) {
+  const records=symbols.map(symbol=>{
+    const f=Array(width).fill('0');
+    Object.assign(f,{0:symbol,1:'103004',13:'1500',33:'20260918',41:'1000',42:'150',43:'0',44:'0'});
+    return f.join('^');
+  });
+  return `0|H0STCNT0|${String(records.length).padStart(3,'0')}|${records.join('^')}`;
+}
+test('official 46-field positions and multiple records match the production parser',()=>{
+  const d=createFrameDiagnostics();const result=d.inspect(tradeFrame(SYMBOLS),false);
+  assert.equal(result.rows.length,2);
+  for(let i=0;i<2;i++) {
+    assert.deepEqual(result.rows[i],{symbol:SYMBOLS[i],lastTradeTime:'103004',acmlVolume:1500,
+      businessDate:'20260918',newMarketOperationCode:'0',previousSameTimeAcmlVolume:1000,
+      providedPreviousSameTimeRate:150,hourClassCode:'0',marketTreatmentClassCode:'0',schema:'LEGACY_46',UNKNOWN_EXTRA_FIELD:null});
+  }
+  assert.equal(d.summary(2).parseSuccess,1);assert.equal(d.summary(2).causeCategory,'D');
+  assert.deepEqual(d.summary(2).symbolTradeFrames,{'005930':1,'000660':1});
+});
+test('ACK and PINGPONG are control frames, not received trades',()=>{
+  const d=createFrameDiagnostics();
+  for(const symbol of SYMBOLS) d.inspect(JSON.stringify({header:{tr_id:'H0STCNT0',tr_key:symbol},body:{rt_cd:'0',msg_cd:'OPSP0000'}}),false);
+  d.inspect(JSON.stringify({header:{tr_id:'PINGPONG'}}),false);
+  const s=d.summary(0);assert.equal(s.totalFrames,3);assert.equal(s.jsonControlFrames,3);
+  assert.equal(s.subscribeAckFrames,2);assert.equal(s.pingpongFrames,1);
+  assert.equal(s.realtimeTradeFrames,0);assert.equal(s.causeCategory,'A');
+});
+test('schema mismatch is counted even when the production parser rejects all frames',()=>{
+  const d=createFrameDiagnostics();d.inspect(tradeFrame(SYMBOLS,48),false);
+  const s=d.summary(0);assert.equal(s.realtimeTradeFrames,1);assert.equal(s.parseSuccess,0);
+  assert.equal(s.parseFailure,1);assert.equal(s.causeCategory,'B');
+  assert.equal(s.parseFailureDetails[0].reason,'FIELD_COUNT_MISMATCH');
+  assert.equal(s.parseFailureDetails[0].fieldsPerRecord,48);
+});
+
+test('47-field frames are counted as parser successes and preserve empty session observation',async()=>{
+  const h=harness();
+  for(const symbol of SYMBOLS) {
+    const f=tradeFrame([symbol],47).split('|')[3].split('^');f[44]='';f[46]='DO_NOT_LOG_EXTRA';
+    for(let i=0;i<5;i++)h.socket.emit('message',Buffer.from('0|H0STCNT0|001|'+f.join('^')),false);
+  }
+  const result=await h.promise;
+  assert.equal(result.parseSuccess,10);assert.equal(result.parseFailure,0);assert.equal(result.sampleCount,10);
+  assert.deepEqual(result.symbols[0].MRKT_TRTM_CLS_CODE,['']);
+  assert.equal(result.numericalAnalysisReady,true);assert.equal(result.bEvidenceSufficient,'NO');
+  assert.ok(!h.output.join('').includes('DO_NOT_LOG_EXTRA'));
+});
+test('a parsed non-target symbol is distinguishable from no trade frames',async()=>{
+  const h=harness();h.socket.emit('message',Buffer.from(tradeFrame(['123456'])),false);
+  h.fire(MAX_MS);const s=await h.promise;
+  assert.equal(s.parseSuccess,1);assert.equal(s.sampleCount,0);assert.equal(s.causeCategory,'C');
+});
+test('multiple records reach the report independently and ACK stays separate',async()=>{
+  const h=harness();h.socket.emit('message',Buffer.from(tradeFrame(SYMBOLS)),false);
+  h.fire(MAX_MS);const s=await h.promise;
+  assert.equal(s.sampleCount,2);assert.equal(s.causeCategory,'D');
+  assert.equal(s.symbols[0].samples,1);assert.equal(s.symbols[1].samples,1);
+  assert.equal(s.subscribeAckFrames,0);
+});
+test('malformed encrypted binary and unknown frames never expose secret payloads',()=>{
+  const secret='NEVER_PRINT_AUTH_SECRET';const d=createFrameDiagnostics();
+  for(const [raw,binary] of [
+    [JSON.stringify({header:{approval_key:secret},body:{access_token:secret}}),false],
+    ['{'+secret,false],['0|'+secret+'|001|'+secret,false],
+    ['0|H0STCNT0|'+secret+'|'+secret,false],['1|H0STCNT0|001|'+secret,false],
+    [tradeFrame(),true],[secret,false]
+  ]) d.inspect(raw,binary);
+  const text=JSON.stringify(d.summary(0));
+  assert.ok(!text.includes(secret));assert.ok(!text.includes('approval_key'));assert.ok(!text.includes('access_token'));
+  assert.equal(d.summary(0).totalFrames,7);assert.equal(d.summary(0).parseFailure,3);
 });
 test('SIGINT stops immediately and old messages cannot revive output', async () => {
   const h = harness(); h.signals.emit('SIGINT'); await h.promise;

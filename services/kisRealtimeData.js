@@ -6,6 +6,13 @@ const { tradingDate, koreaClock, realtimeNumber, tradeTimestamp } = require('./v
 const TR_ID = 'H0STCNT0';
 const MAX_SUBSCRIPTIONS = 41; // All registrations for the app key share this limit.
 const FIELD_COUNT = 46;
+// 2026-09-21 diagnostic: one unknown trailing field; existing offsets unchanged.
+function getTradeSchema(recordCount, payloadFieldCount) {
+  if (!Number.isInteger(recordCount) || recordCount < 1 || recordCount > 1000) return null;
+  if (payloadFieldCount === recordCount * 46) return { schema: 'LEGACY_46', fieldCount: 46 };
+  if (payloadFieldCount === recordCount * 47) return { schema: 'OBSERVED_47', fieldCount: 47 };
+  return null;
+}
 const STABLE_RECOVERY_MS = 30000; // Transport recovery evidence, not a market-data freshness threshold.
 const SUBSCRIPTION_RETRIES = 2;
 const FIELDS = Object.freeze({ symbol: 0, lastTradeTime: 1, acmlVolume: 13,
@@ -13,13 +20,18 @@ const FIELDS = Object.freeze({ symbol: 0, lastTradeTime: 1, acmlVolume: 13,
   providedPreviousSameTimeRate: 42, hourClassCode: 43, marketTreatmentClassCode: 44 });
 
 function parseTrades(raw) {
+  if (typeof raw !== 'string') return null;
   const parts = raw.split('|');
   if (parts.length !== 4 || parts[0] !== '0' || parts[1] !== TR_ID || !/^\d+$/.test(parts[2])) return null;
   const count = Number(parts[2]);
   const fields = parts[3].split('^');
-  if (count < 1 || count > 1000 || fields.length !== count * FIELD_COUNT) return null;
+  const schema = getTradeSchema(count, fields.length);
+  if (!schema) return null; // FIELD_COUNT_MISMATCH or invalid record count.
   return Array.from({ length: count }, (_, index) => {
-    const row = Object.fromEntries(Object.entries(FIELDS).map(([key, offset]) => [key, fields[index * FIELD_COUNT + offset]]));
+    const start = index * schema.fieldCount;
+    const row = Object.fromEntries(Object.entries(FIELDS).map(([key, offset]) => [key, fields[start + offset]]));
+    row.schema = schema.schema;
+    row.UNKNOWN_EXTRA_FIELD = schema.fieldCount === 47 ? fields[start + 46] : null;
     for (const name of ['acmlVolume', 'previousSameTimeAcmlVolume', 'providedPreviousSameTimeRate']) {
       row[name] = realtimeNumber(row[name]);
     }
@@ -257,4 +269,4 @@ function ignoreSocketError() {}
 // Inert on import. Only an explicit subscribe starts a connection; HTTP requests
 // never subscribe the 50 recommendation candidates or expose credentials.
 const realtimeData = createRealtimeService();
-module.exports = { realtimeData, createRealtimeService, requestApproval, parseTrades, FIELDS, FIELD_COUNT, MAX_SUBSCRIPTIONS };
+module.exports = { realtimeData, createRealtimeService, requestApproval, parseTrades, getTradeSchema, FIELDS, FIELD_COUNT, MAX_SUBSCRIPTIONS };
