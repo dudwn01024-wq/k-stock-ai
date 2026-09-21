@@ -4,6 +4,7 @@ const { EventEmitter } = require('node:events');
 const { analyze, createReport, createFrameDiagnostics, run, liveRequested, SYMBOLS, MAX_MS } = require('../scripts/verify-kis-realtime-volume.cjs');
 const { FIELDS, FIELD_COUNT, createRealtimeService } = require('../services/kisRealtimeData');
 const { REALTIME_VALIDATION } = require('../services/volumeEvaluation');
+const { createReversalDiagnostics, REVERSAL_MAX_MS } = require('../scripts/verify-kis-realtime-volume.cjs');
 const now = new Date('2026-09-18T10:30:05+09:00');
 const row = (extra = {}) => ({ symbol: '005930', businessDate: '20260918', lastTradeTime: '103004',
   acmlVolume: 1500, previousSameTimeAcmlVolume: 1000, providedPreviousSameTimeRate: 150,
@@ -235,4 +236,81 @@ test('real service adapter stops its socket, timers and subscription map without
   assert.equal(adapter.getHealth().subscriptions, 0); assert.equal(adapter.getSnapshot('005930'), null);
   assert.equal(timers.size, 0); assert.equal(socket.eventNames().length, 0);
   assert.equal(socket.readyState, 3);
+});
+
+function reversalHarness() {
+  const diagnostic = createReversalDiagnostics(); let sequence = 0;
+  return { diagnostic, add(rows, extra = {}) { diagnostic.inspect(rows, { receivedAt: now.toISOString(),
+    connectionGeneration: 1, frameSequence: ++sequence, recordCount: rows.length,
+    schemaFieldCount: 47, payloadFieldCount: rows.length * 47, ...extra }); },
+    state() { return diagnostic.summary()[0]; } };
+}
+test('reversal keeps ten preceding and following records with bounded first-event capture', () => {
+  const h = reversalHarness();
+  for(let i=0;i<20;i++) h.add([row({acmlVolume:1500+i})]);
+  h.add([row({acmlVolume:1400})]);
+  for(let i=0;i<10;i++) h.add([row({acmlVolume:1520+i})]);
+  assert.equal(h.diagnostic.ready(),true);
+  assert.equal(h.state().capture.before.length,10); assert.equal(h.state().capture.after.length,10);
+  assert.equal(h.state().capture.baseline.ACML_VOL,1519);
+  assert.equal(h.state().capture.flags.volumeDecrease,true);
+  assert.equal(h.state().capture.flags.timeReversal,false);
+  for(let i=0;i<100;i++)h.add([row({acmlVolume:1700+i})]);
+  assert.equal(h.state().capture.after.length,10);
+});
+test('time-only reversal is distinct from volume decrease',()=>{
+  const h=reversalHarness(); h.add([row()]); h.add([row({lastTradeTime:'103003',acmlVolume:1501})]);
+  assert.equal(h.state().timeReversals,1);assert.equal(h.state().volumeDecreases,0);
+});
+test('date reversal and generation transition are independent evidence',()=>{
+  const h=reversalHarness(); h.add([row()]);h.add([row({businessDate:'20260917'})],{connectionGeneration:2});
+  assert.equal(h.state().dateReversals,1);assert.equal(h.state().generationChanges,1);
+});
+test('equal second and equal volume are normal, including generation-only transition',()=>{
+  const h=reversalHarness();h.add([row(),row()]);h.add([row()],{connectionGeneration:2});
+  assert.equal(h.state().capture,null);assert.equal(h.state().generationChanges,1);
+});
+test('multi-record evidence preserves wire order and parser boundaries for both schemas',()=>{
+  for(const width of [46,47]){
+    const frame=tradeFrame(['005930','005930'],width).split('|');const fields=frame[3].split('^');
+    fields[width+13]='1499';frame[3]=fields.join('^');
+    const parsed=createFrameDiagnostics().inspect(frame.join('|'),false);
+    const h=reversalHarness();h.add(parsed.rows,{schemaFieldCount:width,payloadFieldCount:2*width});
+    const c=h.state().capture;assert.equal(c.problem.recordIndexInFrame,1);
+    assert.deepEqual(c.sameFrame.map(r=>r.ACML_VOL),[1500,1499]);
+    assert.equal(c.previous.frameSequence,c.problem.frameSequence);assert.equal(c.boundaryMatches,true);
+  }
+});
+test('cross-frame reversal retains receive order and last normal baseline',()=>{
+  const h=reversalHarness();h.add([row()]);h.add([row({acmlVolume:1400})]);h.add([row({acmlVolume:1450})]);
+  assert.equal(h.state().volumeDecreases,2);
+  assert.notEqual(h.state().capture.previous.frameSequence,h.state().capture.problem.frameSequence);
+});
+test('invalid boundaries and null volume never manufacture a volume decrease',()=>{
+  const h=reversalHarness();h.add([row()],{payloadFieldCount:48});assert.equal(h.state().samples,0);
+  h.add([row()]);h.add([row({acmlVolume:null})]);assert.equal(h.state().volumeDecreases,0);
+  assert.equal(h.state().invalid,1);
+});
+test('reversal evidence stores only public whitelist fields',()=>{
+  const h=reversalHarness();h.add([row({secret:'DO_NOT_PRINT',UNKNOWN_EXTRA_FIELD:'DO_NOT_PRINT'})]);
+  h.add([row({acmlVolume:1000,secret:'DO_NOT_PRINT'})]);
+  assert.ok(!JSON.stringify(h.state()).includes('DO_NOT_PRINT'));
+});
+test('reversal mode requires live and has a twenty-minute cleanup deadline',async()=>{
+  assert.equal(liveRequested(['--diagnose-reversal']),false);
+  assert.equal(liveRequested(['--live','--diagnose-reversal']),true);
+  const safe=harness({live:false,diagnoseReversal:true});await safe.promise;assert.equal(safe.factories(),0);
+  const h=harness({diagnoseReversal:true,durationMs:REVERSAL_MAX_MS*2});
+  h.fire(REVERSAL_MAX_MS);assert.equal((await h.promise).reason,'MAX_DURATION');
+  assert.equal(h.stops(),1);assert.equal(h.timers.size,0);
+});
+test('reversal run bypasses five-sample early exit and stops after full context',async()=>{
+  const h=harness({diagnoseReversal:true});
+  const send=v=>{const f=tradeFrame().split('|');const a=f[3].split('^');a[13]=String(v);f[3]=a.join('^');
+    h.socket.emit('message',Buffer.from(f.join('|')),false);};
+  for(let i=0;i<12;i++)send(1500+i);assert.equal(h.stops(),0);
+  send(1400);for(let i=0;i<10;i++)send(1600+i);
+  const result=await h.promise;assert.equal(result.reason,'REVERSAL_CONTEXT_COLLECTED');
+  assert.equal(result.reversalDiagnostics[0].capture.after.length,10);assert.equal(h.stops(),1);
+  assert.equal(REALTIME_VALIDATION.validated,false);assert.equal(REALTIME_VALIDATION.maxAgeMs,null);
 });

@@ -5,6 +5,7 @@ const { createRealtimeService, parseTrades, getTradeSchema, FIELD_COUNT, FIELDS 
 const { koreaClock, realtimeNumber, tradeTimestamp } = require('../services/volumeEvaluation');
 const SYMBOLS = Object.freeze(['005930', '000660']);
 const MAX_MS = 3 * 60 * 1000;
+const REVERSAL_MAX_MS = 20 * 60 * 1000;
 
 // Count transport events separately from parsed/validated samples. Never retain raw frames.
 function createFrameDiagnostics() {
@@ -60,7 +61,8 @@ function createFrameDiagnostics() {
           frameLength: raw.length, fieldCount: fields.length, fieldsPerRecord: width,
           symbols: [...observed], parseSucceeded: false, reason });
       } else counts.parseSuccess++;
-      return { rows: rows || [] };
+      return { rows: rows || [], recordCount: count, payloadFieldCount: fields.length,
+        schemaFieldCount: reason ? null : getTradeSchema(count, fields.length).fieldCount };
     },
     summary(sampleCount) {
       return { ...counts, symbolTradeFrames: { ...symbolFrames }, parseFailureDetails: [...failures], sampleCount,
@@ -69,7 +71,56 @@ function createFrameDiagnostics() {
   };
 }
 
-const liveRequested = args => args.length === 1 && args[0] === '--live';
+const liveRequested = args => (args.length === 1 && args[0] === '--live') ||
+  (args.length === 2 && args[0] === '--live' && args[1] === '--diagnose-reversal');
+
+// Bounded, public-field-only evidence. Never retain raw frames or sort records.
+function createReversalDiagnostics() {
+  const states = new Map(SYMBOLS.map(symbol => [symbol, { recent: [], normal: null, last: null,
+    count: 0, volumeDecreases: 0, timeReversals: 0, dateReversals: 0, generationChanges: 0,
+    invalid: 0, capture: null }]));
+  function publicRecord(row, meta, index) {
+    const validTime = tradeTimestamp(row.businessDate, row.lastTradeTime) !== null;
+    return { symbol: SYMBOLS.includes(row.symbol) ? row.symbol : null,
+      BSOP_DATE: validTime ? row.businessDate : null, STCK_CNTG_HOUR: validTime ? row.lastTradeTime : null,
+      ACML_VOL: volume(row.acmlVolume), PRDY_SMNS_HOUR_ACML_VOL: volume(row.previousSameTimeAcmlVolume),
+      receivedAt: new Date(meta.receivedAt).toISOString(), connectionGeneration: meta.connectionGeneration,
+      frameSequence: meta.frameSequence, recordIndexInFrame: index,
+      recordCountInFrame: meta.recordCount, schemaFieldCount: meta.schemaFieldCount };
+  }
+  return {
+    inspect(rows, meta) {
+      if (![46, 47].includes(meta.schemaFieldCount) || meta.recordCount !== rows.length ||
+          meta.recordCount * meta.schemaFieldCount !== meta.payloadFieldCount) return;
+      const frame = rows.map((row, index) => publicRecord(row, meta, index)).filter(row => row.symbol);
+      for (const record of frame) {
+        const s = states.get(record.symbol); s.count++;
+        if (s.capture && s.capture.after.length < 10) s.capture.after.push(record);
+        const normal = s.normal, previous = s.last;
+        const flags = {
+          volumeDecrease: record.ACML_VOL !== null && normal?.ACML_VOL != null && record.ACML_VOL < normal.ACML_VOL,
+          timeReversal: record.STCK_CNTG_HOUR !== null && previous?.STCK_CNTG_HOUR != null &&
+            record.STCK_CNTG_HOUR < previous.STCK_CNTG_HOUR,
+          dateReversal: record.BSOP_DATE !== null && previous?.BSOP_DATE != null && record.BSOP_DATE < previous.BSOP_DATE,
+          generationChanged: previous !== null && record.connectionGeneration !== previous.connectionGeneration
+        };
+        s.volumeDecreases += Number(flags.volumeDecrease); s.timeReversals += Number(flags.timeReversal);
+        s.dateReversals += Number(flags.dateReversal); s.generationChanges += Number(flags.generationChanged);
+        const reversed = flags.volumeDecrease || flags.timeReversal || flags.dateReversal;
+        if (reversed && !s.capture) s.capture = { flags, baseline: normal, previous,
+          before: [...s.recent], problem: record, after: [], sameFrame: frame,
+          payloadFieldCount: meta.payloadFieldCount, boundaryMatches: true };
+        if (record.BSOP_DATE === null || record.ACML_VOL === null) s.invalid++;
+        else if (!reversed) s.normal = record;
+        s.last = record; s.recent.push(record); if (s.recent.length > 10) s.recent.shift();
+      }
+    },
+    ready() { return [...states.values()].some(s => s.capture?.before.length >= 10 && s.capture.after.length >= 10); },
+    summary() { return [...states].map(([symbol, s]) => ({ symbol, samples: s.count,
+      volumeDecreases: s.volumeDecreases, timeReversals: s.timeReversals, dateReversals: s.dateReversals,
+      generationChanges: s.generationChanges, invalid: s.invalid, capture: s.capture })); }
+  };
+}
 
 const volume = value => {
   const n = realtimeNumber(value);
@@ -156,9 +207,13 @@ function createReport() {
 
 async function run({ clock = () => new Date(), live = false,
   serviceFactory = createRealtimeService, socketFactory, write = line => console.log(line),
-  schedule = setTimeout, cancel = clearTimeout, signals = process, durationMs = MAX_MS } = {}) {
+  schedule = setTimeout, cancel = clearTimeout, signals = process, durationMs,
+  diagnoseReversal = false } = {}) {
   const report = createReport();
   const frames = createFrameDiagnostics();
+  const reversals = createReversalDiagnostics();
+  const startedAt = clock().toISOString();
+  let frameSequence = 0;
   let service, timer, connections = 0, finished = false, finish;
   let connectionOpened = false;
   const acknowledgements = new Set();
@@ -173,6 +228,8 @@ async function run({ clock = () => new Date(), live = false,
       Object.assign(summary, frames.summary(summary.symbols.reduce((sum, item) => sum + item.samples, 0)));
       summary.connectionOpened = connectionOpened;
       summary.subscriptionAcknowledgements = [...acknowledgements];
+      if (diagnoseReversal) Object.assign(summary, { startedAt, endedAt: clock().toISOString(),
+        reversalDiagnostics: reversals.summary() });
       output(summary); resolve(summary);
     }
   }; });
@@ -182,7 +239,7 @@ async function run({ clock = () => new Date(), live = false,
     const result = report.add({ ...row, receivedAt: clock().toISOString() });
     // Keep memory bounded and print at most five samples per symbol.
     if (result && result.count <= 5) output(result.sample);
-    if (report.ready()) finish('SAMPLES_COLLECTED');
+    if (!diagnoseReversal && report.ready()) finish('SAMPLES_COLLECTED');
   }
   try {
     if (live !== true) {
@@ -190,7 +247,8 @@ async function run({ clock = () => new Date(), live = false,
       finish('SAFE_MODE'); return await complete;
     }
     signals.once('SIGINT', interrupt); signals.once('SIGTERM', interrupt);
-    const limit = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, MAX_MS) : MAX_MS;
+    const maximum = diagnoseReversal ? REVERSAL_MAX_MS : MAX_MS;
+    const limit = Number.isFinite(durationMs) && durationMs > 0 ? Math.min(durationMs, maximum) : maximum;
     timer = schedule(() => finish('MAX_DURATION'), limit);
     const makeSocket = socketFactory || (url => {
       const WebSocket = require('ws');
@@ -198,13 +256,19 @@ async function run({ clock = () => new Date(), live = false,
     });
     service = serviceFactory({ maxSubscriptions: 2, clock, socketFactory: url => {
       const ws = makeSocket(url); connections++;
+      const connectionGeneration = connections;
       ws.on('open', () => { if (!finished) connectionOpened = true; });
       ws.on('message', (payload, binary) => {
         if (finished) return;
+        frameSequence++;
         try {
-          const { rows, ackSymbol } = frames.inspect(payload, binary);
+          const frame = frames.inspect(payload, binary);
+          const { rows, ackSymbol } = frame;
           if (ackSymbol) acknowledgements.add(ackSymbol);
+          if (diagnoseReversal && rows.length) reversals.inspect(rows, { ...frame,
+            receivedAt: clock().toISOString(), connectionGeneration, frameSequence });
           for (const row of rows) observe(row);
+          if (diagnoseReversal && reversals.ready()) finish('REVERSAL_CONTEXT_COLLECTED');
         } catch { /* No raw exception text can reach output. */ }
       });
       return ws;
@@ -217,8 +281,10 @@ async function run({ clock = () => new Date(), live = false,
 }
 
 if (require.main === module) {
-  run({ live: liveRequested(process.argv.slice(2)) }).catch(() => {
+  const args = process.argv.slice(2);
+  run({ live: liveRequested(args), diagnoseReversal: args.includes('--diagnose-reversal') }).catch(() => {
     console.error('검증 도구 종료: UNKNOWN'); process.exitCode = 1;
   });
 }
-module.exports = { analyze, createReport, createFrameDiagnostics, run, liveRequested, SYMBOLS, MAX_MS };
+module.exports = { analyze, createReport, createFrameDiagnostics, createReversalDiagnostics,
+  run, liveRequested, SYMBOLS, MAX_MS, REVERSAL_MAX_MS };
