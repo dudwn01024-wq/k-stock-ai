@@ -104,7 +104,7 @@ test('business failure reports only bounded codes without interpreting msg_cd',a
     msg1:'DUMMY_SECRET DUMMY_TOKEN 00000000',raw:{private:'PRIVATE_ACCOUNT_BODY'}}));
   const r=await f.run(config());
   assert.equal(r.errorCode,'BALANCE_RESPONSE_FAILED');assert.equal(r.httpStatus,200);
-  assert.equal(r.kisRtCd,'1');assert.equal(r.kisMsgCd,'TEST1234');
+  assert.equal(r.kisRtCd,'1');assert.equal(r.kisMsgCd,null);
   assert.equal(r.safeFailureCategory,'KIS_BUSINESS_ERROR');assert.equal(r.riskReady,false);
   for(const value of ['msg1','raw','DUMMY_SECRET','DUMMY_TOKEN','00000000','PRIVATE_ACCOUNT_BODY'])assert.ok(!JSON.stringify(r).includes(value));
   assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
@@ -128,7 +128,7 @@ test('HTTP failure exposes status only and never parses error bodies',async()=>{
 test('successful result and fixed first-page parameters remain unchanged',async()=>{
   const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({...body(),msg_cd:'TEST0000',msg1:'PRIVATE_MESSAGE'}));
   const r=await f.run(config());assert.equal(r.probeCompleted,true);assert.equal(r.httpStatus,200);
-  assert.equal(r.kisRtCd,'0');assert.equal(r.kisMsgCd,'TEST0000');assert.equal(r.safeFailureCategory,null);
+  assert.equal(r.kisRtCd,'0');assert.equal(r.kisMsgCd,null);assert.equal(r.safeFailureCategory,null);
   assert.equal(r.riskReady,false);assert.equal(r.positionCount,1);assert.ok(!JSON.stringify(r).includes('PRIVATE_MESSAGE'));
   assert.deepEqual(Object.fromEntries(new URL(f.calls[1].url).searchParams),{
     CANO:'00000000',ACNT_PRDT_CD:'00',AFHR_FLPR_YN:'N',OFL_YN:'',INQR_DVSN:'02',UNPR_DVSN:'01',
@@ -137,7 +137,7 @@ test('successful result and fixed first-page parameters remain unchanged',async(
 
 for(const msg_cd of ['EGW00123','AB12','Code_12-AB'])test('bounded alphanumeric code accepted '+msg_cd,async()=>{
   const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd}));
-  const r=await f.run(config());assert.equal(r.kisMsgCd,msg_cd);
+  const r=await f.run(config());assert.equal(r.kisMsgCd,null);
   assert.equal(r.kisMsgCdPresent,true);assert.equal(r.kisMsgCdFormatAccepted,true);
   assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
 });
@@ -159,4 +159,34 @@ test('code-shaped credential still rejected with presence flags',async()=>{
   const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd:'SECRET12'}));
   const r=await f.run(c);assert.equal(r.kisMsgCd,null);assert.equal(r.kisMsgCdPresent,true);
   assert.equal(r.kisMsgCdFormatAccepted,false);assert.ok(!JSON.stringify(r).includes('SECRET12'));
+});
+
+const rejectionFixtures=[
+  [{msg_cd:'CODE1234'},'NONE'],[{},'MISSING'],[{msg_cd:null},'NOT_STRING'],
+  [{msg_cd:''},'EMPTY'],[{msg_cd:'A1'.repeat(17)},'TOO_LONG'],
+  [{msg_cd:'CODE12\n'},'INVALID_CHARACTERS'],[{msg_cd:'1234'},'MISSING_LETTER'],
+  [{msg_cd:'CODE'},'MISSING_DIGIT']
+];
+for(const [fields,reason] of rejectionFixtures)test('rejection enum only: '+reason,async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',...fields,msg1:'PRIVATE_MESSAGE',raw:'PRIVATE_BODY'}));
+  const r=await f.run(config());assert.equal(r.kisMsgCdRejectionReason,reason);
+  assert.equal(r.kisMsgCd,null);assert.equal(r.kisMsgCdFormatAccepted,reason==='NONE');
+  const serialized=JSON.stringify(r);assert.ok(!serialized.includes('PRIVATE_MESSAGE'));assert.ok(!serialized.includes('PRIVATE_BODY'));
+  if(reason==='NONE')assert.ok(!serialized.includes(fields.msg_cd));
+  assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
+});
+test('sensitive exact and full-value substring matching remains unchanged',async()=>{
+  for(const msg_cd of ['SECRET12','XSECRET12Y','A00000000B']){
+    const c=config();c.auth.appSecret='SECRET12';
+    const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd}));
+    const r=await f.run(c);assert.equal(r.kisMsgCdRejectionReason,'SENSITIVE_VALUE_MATCH');
+    assert.equal(r.kisMsgCd,null);assert.ok(!JSON.stringify(r).includes(msg_cd));
+  }
+});
+test('short product code and partial account number do not trigger substring matching',async()=>{
+  const f=fake(n=>n===1?reply({access_token:'DUMMY_TOKEN'}):reply({rt_cd:'1',msg_cd:'CODE0000'}));
+  const r=await f.run(config());assert.equal(r.kisMsgCdRejectionReason,'NONE');assert.equal(r.kisMsgCd,null);
+});
+test('preflight rejection never claims message code was evaluated',async()=>{
+  const f=fake();const r=await f.run({});assert.equal(r.kisMsgCdRejectionReason,'NOT_EVALUATED');assert.equal(f.calls.length,0);
 });
