@@ -1360,6 +1360,7 @@ const buildFinalAssessment = ({
 const createEmptyStrategy = (
   symbol = null
 ) => ({
+  decisionRole: 'ENTRY_GATE',
   symbol,
 
   available: false,
@@ -1667,6 +1668,7 @@ const calculateTradingStrategy = ({
   // =====================================
 
   return {
+    decisionRole: 'ENTRY_GATE',
     symbol,
 
     available: finalAssessment.status !== 'DATA_INSUFFICIENT',
@@ -1794,7 +1796,31 @@ const calculateTradingStrategy = ({
 // EXPORT
 // ========================================
 
+// Strategy eligibility only: this does not authorize or execute an order.
+// Consume a freshly calculated backend result, never a client-supplied status.
+const isEntryAllowed = (result) => {
+  if (result?.decisionRole !== 'ENTRY_GATE' || result.available !== true ||
+      result.finalAssessment?.status !== 'ENTRY_CANDIDATE') return false;
+  if (result.sourceIntegrity != null && result.sourceIntegrity.complete !== true) return false;
+  const { technicalAssessment: technical, marketAssessment: market,
+    riskRewardAssessment: risk, executionAssessment: execution } = result;
+  if (technical?.status !== 'FAVORABLE' || market?.available !== true ||
+      market.cautionCount !== 0 || risk?.available !== true || risk.status !== 'PASS' ||
+      execution?.status !== 'ENTRY_ZONE') return false;
+  if ([technical, market, result.finalAssessment].some(a =>
+    a.missingRequired != null && (!Array.isArray(a.missingRequired) || a.missingRequired.length > 0))) return false;
+  const known = ['FAVORABLE', 'NEUTRAL', 'CAUTION'];
+  if (['trend', 'rsi', 'macd', 'bollinger'].some(key =>
+    !known.includes(technical.conditions?.[key]?.status))) return false;
+  if (['volume', 'supply', 'news'].some(key =>
+    !['FAVORABLE', 'NEUTRAL'].includes(market.conditions?.[key]?.status))) return false;
+  const { currentPrice, entryPrice, takeProfitPrice, stopLossPrice } = result;
+  return [currentPrice, entryPrice, takeProfitPrice, stopLossPrice].every(Number.isFinite) &&
+    currentPrice > 0 && stopLossPrice > 0 && stopLossPrice < entryPrice && entryPrice < takeProfitPrice;
+};
+
 module.exports = {
+  isEntryAllowed,
   STRATEGY_RULES,
 
   evaluateTechnicalConditions,
