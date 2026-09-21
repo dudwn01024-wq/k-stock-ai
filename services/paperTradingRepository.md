@@ -11,3 +11,11 @@ State includes schema/version, initial seed, currency/session, orders/client IDs
 `rolloverBusinessDate(newDate, { source, sourceTimestamp })` accepts an explicit canonical date and zoned timestamp on that KST date. It does not verify that the date is an exchange trading day. Same-day calls are idempotent; backward or invalid dates fail. Daily gross loss starts at zero for the explicitly opened new ledger period. Consecutive completed losing position lifecycles carry over, as do positions, pending orders, cumulative PnL and event history. No scheduling or automatic cancellation occurs.
 
 Recovered snapshots require caller-provided timestamps and explicit validated marks for open positions. Freshness remains `UNKNOWN`; recovery does not establish that the supplied marks or account state are current. This module is not wired into any server or real order/account API.
+
+## Lifecycle schema 2
+
+New orders require an explicit unique `eventId` at creation (`createEntryOrder` and `createExitOrder`). Fill, cancel and reject also require unique IDs across the whole ledger. Caller event IDs, never inferred broker IDs, are persisted with the order history in the same transaction. `internalOrderId` currently aliases the backward-compatible `orderId`/`clientOrderId`; `brokerOrderId` is always null. No broker adapter is connected.
+
+A partial fill may be filled again or canceled, but never rejected. Terminal states cannot be reactivated. `remainingQuantity` means the unfilled portion even after cancellation; terminal orders are excluded from pending-order snapshots. `filledAmount` and `averageFillPrice` reflect only explicit fill events; before any fill they are zero and null respectively. No cancellation generates a fill or reverses an existing position.
+
+Schema 1 has no complete lifecycle history, so it is rejected with `RECOVERY_FAILED` rather than migrated by inventing events. Recovery validates schema 2 event ordering, state transitions, quantities, amounts, averages and event-ID coverage. Free-form rejection payload/message is deliberately not stored; rejection is represented by the whitelisted REJECT event and its source/time.

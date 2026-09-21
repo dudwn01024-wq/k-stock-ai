@@ -10,7 +10,7 @@ const id=x=>typeof x==='string'&&x.trim().length>0;
 const copy=x=>JSON.parse(JSON.stringify(x));
 const frozen=x=>{if(x&&typeof x==='object'){Object.values(x).forEach(frozen);Object.freeze(x);}return x;};
 const fail=reason=>({allowed:false,status:'REJECTED',reasons:[reason],persistence:'MEMORY_ONLY'});
-const active=o=>['PENDING','PARTIALLY_FILLED'].includes(o.status);
+const {active,transition}=require('./orderLifecycle');
 const costs=Object.freeze({fees:null,taxes:null,status:'NOT_APPLIED',pnlBasis:'GROSS'});
 
 // Paper simulation only. Optional synchronous transactional repository; no API or order I/O.
@@ -26,7 +26,7 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
   let day=initial.accountSnapshot.businessDate,updatedAt=initial.accountSnapshot.sourceTimestamp,dailyRiskHistory=[],blocked=false;
   const currency=initial.accountSnapshot.currency;
   const orders=new Map(),positions=new Map(),events=new Set(),issued=new WeakMap();
-  const exportState=()=>({schemaVersion:1,stateVersion:version,sequence,sessionId,currency,initialSnapshots:initial,businessDate:day,updatedAt,cash,dailyLoss,consecutiveLosses,
+  const exportState=()=>({schemaVersion:2,stateVersion:version,sequence,sessionId,currency,initialSnapshots:initial,businessDate:day,updatedAt,cash,dailyLoss,consecutiveLosses,
     orders:[...orders.values()],positions:[...positions.values()],processedEventIds:[...events],clientOrderIds:[...orders.keys()],dailyRiskHistory});
   const restore=s=>{cash=s.cash;version=s.stateVersion;sequence=s.sequence;day=s.businessDate;updatedAt=s.updatedAt;lastTime=Date.parse(updatedAt);
     dailyLoss=s.dailyLoss;consecutiveLosses=s.consecutiveLosses;dailyRiskHistory=copy(s.dailyRiskHistory);
@@ -39,7 +39,7 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
     }else{sync('begin',null);sync('saveState',exportState());sync('commit');}}
     catch{try{sync('rollback');}catch{}throw Error('RECOVERY_FAILED');}
   }
-  const atomic=(fn,eventIndex=null)=>(...args)=>{
+  const atomic=fn=>(...args)=>{
     if(blocked)return {...fail('PERSISTENT_UNAVAILABLE'),status:'PERSISTENT_UNAVAILABLE'};
     const before=copy(exportState());let begun=false;
     try {
@@ -47,7 +47,7 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
       const result=fn(...args);
       if(!result.allowed||version===before.stateVersion){if(begun)sync('rollback');return result;}
       if(!validatePaperState(exportState(),sessionId))throw Error('INVALID_STATE');
-      if(repository){sync('saveState',exportState());if(eventIndex!==null){const e=args[eventIndex];sync('saveEvent',{eventId:e.eventId,orderId:args[0],fillPrice:e.fillPrice,fillQuantity:e.fillQuantity,source:e.source,sourceTimestamp:e.sourceTimestamp,businessDate:e.businessDate});}sync('commit');}
+      if(repository){sync('saveState',exportState());for(const o of orders.values())for(const e of o.lifecycleEvents)if(!before.processedEventIds.includes(e.eventId))sync('saveEvent',e);sync('commit');}
       return result;
     }catch{restore(before);blocked=true;if(begun)try{sync('rollback');}catch{}return {...fail('PERSISTENCE_FAILED'),status:'PERSISTENT_UNAVAILABLE'};}
   };
@@ -70,6 +70,12 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
   const duplicate=(clientOrderId,symbol)=>orders.has(clientOrderId)||[...orders.values()].some(o=>o.symbol===symbol&&active(o));
   const advance=time=>{version++;lastTime=Date.parse(time);updatedAt=time;};
 
+  const eventValid=e=>e&&id(e.eventId)&&!events.has(e.eventId)&&metadata(e);
+  const record=(order,type,event,quantity=null,price=null)=>{
+    order.lifecycleEvents.push({eventId:event.eventId,orderId:order.orderId,type,source:event.source,sourceTimestamp:event.sourceTimestamp,
+      businessDate:event.businessDate,receivedAt:event.receivedAt??null,quantity,price});events.add(event.eventId);
+  };
+  const initialize=order=>Object.assign(order,{internalOrderId:order.orderId,brokerOrderId:null,remainingQuantity:order.quantity,filledAmount:0,averageFillPrice:null,lifecycleEvents:[]});
   // marks: symbol -> {price, validated:true, source, sourceTimestamp,businessDate}.
   // No last fill, entry price or missing quote is used as a valuation fallback.
   function getSnapshots({sourceTimestamp,businessDate,receivedAt=null,marks={}}={}) {
@@ -97,7 +103,7 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
     issued.set(result,version);
     return result;
   }
-  function createEntryOrder({clientOrderId,strategyResult,riskResult,snapshots,policy,quantity,proposedEntryPrice}={}) {
+  function createEntryOrder({eventId,clientOrderId,strategyResult,riskResult,snapshots,policy,quantity,proposedEntryPrice}={}) {
     const symbol=strategyResult?.symbol;
     if(!id(clientOrderId)||!/^\d{6}$/.test(symbol||'')||!qty(quantity)||!positive(proposedEntryPrice))return fail('INVALID_PROPOSAL');
     if(duplicate(clientOrderId,symbol))return fail('DUPLICATE_ORDER');
@@ -107,19 +113,20 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
       !canOpenPosition({strategyResult,riskResult:checked}))return fail('ENTRY_OR_RISK_DENIED');
     if(riskResult.observed?.proposedEntryPrice!==proposedEntryPrice||riskResult.observed?.proposedQuantity!==quantity)return fail('RISK_PROPOSAL_MISMATCH');
     const time=snapshots.accountSnapshot.sourceTimestamp;
+    const creation={...snapshots.accountSnapshot,eventId};if(!eventValid(creation))return fail('INVALID_OR_DUPLICATE_EVENT');
     const order={orderId:clientOrderId,clientOrderId,symbol,side:'BUY',status:'PENDING',quantity,filledQuantity:0,
       limitPrice:proposedEntryPrice,createdAt:time,updatedAt:time,source:'PAPER_LEDGER',businessDate:day,
       targetPrice:strategyResult.takeProfitPrice,stopLossPrice:strategyResult.stopLossPrice,persistence:'MEMORY_ONLY',costs};
-    orders.set(clientOrderId,order);advance(time);return {allowed:true,order:read(order)};
+    initialize(order);record(order,'CREATED',creation,quantity,proposedEntryPrice);orders.set(clientOrderId,order);advance(time);return {allowed:true,order:read(order)};
   }
   function createExitOrder({clientOrderId,symbol,quantity,...event}={}) {
     const p=positions.get(symbol);
-    if(!id(clientOrderId)||!qty(quantity)||!p||quantity>p.quantity||!metadata(event))return fail('INVALID_EXIT');
+    if(!id(clientOrderId)||!qty(quantity)||!p||quantity>p.quantity||!eventValid(event))return fail('INVALID_EXIT');
     if(duplicate(clientOrderId,symbol))return fail('DUPLICATE_ORDER');
     const order={orderId:clientOrderId,clientOrderId,symbol,side:'SELL',status:'PENDING',quantity,filledQuantity:0,
       limitPrice:null,createdAt:event.sourceTimestamp,updatedAt:event.sourceTimestamp,source:'PAPER_LEDGER',businessDate:day,
       persistence:'MEMORY_ONLY',costs};
-    orders.set(clientOrderId,order);advance(event.sourceTimestamp);return {allowed:true,order:read(order)};
+    initialize(order);record(order,'CREATED',event,quantity,null);orders.set(clientOrderId,order);advance(event.sourceTimestamp);return {allowed:true,order:read(order)};
   }
   function fillPaperOrder(orderId,event={}) {
     const o=orders.get(orderId);
@@ -127,6 +134,7 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
     if(event.validated!==true||!id(event.eventId)||events.has(event.eventId)||!positive(event.fillPrice)||
       !qty(event.fillQuantity)||!metadata(event))return fail('INVALID_OR_DUPLICATE_FILL');
     const q=event.fillQuantity,price=event.fillPrice;
+    const transitioned=transition(o,'FILL',q,price);if(!transitioned)return fail('INVALID_TRANSITION');
     if(q>o.quantity-o.filledQuantity)return fail('OVERFILL');
     if(o.side==='BUY'&&price>o.limitPrice)return fail('LIMIT_PRICE_EXCEEDED');
     const notional=q*price;
@@ -155,16 +163,17 @@ function createPaperTrading({sessionId,initialSnapshots,repository}={}) {
     }
     if(![cashAfter,pnl,next.realizedPnl,next.cycleRealizedPnl,lossAfter].every(finite)||!Number.isSafeInteger(streakAfter))return fail('NONFINITE_LEDGER');
     positions.set(o.symbol,next);cash=cashAfter;dailyLoss=lossAfter;consecutiveLosses=streakAfter;
-    o.filledQuantity+=q;o.status=o.filledQuantity===o.quantity?'FILLED':'PARTIALLY_FILLED';o.updatedAt=event.sourceTimestamp;
-    events.add(event.eventId);advance(event.sourceTimestamp);
+    Object.assign(o,transitioned);o.updatedAt=event.sourceTimestamp;
+    record(o,o.status==='FILLED'?'FILL':'PARTIAL_FILL',event,q,price);advance(event.sourceTimestamp);
     return {allowed:true,order:read(o),position:read(next),realizedPnl:pnl,costs};
   }
   function endOrder(orderId,status,event) {
-    const o=orders.get(orderId);if(!o||!active(o)||!metadata(event))return fail('ORDER_NOT_CANCELABLE');
-    o.status=status;o.updatedAt=event.sourceTimestamp;advance(event.sourceTimestamp);return {allowed:true,order:read(o)};
+    const o=orders.get(orderId);if(!o||!eventValid(event))return fail('INVALID_OR_DUPLICATE_EVENT');
+    const type=status==='CANCELED'?'CANCEL':'REJECT',next=transition(o,type);if(!next)return fail('INVALID_TRANSITION');
+    Object.assign(o,next);o.updatedAt=event.sourceTimestamp;record(o,type,event);advance(event.sourceTimestamp);return {allowed:true,order:read(o)};
   }
   return Object.freeze({get persistence(){return blocked?'PERSISTENT_UNAVAILABLE':repository?.persistence??'MEMORY_ONLY';},getSnapshots,
-    createEntryOrder:atomic(createEntryOrder),createExitOrder:atomic(createExitOrder),fillPaperOrder:atomic(fillPaperOrder,1),rolloverBusinessDate:atomic(rolloverBusinessDate),
+    createEntryOrder:atomic(createEntryOrder),createExitOrder:atomic(createExitOrder),fillPaperOrder:atomic(fillPaperOrder),rolloverBusinessDate:atomic(rolloverBusinessDate),
     exportState:()=>read(exportState()),
     cancelPaperOrder:atomic((id,event)=>endOrder(id,'CANCELED',event)),rejectPaperOrder:atomic((id,event)=>endOrder(id,'REJECTED',event)),
     getOrder:id=>read(orders.get(id)),getPosition:symbol=>read(positions.get(symbol)),

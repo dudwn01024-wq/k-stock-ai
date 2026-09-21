@@ -18,7 +18,7 @@ const policy=()=>({enabled:true,maxInvestmentPerSymbol:1000,maxOrderAmount:1000,
  preventDuplicatePosition:true,preventDuplicatePendingOrder:true,maxConsecutiveLosses:3,maxExposureRatio:0.5});
 const book=()=>createPaperTrading({sessionId:'MOCK',initialSnapshots:initial()});
 const proposal=(p,patch={})=>{const snapshots=p.getSnapshots(stamp()),s=strategy(),rules=policy();const i={...snapshots,strategyResult:s,symbol:s.symbol,proposedQuantity:4,proposedEntryPrice:100,policy:rules};return {
- clientOrderId:'BUY-1',strategyResult:s,riskResult:evaluateRiskWithSnapshots(i),snapshots,policy:rules,quantity:4,proposedEntryPrice:100,...patch};};
+ eventId:'CREATE-BUY-1',clientOrderId:'BUY-1',strategyResult:s,riskResult:evaluateRiskWithSnapshots(i),snapshots,policy:rules,quantity:4,proposedEntryPrice:100,...patch};};
 const fill=(eventId,fillPrice=100,fillQuantity=4)=>({...stamp(),eventId,validated:true,fillPrice,fillQuantity});
 const opened=()=>{const p=book();assert.equal(p.createEntryOrder(proposal(p)).allowed,true);assert.equal(p.fillPaperOrder('BUY-1',fill('F1')).allowed,true);return p;};
 test('normal gates create PENDING paper limit order only',()=>{
@@ -63,26 +63,26 @@ test('overfill, duplicate event, fractional quantity and above-limit price rejec
  assert.equal(p.fillPaperOrder('BUY-1',fill('X',100,1)).allowed,true);assert.equal(p.fillPaperOrder('BUY-1',fill('X',100,1)).allowed,false);
 });
 for(const state of ['FILLED','CANCELED','REJECTED'])test(state+' cannot be filled again',()=>{
- const p=book();p.createEntryOrder(proposal(p));if(state==='FILLED')p.fillPaperOrder('BUY-1',fill('F1'));else if(state==='CANCELED')p.cancelPaperOrder('BUY-1',stamp());else p.rejectPaperOrder('BUY-1',stamp());
+ const p=book();p.createEntryOrder(proposal(p));if(state==='FILLED')p.fillPaperOrder('BUY-1',fill('F1'));else if(state==='CANCELED')p.cancelPaperOrder('BUY-1',{...stamp(),eventId:'END-BUY-1'});else p.rejectPaperOrder('BUY-1',{...stamp(),eventId:'END-BUY-1'});
  assert.equal(p.getOrder('BUY-1').status,state);assert.equal(p.fillPaperOrder('BUY-1',fill('F2')).allowed,false);
 });
 test('partial cancellation preserves actual filled position',()=>{
- const p=book();p.createEntryOrder(proposal(p));p.fillPaperOrder('BUY-1',fill('F1',100,1));p.cancelPaperOrder('BUY-1',stamp());assert.equal(p.getPosition('005930').quantity,1);
+ const p=book();p.createEntryOrder(proposal(p));p.fillPaperOrder('BUY-1',fill('F1',100,1));p.cancelPaperOrder('BUY-1',{...stamp(),eventId:'END-BUY-1'});assert.equal(p.getPosition('005930').quantity,1);
 });
 test('partial exit then full exit compute gross P&L and explicit costs',()=>{
- const p=opened();assert.equal(p.createExitOrder({...stamp(),clientOrderId:'SELL-1',symbol:'005930',quantity:4}).allowed,true);
+ const p=opened();assert.equal(p.createExitOrder({...stamp(),eventId:'CREATE-SELL-1',clientOrderId:'SELL-1',symbol:'005930',quantity:4}).allowed,true);
  let r=p.fillPaperOrder('SELL-1',fill('S1',110,2));assert.equal(r.order.status,'PARTIALLY_FILLED');assert.equal(r.realizedPnl,20);assert.equal(r.position.quantity,2);
  r=p.fillPaperOrder('SELL-1',fill('S2',90,2));assert.equal(r.order.status,'FILLED');assert.equal(r.position.quantity,0);assert.equal(r.position.realizedPnl,0);
  assert.equal(r.costs.fees,null);assert.equal(r.costs.taxes,null);assert.equal(r.costs.status,'NOT_APPLIED');assert.equal(p.getState().cash,10000);
  assert.equal(p.getState().dailyLoss,20);assert.equal(p.getState().consecutiveLosses,0);
 });
 test('fully losing lifecycle updates consecutive losses only at full close',()=>{
- const p=opened();p.createExitOrder({...stamp(),clientOrderId:'SELL-1',symbol:'005930',quantity:4});p.fillPaperOrder('SELL-1',fill('S1',90,1));assert.equal(p.getState().consecutiveLosses,0);
+ const p=opened();p.createExitOrder({...stamp(),eventId:'CREATE-SELL-1',clientOrderId:'SELL-1',symbol:'005930',quantity:4});p.fillPaperOrder('SELL-1',fill('S1',90,1));assert.equal(p.getState().consecutiveLosses,0);
  p.fillPaperOrder('SELL-1',fill('S2',90,3));assert.equal(p.getState().consecutiveLosses,1);assert.equal(p.getPosition('005930').realizedPnl,-40);
 });
 test('exit oversell and concurrent exit blocked',()=>{
- const p=opened();assert.equal(p.createExitOrder({...stamp(),clientOrderId:'S',symbol:'005930',quantity:5}).allowed,false);
- p.createExitOrder({...stamp(),clientOrderId:'S',symbol:'005930',quantity:4});assert.equal(p.createExitOrder({...stamp(),clientOrderId:'S2',symbol:'005930',quantity:1}).allowed,false);
+ const p=opened();assert.equal(p.createExitOrder({...stamp(),eventId:'CREATE-S',clientOrderId:'S',symbol:'005930',quantity:5}).allowed,false);
+ p.createExitOrder({...stamp(),eventId:'CREATE-S',clientOrderId:'S',symbol:'005930',quantity:4});assert.equal(p.createExitOrder({...stamp(),eventId:'CREATE-S2',clientOrderId:'S2',symbol:'005930',quantity:1}).allowed,false);
 });
 test('take profit and stop loss only signal; no automatic fills',()=>{
  const p=opened(),before=p.getState(),pos=p.getPosition('005930');assert.equal(evaluatePaperExitSignal(pos,120),'TAKE_PROFIT_TRIGGERED');
@@ -98,12 +98,12 @@ test('pending BUY reservation stays visible in risk snapshots',()=>{
  const p=book();p.createEntryOrder(proposal(p));const s=p.getSnapshots(stamp());assert.equal(s.valid,true);assert.equal(s.portfolioSnapshot.pendingOrders[0].remainingNotional,400);
 });
 test('old generation of paper snapshot cannot authorize after cancel',()=>{
- const p=book(),old=proposal(p);p.createEntryOrder(old);p.cancelPaperOrder('BUY-1',stamp());
+ const p=book(),old=proposal(p);p.createEntryOrder(old);p.cancelPaperOrder('BUY-1',{...stamp(),eventId:'END-BUY-1'});
  assert.equal(p.createEntryOrder({...old,clientOrderId:'BUY-NEW'}).allowed,false);
 });
 test('reentry after full close starts new cost basis without erasing realized P&L',()=>{
- const p=opened();p.createExitOrder({...stamp(),clientOrderId:'S',symbol:'005930',quantity:4});p.fillPaperOrder('S',fill('S1',110,4));
- assert.equal(p.createEntryOrder(proposal(p,{clientOrderId:'B2'})).allowed,true);p.fillPaperOrder('B2',fill('F2',90,4));
+ const p=opened();p.createExitOrder({...stamp(),eventId:'CREATE-S',clientOrderId:'S',symbol:'005930',quantity:4});p.fillPaperOrder('S',fill('S1',110,4));
+ assert.equal(p.createEntryOrder(proposal(p,{clientOrderId:'B2',eventId:'CREATE-B2'})).allowed,true);p.fillPaperOrder('B2',fill('F2',90,4));
  assert.equal(p.getPosition('005930').averageEntryPrice,90);assert.equal(p.getPosition('005930').realizedPnl,40);
 });
 test('out-of-day or reversed event rejected and memory has no restart recovery',()=>{
@@ -114,6 +114,6 @@ test('out-of-day or reversed event rejected and memory has no restart recovery',
 test('module dependency whitelist prevents real account/order/network access',()=>{
  let calls=0;const forbidden=()=>{calls++;throw Error('Forbidden I/O');};const module={exports:{}};
  vm.runInNewContext(fs.readFileSync(require.resolve('../services/paperTrading'),'utf8'),{module,require:name=>{
- assert.ok(['./accountSnapshot','./riskManager','./tradingStrategy','./paperTradingState'].includes(name));return require('../services/'+name.slice(2));},fetch:forbidden,setTimeout:forbidden,process:new Proxy({},{get:forbidden})});
+ assert.ok(['./accountSnapshot','./riskManager','./tradingStrategy','./paperTradingState','./orderLifecycle'].includes(name));return require('../services/'+name.slice(2));},fetch:forbidden,setTimeout:forbidden,process:new Proxy({},{get:forbidden})});
  const p=module.exports.createPaperTrading({sessionId:'MOCK',initialSnapshots:initial()});p.createEntryOrder(proposal(p));p.fillPaperOrder('BUY-1',fill('F'));assert.equal(calls,0);
 });

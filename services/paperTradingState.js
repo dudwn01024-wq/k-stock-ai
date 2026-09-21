@@ -1,4 +1,5 @@
 'use strict';
+const {validHistory}=require('./orderLifecycle');
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 const finite=x=>typeof x==='number'&&Number.isFinite(x);
 const nonnegative=x=>finite(x)&&x>=0;
@@ -9,13 +10,23 @@ const unique=xs=>new Set(xs).size===xs.length;
 const kst=x=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(x));
 function validatePaperState(s,sessionId) {
  try {
-  if(!s||!s.initialSnapshots||!/^[A-Z]{3}$/.test(s.currency)||s.schemaVersion!==1||s.sessionId!==sessionId||!integer(s.stateVersion)||!integer(s.sequence)||
+  if(!s||!s.initialSnapshots||!/^[A-Z]{3}$/.test(s.currency)||s.schemaVersion!==2||s.sessionId!==sessionId||!integer(s.stateVersion)||!integer(s.sequence)||
    sourceDate(s.businessDate)!==s.businessDate||!time(s.updatedAt)||kst(s.updatedAt)!==s.businessDate||
    !nonnegative(s.cash)||!nonnegative(s.dailyLoss)||!integer(s.consecutiveLosses))return false;
   if(![s.orders,s.positions,s.processedEventIds,s.clientOrderIds,s.dailyRiskHistory].every(Array.isArray))return false;
   if(!s.processedEventIds.every(id)||!unique(s.processedEventIds)||!unique(s.clientOrderIds)||
    !unique(s.orders.map(o=>o.orderId))||!unique(s.orders.map(o=>o.clientOrderId))||!unique(s.positions.map(p=>p.symbol)))return false;
   if(s.clientOrderIds.length!==s.orders.length||!s.orders.every(o=>s.clientOrderIds.includes(o.clientOrderId)))return false;
+  const history=s.orders.flatMap(o=>o.lifecycleEvents??[]);
+  if(!unique(history.map(e=>e.eventId))||history.length!==s.processedEventIds.length||!history.every(e=>s.processedEventIds.includes(e.eventId)))return false;
+  for(const o of s.orders){
+   if(o.internalOrderId!==o.orderId||o.brokerOrderId!==null||!validHistory(o))return false;
+   let previous=null;
+   for(const e of o.lifecycleEvents){if(!id(e.eventId)||!id(e.source)||!time(e.sourceTimestamp)||sourceDate(e.businessDate)!==e.businessDate||kst(e.sourceTimestamp)!==e.businessDate||
+    Date.parse(e.sourceTimestamp)>Date.parse(o.updatedAt)||previous!==null&&Date.parse(e.sourceTimestamp)<previous||
+    e.receivedAt!==null&&(!time(e.receivedAt)||Date.parse(e.receivedAt)<Date.parse(e.sourceTimestamp)))return false;previous=Date.parse(e.sourceTimestamp);}
+   if(o.lifecycleEvents[0].sourceTimestamp!==o.createdAt||o.lifecycleEvents.at(-1).sourceTimestamp!==o.updatedAt)return false;
+  }
   const stamp=o=>sourceDate(o.businessDate)===o.businessDate&&o.businessDate<=s.businessDate&&time(o.updatedAt)&&Date.parse(o.updatedAt)<=Date.parse(s.updatedAt)&&id(o.source);
   for(const o of s.orders){
    if(!id(o.orderId)||o.orderId!==o.clientOrderId||!/^\d{6}$/.test(o.symbol)||!['BUY','SELL'].includes(o.side)||
