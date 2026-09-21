@@ -12,12 +12,12 @@ const { evaluateMarketContext } = require('../services/tradingStrategy');
 // Synthetic test contract only: neither the age threshold nor session codes
 // below are claims about verified KIS market behavior. No test connects to KIS.
 const now = new Date('2026-09-18T10:30:05+09:00');
-const verified = { validated: true, maxAgeMs: 10000, sessionCodes: ['0:0:20'] };
+const verified = { validated: true, maxAgeMs: 10000, sessionCodes: ['0'] };
 const good = () => ({ symbol: '005930', businessDate: '20260918', lastTradeTime: '103004',
   receivedAt: now.toISOString(), acmlVolume: 1500000, previousSameTimeAcmlVolume: 1000000,
   providedPreviousSameTimeRate: 99999, hourClassCode: '0', marketTreatmentClassCode: '0',
   newMarketOperationCode: '20', connectionState: 'CONNECTED', subscriptionState: 'SUBSCRIBED',
-  dataStatus: 'VALID', stale: false });
+  connectionGeneration: 1, currentConnectionGeneration: 1, dataStatus: 'VALID', stale: false });
 const evaluate = (changes = {}, extra = {}) => evaluateRealtimeVolume({ snapshot: { ...good(), ...changes },
   now, validation: verified, ...extra });
 const unknown = (result) => {
@@ -39,7 +39,6 @@ for (const [name, changes] of [
   ['disconnected', { connectionState: 'DISCONNECTED' }], ['reconnecting', { connectionState: 'RECONNECTING' }],
   ['pending subscription', { subscriptionState: 'PENDING' }], ['waiting for new data', { dataStatus: 'WAITING', receivedAt: null }],
   ['invalid data', { dataStatus: 'INVALID' }], ['unknown session', { hourClassCode: 'X' }],
-  ['unknown treatment', { marketTreatmentClassCode: 'X' }], ['unknown market operation', { newMarketOperationCode: 'X' }],
   ['old trade with fresh receipt', { lastTradeTime: '100000' }], ['old receipt', { receivedAt: '2026-09-18T01:00:00Z' }],
   ['future trade', { lastTradeTime: '103006' }], ['future receipt', { receivedAt: '2026-09-18T01:30:06Z' }],
   ['invalid time', { lastTradeTime: '106060' }]
@@ -289,10 +288,10 @@ test('extra field is preserved verbatim, never used for ratio, session or unlock
     const r=parseTrades(wire(schemaRecord(47,0,value)))[0];assert.equal(r.UNKNOWN_EXTRA_FIELD,value);
     const snapshot={...good(),...r};
     // Explicit synthetic session contract only, not a production setting.
-    const result=evaluateRealtimeVolume({snapshot,now,validation:{...verified,sessionCodes:['0::20']}});
+    const result=evaluateRealtimeVolume({snapshot,now,validation:{...verified,sessionCodes:['0']}});
     assert.equal(result.ratio,1.5);
     unknown(evaluateRealtimeVolume({snapshot,now}));
-    unknown(evaluateRealtimeVolume({snapshot,now,validation:verified})); // Empty session remains unverified.
+    assert.equal(evaluateRealtimeVolume({snapshot,now,validation:verified}).marketTreatmentStatus,'UNKNOWN');
   }
   assert.equal(REALTIME_VALIDATION.validated,false);
 });
@@ -427,4 +426,30 @@ test('stop leaves no cleanup listeners on an already closed socket', async () =>
   ws.readyState = 3; h.service.stop();
   assert.equal(ws.eventNames().length, 0); assert.equal(h.timers.size, 0);
   assert.equal(h.service.getSnapshot('005930'), null);
+});
+
+for (const value of [null, undefined, 0, 2]) test('generation mismatch '+value,()=>unknown(evaluate({connectionGeneration:value})));
+test('stale has explicit UNKNOWN reason',()=>{const r=evaluate({receivedAt:'2026-09-18T01:00:00Z'});unknown(r);assert.equal(r.reasonCode,'STALE_REALTIME_DATA');});
+for(const value of ['', 'X', '0']) test('treatment metadata is not evidence '+value,()=>{const r=evaluate({marketTreatmentClassCode:value});assert.equal(r.ratio,1.5);assert.equal(r.marketTreatmentStatus,'UNKNOWN');unknown(evaluateRealtimeVolume({snapshot:{...good(),marketTreatmentClassCode:value},now}));});
+test('generation changes on reconnect and old socket cannot restore data',async()=>{
+const h=harness();h.service.subscribe('005930');const first=await h.open();first.ack('005930');first.frame(wire(record()));
+const old=h.service.getSnapshot('005930');assert.equal(old.connectionGeneration,old.currentConnectionGeneration);
+first.emit('close');unknown(evaluateRealtimeVolume({snapshot:h.service.getSnapshot('005930'),now,validation:verified}));
+await h.advance(1000);const second=await h.open();second.ack('005930');const waiting=h.service.getSnapshot('005930');assert.equal(waiting.connectionGeneration,null);assert.ok(waiting.currentConnectionGeneration>old.connectionGeneration);
+unknown(evaluateRealtimeVolume({snapshot:{...old,currentConnectionGeneration:waiting.currentConnectionGeneration},now,validation:verified}));
+first.frame(wire(record()));assert.equal(h.service.getSnapshot('005930').acmlVolume,null);
+second.frame(wire(record({lastTradeTime:'103005'})));const fresh=h.service.getSnapshot('005930');assert.equal(fresh.connectionGeneration,fresh.currentConnectionGeneration);assert.equal(fresh.dataStatus,'VALID');h.service.stop();
+});
+test('same timestamp additional volume is valid',async()=>{const h=harness();h.service.subscribe('005930');const ws=await h.open();ws.ack('005930');ws.frame(wire(record()));ws.frame(wire(record({acmlVolume:1500001})));assert.equal(h.service.getSnapshot('005930').dataStatus,'VALID');h.service.stop();});
+
+test('receipt threshold boundary is inclusive and then UNKNOWN',()=>{
+ const boundary=new Date(now.getTime()-verified.maxAgeMs).toISOString();
+ assert.equal(evaluate({receivedAt:boundary}).ratio,1.5);
+ const r=evaluate({receivedAt:new Date(now.getTime()-verified.maxAgeMs-1).toISOString()});unknown(r);assert.equal(r.reasonCode,'STALE_REALTIME_DATA');
+});
+test('missing current generation cannot authorize a snapshot',()=>unknown(evaluate({currentConnectionGeneration:undefined})));
+test('production adapter repeatedly refuses raw data regardless of generation or REST ratio',async()=>{
+ let snapshot={...good(),connectionGeneration:1,currentConnectionGeneration:2};
+ const adapter=createRealtimeVolumeAdapter({getSnapshot:()=>snapshot},()=>now);
+ for(const g of [1,2]){snapshot={...snapshot,connectionGeneration:g};const r=await adapter.assess({symbol:'005930',historicalVolume:1,averageVolume20:1,validation:verified});unknown(r);assert.equal(r.reasonCode,'VALIDATION_LOCKED');}
 });

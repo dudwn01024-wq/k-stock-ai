@@ -151,11 +151,15 @@ function evaluateRealtimeVolume({ snapshot, now = new Date(), policy = 'advanced
   const received = typeof s.receivedAt === 'string' ? Date.parse(s.receivedAt) : NaN;
   const age = now.getTime() - received;
   const tradeAge = timestamp === null ? NaN : now.getTime() - timestamp;
-  const sessionCode = `${s.hourClassCode}:${s.marketTreatmentClassCode}:${s.newMarketOperationCode}`;
+  // Realtime fields are authoritative; REST reconstruction is never a correction source.
+  // Empty treatment and unknown trailing fields are metadata, not session evidence.
   let reasonCode = null;
   if (validation.validated !== true) reasonCode = 'VALIDATION_LOCKED';
   else if (s.connectionState !== 'CONNECTED') reasonCode = 'DISCONNECTED';
   else if (s.subscriptionState !== 'SUBSCRIBED') reasonCode = 'NOT_SUBSCRIBED';
+  else if (!Number.isSafeInteger(s.connectionGeneration) || s.connectionGeneration < 1 ||
+      s.connectionGeneration !== s.currentConnectionGeneration) reasonCode = 'CONNECTION_GENERATION_MISMATCH';
+  else if (s.hourClassCode !== '0') reasonCode = 'SESSION_UNVERIFIED';
   else if (tradingDate(s.businessDate) !== koreaClock(now).date || timestamp === null) reasonCode = 'DATE_OR_TIME_INVALID';
   else if (priceDate !== null && tradingDate(priceDate) !== s.businessDate) reasonCode = 'PRICE_DATE_MISMATCH';
   else if (volume === null || baseline === null) reasonCode = 'MISSING_VOLUME';
@@ -165,8 +169,8 @@ function evaluateRealtimeVolume({ snapshot, now = new Date(), policy = 'advanced
   else if (s.dataStatus !== 'VALID') reasonCode = 'INVALID_DATA';
   else if (s.stale !== false || !Number.isFinite(validation.maxAgeMs) || validation.maxAgeMs <= 0 ||
       !Number.isFinite(age) || age < 0 || age > validation.maxAgeMs ||
-      !Number.isFinite(tradeAge) || tradeAge < 0 || tradeAge > validation.maxAgeMs) reasonCode = 'STALE_OR_UNVERIFIED_AGE';
-  else if (koreaClock(now).weekend || !validation.sessionCodes?.includes(sessionCode)) reasonCode = 'SESSION_UNVERIFIED';
+      !Number.isFinite(tradeAge) || tradeAge < 0 || tradeAge > validation.maxAgeMs) reasonCode = 'STALE_REALTIME_DATA';
+  else if (koreaClock(now).weekend || !validation.sessionCodes?.includes(s.hourClassCode)) reasonCode = 'SESSION_UNVERIFIED';
   const result = reasonCode ? { status: 'UNKNOWN', passed: null, ratio: null }
     : classifyVolume(volume, baseline, policy);
   return { ...result, basis: 'PREVIOUS_TRADING_DAY_SAME_TIME', strategyVersion: 'B',
@@ -176,6 +180,12 @@ function evaluateRealtimeVolume({ snapshot, now = new Date(), policy = 'advanced
     sourceDate: tradingDate(s.businessDate), sourceTime: s.lastTradeTime ?? null,
     fetchedAt: s.receivedAt ?? null, evaluationTime: now.toISOString(), asOf: s.lastTradeTime ?? null,
     providedPreviousSameTimeRate: realtimeNumber(s.providedPreviousSameTimeRate),
+    connectionGeneration: s.connectionGeneration ?? null,
+    currentConnectionGeneration: s.currentConnectionGeneration ?? null,
+    receivedAgeMs: Number.isFinite(age) ? age : null,
+    tradeAgeMs: Number.isFinite(tradeAge) ? tradeAge : null,
+    marketTreatmentClassCode: s.marketTreatmentClassCode ?? null,
+    marketTreatmentStatus: 'UNKNOWN',
     validationStatus: validation.validated === true ? 'VALIDATED' : 'UNVERIFIED',
     completionStatus: 'INTRADAY_SNAPSHOT', completionEvidence: null,
     session: reasonCode ? 'UNKNOWN' : 'REGULAR', reasonCode,

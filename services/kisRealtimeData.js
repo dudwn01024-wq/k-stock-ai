@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const { tradingDate, koreaClock, realtimeNumber, tradeTimestamp } = require('./volumeEvaluation');
+const { tradingDate, koreaClock, realtimeNumber, tradeTimestamp, REALTIME_VALIDATION } = require('./volumeEvaluation');
 
 // Official KRX H0STCNT0 schema (46 fields), not account execution notices:
 // https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/ccnl_krx/ccnl_krx.py
@@ -62,12 +62,13 @@ async function requestApproval({ signal } = {}) {
 
 function createRealtimeService({ approval = requestApproval,
   socketFactory = (url) => new WebSocket(url, { handshakeTimeout: 8000, maxPayload: 1024 * 1024, followRedirects: false }),
-  clock = () => new Date(), maxSubscriptions = 2, freshnessMs = null,
+  clock = () => new Date(), maxSubscriptions = 2, freshnessMs = REALTIME_VALIDATION.maxAgeMs,
   retryBaseMs = 1000, maxRetries = 6, ackTimeoutMs = 10000, heartbeatTimeoutMs = 60000,
   schedule = setTimeout, cancel = clearTimeout } = {}) {
   if (!Number.isInteger(maxSubscriptions) || maxSubscriptions < 1 || maxSubscriptions > MAX_SUBSCRIPTIONS) throw Error('INVALID_SUBSCRIPTION_LIMIT');
   const desired = new Set(), states = new Map(), highWater = new Map(), subscriptionRetries = new Map();
   let socket = null, controller = null, connectionState = 'DISCONNECTED';
+  let connectionGeneration = 0;
   let generation = 0, stopped = false, connecting = false, retries = 0;
   let retryTimer, sendTimer, watchTimer, connectionTimer, lastMessageAt = 0, lastError = null;
   let releaseConnection = () => {};
@@ -86,7 +87,7 @@ function createRealtimeService({ approval = requestApproval,
 
   function invalidate() {
     for (const symbol of desired) {
-      states.set(symbol, { symbol, businessDate: null, lastTradeTime: null, receivedAt: null,
+      states.set(symbol, { symbol, connectionGeneration: null, businessDate: null, lastTradeTime: null, receivedAt: null,
         acmlVolume: null, previousSameTimeAcmlVolume: null, providedPreviousSameTimeRate: null,
         hourClassCode: null, marketTreatmentClassCode: null, newMarketOperationCode: null,
         subscriptionState: 'PENDING', dataStatus: 'WAITING', validationStatus: 'UNVERIFIED' });
@@ -117,8 +118,10 @@ function createRealtimeService({ approval = requestApproval,
     const age = state.receivedAt === null ? NaN : now - Date.parse(state.receivedAt);
     const timestamp = tradeTimestamp(state.businessDate, state.lastTradeTime);
     const tradeAge = timestamp === null ? NaN : now - timestamp;
-    return { ...state, connectionState,
-      stale: connectionState !== 'CONNECTED' || state.subscriptionState !== 'SUBSCRIBED' ||
+    return { ...state, connectionState, currentConnectionGeneration: connectionGeneration,
+      receivedAgeMs: Number.isFinite(age) ? age : null,
+      tradeAgeMs: Number.isFinite(tradeAge) ? tradeAge : null,
+      stale: state.connectionGeneration !== connectionGeneration || connectionState !== 'CONNECTED' || state.subscriptionState !== 'SUBSCRIBED' ||
         !Number.isFinite(freshnessMs) || freshnessMs <= 0 || !Number.isFinite(age) || age < 0 || age > freshnessMs ||
         !Number.isFinite(tradeAge) || tradeAge < 0 || tradeAge > freshnessMs };
   }
@@ -133,6 +136,7 @@ function createRealtimeService({ approval = requestApproval,
       const credential = await approval({ signal: controller.signal });
       if (stopped || epoch !== generation) return;
       const ws = socketFactory(credential.url); socket = ws;
+      const receivedGeneration = ++connectionGeneration;
       let approvalKey = credential.key;
       credential.key = null;
       releaseConnection = () => {
@@ -209,7 +213,7 @@ function createRealtimeService({ approval = requestApproval,
               !(previous && previous.businessDate === record.businessDate &&
                 (timestamp < previous.timestamp || record.acmlVolume < previous.acmlVolume ||
                   record.previousSameTimeAcmlVolume < previous.previousSameTimeAcmlVolume));
-            states.set(record.symbol, { ...state, ...record, receivedAt: now.toISOString(),
+            states.set(record.symbol, { ...state, ...record, connectionGeneration: receivedGeneration, receivedAt: now.toISOString(),
               dataStatus: valid ? 'VALID' : 'INVALID', validationStatus: 'UNVERIFIED' });
             if (valid) { highWater.set(record.symbol, { ...record, timestamp }); noteRecoveryEvidence(); }
           }
@@ -244,7 +248,7 @@ function createRealtimeService({ approval = requestApproval,
     desired.add(symbol);
     resetRecovery();
     // Add only the new state; never discard existing symbols' live observations.
-    states.set(symbol, { symbol, businessDate: null, lastTradeTime: null, receivedAt: null,
+    states.set(symbol, { symbol, connectionGeneration: null, businessDate: null, lastTradeTime: null, receivedAt: null,
       acmlVolume: null, previousSameTimeAcmlVolume: null, providedPreviousSameTimeRate: null,
       hourClassCode: null, marketTreatmentClassCode: null, newMarketOperationCode: null,
       subscriptionState: 'PENDING', dataStatus: 'WAITING', validationStatus: 'UNVERIFIED' });
@@ -261,7 +265,7 @@ function createRealtimeService({ approval = requestApproval,
     desired.clear(); states.clear(); highWater.clear(); subscriptionRetries.clear();
   }
   return { subscribe, stop, getSnapshot: snapshot,
-    getHealth: () => ({ connectionState, lastError, subscriptions: desired.size, maxSubscriptions, retries }) };
+    getHealth: () => ({ connectionState, connectionGeneration, lastError, subscriptions: desired.size, maxSubscriptions, retries }) };
 }
 
 function ignoreSocketError() {}
