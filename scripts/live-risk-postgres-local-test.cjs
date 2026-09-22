@@ -6,7 +6,7 @@ const {buildState,validState,testId}=require('../services/liveRiskLedgerState');
 const STAGES=['connection-check','migration','persistence-canary','recovery-canary'];
 const KEYS=['host','port','database','user','ssl','connectionTimeoutMillis','enabled','migrationEnabled','runId'];
 const MIGRATION=require('node:path').join(__dirname,'../migrations/live_risk_ledger_test_001.sql');
-const IDENTITY_SQL="SELECT current_database() AS database, current_user AS username, inet_server_addr()::text AS server_address, inet_client_addr()::text AS client_address, current_setting('server_version') AS version";
+const IDENTITY_SQL="SELECT current_database() AS database, current_user AS username, host(inet_server_addr()) AS server_address, host(inet_client_addr()) AS client_address, current_setting('server_version') AS version";
 const result=(ok,errorCode=null,extra={})=>({ok,errorCode,...extra,riskReady:false,ledgerInputReady:false});
 const fail=code=>{throw new Error(code);};
 const SAFE_CODES=new Set(['POSTGRES_DISABLED','LOCAL_TEST_CONFIG_INVALID','MIGRATION_APPROVAL_REQUIRED','STAGE_INVALID',

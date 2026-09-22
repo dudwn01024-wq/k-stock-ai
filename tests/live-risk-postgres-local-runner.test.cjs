@@ -25,7 +25,10 @@ function fake({shared={state:null,table:false},fault,identity,commitAckLost=fals
       return {on(event,listener){if(event==='error')calls.clientErrors=listener;},release(){calls.release++;},async query(sql,params){
         calls.sql.push(sql);
         if(fault&&sql.startsWith(fault))throw Error('DUMMY_SECRET');
-        if(sql.startsWith('SELECT current_database'))return {rows:[identity||{database:'kstock_live_test',username:'kstock_live_test',server_address:'127.0.0.1',client_address:'127.0.0.1',version:'18.6'}]};
+        if(sql.startsWith('SELECT current_database'))return {rows:[identity||{
+          database:'kstock_live_test',username:'kstock_live_test',
+          server_address:sql.includes('host(inet_server_addr())')?'127.0.0.1':'127.0.0.1/32',
+          client_address:sql.includes('host(inet_client_addr())')?'127.0.0.1':'127.0.0.1/32',version:'18.6'}]};
         if(sql==='BEGIN'){pool.pending=structuredClone(shared);return {rows:[]};}
         if(sql==='ROLLBACK'){pool.pending=null;return {rows:[]};}
         if(sql==='COMMIT'){
@@ -88,6 +91,25 @@ test('connection check does SELECT only and always closes',async()=>{
 test('server-reported identity mismatch blocks all writes',async()=>{
   const f=fake({identity:{database:'postgres'}}),r=await execute('migration',f,{migrationEnabled:'true'});
   assert.equal(r.errorCode,'LOCAL_TEST_IDENTITY_MISMATCH');assert.equal(f.calls.sql.length,1);assert.equal(f.calls.end,1);
+});
+test('host extraction avoids inet text mask without loosening identity comparisons',async()=>{
+  const f=fake(),r=await execute('connection-check',f);
+  assert.equal(r.ok,true);assert.equal(r.identityVerified,true);
+  assert.match(f.calls.sql[0],/host\(inet_server_addr\(\)\) AS server_address/);
+  assert.match(f.calls.sql[0],/host\(inet_client_addr\(\)\) AS client_address/);
+  assert.doesNotMatch(f.calls.sql[0],/inet_(?:server|client)_addr\(\)::text/);
+  assert.equal(f.calls.sql.length,1);assert.equal(f.calls.end,1);
+});
+for(const [field,value] of [
+  ['database','postgres'],['username','postgres'],
+  ...['server_address','client_address'].flatMap(field=>
+    ['192.0.2.1','0.0.0.0','localhost','127.0.0.2','::1','127.0.0.1/32',null].map(value=>[field,value]))
+])test(`strict identity rejects ${field}=${value}`,async()=>{
+  const identity={database:'kstock_live_test',username:'kstock_live_test',server_address:'127.0.0.1',client_address:'127.0.0.1',[field]:value};
+  const f=fake({identity}),r=await execute('connection-check',f);
+  assert.equal(r.errorCode,'LOCAL_TEST_IDENTITY_MISMATCH');assert.equal(r.riskReady,false);assert.equal(r.ledgerInputReady,false);
+  assert.equal(f.calls.sql.length,1);assert.match(f.calls.sql[0],/^SELECT /);assert.equal(f.calls.end,1);
+  assert.doesNotMatch(JSON.stringify(r),/DUMMY_SECRET|postgresql:/);
 });
 test('connection failure has zero retry and sanitized result',async()=>{
   const f=fake({fault:'connect'}),r=await execute('connection-check',f);
