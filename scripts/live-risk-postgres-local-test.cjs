@@ -3,7 +3,7 @@ const {isDeepStrictEqual}=require('node:util');
 const {createLiveRiskLedgerPostgresClient,positiveTimeout}=require('../services/liveRiskLedgerPostgresClient');
 const {createLiveRiskLedgerPostgresRepository}=require('../services/liveRiskLedgerPostgresRepository');
 const {buildState,validState,testId}=require('../services/liveRiskLedgerState');
-const STAGES=['connection-check','migration','persistence-canary','recovery-canary'];
+const STAGES=['connection-check','migration','persistence-canary','recovery-canary','concurrency-canary'];
 const KEYS=['host','port','database','user','ssl','connectionTimeoutMillis','enabled','migrationEnabled','runId'];
 const MIGRATION=require('node:path').join(__dirname,'../migrations/live_risk_ledger_test_001.sql');
 const IDENTITY_SQL="SELECT current_database() AS database, current_user AS username, host(inet_server_addr()) AS server_address, host(inet_client_addr()) AS client_address, current_setting('server_version') AS version";
@@ -12,6 +12,7 @@ const fail=code=>{throw new Error(code);};
 const SAFE_CODES=new Set(['POSTGRES_DISABLED','LOCAL_TEST_CONFIG_INVALID','MIGRATION_APPROVAL_REQUIRED','STAGE_INVALID',
   'LOCAL_TEST_IDENTITY_MISMATCH','MIGRATION_ALREADY_PRESENT','MIGRATION_FAILED','COMMIT_OUTCOME_UNKNOWN',
   'STATE_ALREADY_PRESENT','STATE_VERSION_CONFLICT','RECOVERY_FAILED','CANARY_STATE_INVALID','EVENT_ID_UNVERIFIED',
+  'STALE_WRITE_SUCCEEDED','CONCURRENCY_WRITE_BLOCKED','CONCURRENCY_STATE_CHANGED','CONCURRENCY_CHECK_FAILED',
   'POSTGRES_CONNECTION_FAILED','POOL_CREATION_FAILED','POOL_CLOSE_FAILED','CONNECTION_NOT_AVAILABLE','LOCAL_DB_QUERY_FAILED']);
 
 function validate(stage,config){
@@ -78,6 +79,29 @@ async function runLocalTest({stage,config,password,canaryState}={}, {Pool}={}){
         const saved=await repository.saveState(expected,0);
         if(!saved.ok)fail(SAFE_CODES.has(saved.errorCode)?saved.errorCode:'RECOVERY_FAILED');
         outcome=result(true,null,{stage,stateVersion:expected.stateVersion});
+      }else if(stage==='concurrency-canary'){
+        if(!isDeepStrictEqual(loaded.state,expected))fail('RECOVERY_FAILED');
+        // A distinct valid TEST payload avoids the repository's idempotent-duplicate path.
+        const proposed={...structuredClone(loaded.state),lastPersistedAt:'2026-01-02T01:00:01Z'};
+        if(!validState(proposed)||isDeepStrictEqual(proposed,loaded.state))fail('CANARY_STATE_INVALID');
+        let writeBlocked=false;
+        const guardedClient={async query(sql,values){
+          // A version conflict must occur before any DML or COMMIT. Never permit a successful write.
+          if(sql!=='BEGIN'&&sql!=='ROLLBACK'&&!sql.startsWith('SELECT schema_version')){
+            writeBlocked=true;throw Error('CONCURRENCY_WRITE_BLOCKED');
+          }
+          return client.query(sql,values);
+        }};
+        const challenger=createLiveRiskLedgerPostgresRepository({client:guardedClient,accountContextId:config.runId,
+          businessDate:expected.businessDate,businessDateVerified:true,provenance:'TEST_DB_CLIENT'});
+        const attempt=await challenger.saveState(proposed,loaded.state.stateVersion-1);
+        if(attempt.ok)fail('STALE_WRITE_SUCCEEDED');
+        if(writeBlocked)fail('CONCURRENCY_WRITE_BLOCKED');
+        if(attempt.errorCode!=='STATE_VERSION_CONFLICT')fail('CONCURRENCY_CHECK_FAILED');
+        const after=await repository.loadState();
+        if(!after.ok||!isDeepStrictEqual(after.state,loaded.state))fail('CONCURRENCY_STATE_CHANGED');
+        outcome=result(true,null,{stage,priorRecoveryVerified:true,staleWriteAttempts:1,
+          conflictCode:'STATE_VERSION_CONFLICT',staleWriteSucceeded:false,stateUnchanged:true});
       }else{
         if(!isDeepStrictEqual(loaded.state,expected))fail('RECOVERY_FAILED');
         outcome=result(true,null,{stage,recovered:true,stateVersion:expected.stateVersion});

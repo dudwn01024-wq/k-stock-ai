@@ -15,7 +15,7 @@ const config={host:'127.0.0.1',port:5432,database:'kstock_live_test',user:'kstoc
   connectionTimeoutMillis:1234,enabled:'true',runId:'TEST_LOCAL_CANARY'};
 const clientConfig={enabled:'true',ssl:false,connectionTimeoutMillis:1234,
   connectionString:'postgresql://kstock_live_test:DUMMY_SECRET@127.0.0.1:5432/kstock_live_test'};
-function fake({shared={state:null,table:false},fault,identity,commitAckLost=false,endFailure=false}={}){
+function fake({shared={state:null,table:false},fault,identity,commitAckLost=false,endFailure=false,onRollback,onLockedRead}={}){
   const calls={pool:0,connect:0,end:0,release:0,sql:[],configs:[],clientErrors:null};
   class Pool extends EventEmitter {
     constructor(options){super();calls.pool++;calls.configs.push(options);this.pending=null;}
@@ -30,7 +30,7 @@ function fake({shared={state:null,table:false},fault,identity,commitAckLost=fals
           server_address:sql.includes('host(inet_server_addr())')?'127.0.0.1':'127.0.0.1/32',
           client_address:sql.includes('host(inet_client_addr())')?'127.0.0.1':'127.0.0.1/32',version:'18.6'}]};
         if(sql==='BEGIN'){pool.pending=structuredClone(shared);return {rows:[]};}
-        if(sql==='ROLLBACK'){pool.pending=null;return {rows:[]};}
+        if(sql==='ROLLBACK'){pool.pending=null;onRollback?.(shared);return {rows:[]};}
         if(sql==='COMMIT'){
           if(pool.pending)Object.assign(shared,pool.pending);pool.pending=null;
           if(commitAckLost)throw Error('DUMMY_SECRET');return {rows:[]};
@@ -39,6 +39,7 @@ function fake({shared={state:null,table:false},fault,identity,commitAckLost=fals
         if(sql.includes("to_regclass('public.live_risk_ledger_state')"))return {rows:[{present:storage.table}]};
         if(sql.includes('CREATE TABLE live_risk_ledger_state')){storage.table=true;return {rows:[]};}
         if(sql.startsWith('SELECT schema_version')){
+          if(sql.endsWith('FOR UPDATE'))onLockedRead?.(storage);
           if(!storage.table)throw Error('DUMMY_SECRET');
           const s=storage.state;
           return {rows:s?[{schema_version:s.schemaVersion,state_version:String(s.stateVersion),account_context_id:s.accountContextId,
@@ -193,4 +194,42 @@ test('new modules have no env/logging/KIS/PAPER integrations',()=>{
     const source=fs.readFileSync(require.resolve(file),'utf8');
     assert.doesNotMatch(source,/process\.env|dotenv|console\.|require\(['"][^'"]*(?:riskManager|paperTrading|kisAuth|kisMarketData)/);
   }
+});
+
+test('concurrency canary detects stale version once and preserves state without DML',async()=>{
+  const original=canary(config.runId),f=fake({shared:{table:true,state:structuredClone(original)}});
+  const r=await execute('concurrency-canary',f);
+  assert.equal(r.ok,true);assert.equal(r.conflictCode,'STATE_VERSION_CONFLICT');assert.equal(r.staleWriteAttempts,1);
+  assert.equal(r.staleWriteSucceeded,false);assert.equal(r.stateUnchanged,true);
+  assert.deepEqual(f.shared.state,original);assert.equal(f.calls.sql.filter(s=>s==='BEGIN').length,1);
+  assert.equal(f.calls.sql.filter(s=>s==='ROLLBACK').length,1);
+  assert.equal(f.calls.sql.some(s=>/^(INSERT|UPDATE|DELETE|CREATE|COMMIT)/.test(s)),false);
+  assert.equal(f.calls.connect,1);assert.equal(f.calls.end,1);assert.equal(f.calls.release,1);
+  assert.equal(r.riskReady,false);assert.equal(r.ledgerInputReady,false);
+  assert.doesNotMatch(JSON.stringify(r),/DUMMY_SECRET|lastPersistedAt|events|postgresql:/);
+  const recovery=await execute('recovery-canary',fake({shared:f.shared}));assert.equal(recovery.recovered,true);
+});
+for(const state of [null,{invalid:true}])test('concurrency requires recovered original state before attempting write',async()=>{
+  const f=fake({shared:{table:true,state}}),r=await execute('concurrency-canary',f);
+  assert.equal(r.errorCode,'RECOVERY_FAILED');assert.equal(f.calls.sql.includes('BEGIN'),false);assert.equal(f.calls.end,1);
+});
+test('concurrency blocks unexpected DML before reaching database',async()=>{
+  const f=fake({shared:{table:true,state:canary(config.runId)},onLockedRead:storage=>{storage.state=null;}});
+  const r=await execute('concurrency-canary',f);
+  assert.equal(r.errorCode,'CONCURRENCY_WRITE_BLOCKED');assert.equal(f.calls.sql.some(s=>s.startsWith('INSERT')),false);
+  assert.equal(f.calls.sql.includes('COMMIT'),false);assert.equal(f.calls.sql.includes('ROLLBACK'),true);
+  assert.deepEqual(f.shared.state,canary(config.runId));
+});
+test('concurrency fails when persisted payload changes after rollback',async()=>{
+  const f=fake({shared:{table:true,state:canary(config.runId)},onRollback:storage=>{storage.state.lastPersistedAt='2026-01-02T01:00:02Z';}});
+  const r=await execute('concurrency-canary',f);assert.equal(r.errorCode,'CONCURRENCY_STATE_CHANGED');assert.equal(f.calls.end,1);
+});
+for(const fault of ['BEGIN','ROLLBACK'])test(`concurrency ${fault} failure stops without retry`,async()=>{
+  const f=fake({shared:{table:true,state:canary(config.runId)},fault}),r=await execute('concurrency-canary',f);
+  assert.equal(r.errorCode,'CONCURRENCY_CHECK_FAILED');assert.equal(f.calls.sql.filter(s=>s==='BEGIN').length,1);
+  assert.equal(f.calls.end,1);
+});
+test('concurrency rejects network provenance before pool creation',async()=>{
+  const f=fake(),r=await execute('concurrency-canary',f,{}, {canaryState:{provenance:'KIS_NETWORK'}});
+  assert.equal(r.errorCode,'EVENT_ID_UNVERIFIED');assert.equal(f.calls.pool,0);
 });
