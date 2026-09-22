@@ -1,5 +1,6 @@
 'use strict';
 const {calculateLiveRiskLedger}=require('./liveRiskLedger');
+const {isDeepStrictEqual}=require('node:util');
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 const exact=(o,keys)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===keys.length&&keys.every(k=>Object.hasOwn(o,k));
 const testId=v=>typeof v==='string'&&/^TEST_[A-Za-z0-9_-]{1,60}$/.test(v)&&!/[\r\n]/.test(v);
@@ -23,7 +24,7 @@ function buildState({accountContextId,businessDate,events,initialConsecutiveLoss
 function validState(s){
   try{
     if(!exact(s,['namespace','schemaVersion','stateVersion','mode','environment','accountContextId','businessDate','provenance','initialConsecutiveLosses','events','processedEventIds','ledger','recoveryMetadata','lastPersistedAt']))return false;
-    const expected=buildState(s);return expected!==null&&JSON.stringify(s)===JSON.stringify(expected);
+    const expected=buildState(s);return expected!==null&&isDeepStrictEqual(s,expected);
   }catch{return false;}
 }
 module.exports={buildState,validState,eventValid,testId,time};
