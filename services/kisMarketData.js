@@ -1,4 +1,8 @@
 const { dataFreshness, sourceDate } = require('./dataFreshness');
+// Per-reader transport/cache scope; the default server reader keeps its existing behavior.
+function createKisMarketData({environment=process.env,fetchImpl=(...args)=>globalThis.fetch(...args),waitImpl}={}, tokenState=null) {
+const fetch=fetchImpl;
+
 // ========================================
 // KIS MARKET DATA SERVICE
 // 한국투자증권 실제 OHLCV 전용
@@ -25,16 +29,16 @@ const { dataFreshness, sourceDate } = require('./dataFreshness');
 // ========================================
 
 const KIS_BASE_URL =
-  process.env.KIS_BASE_URL ||
+  environment.KIS_BASE_URL ||
   'https://openapi.koreainvestment.com:9443';
 
 
 const KIS_APP_KEY =
-  process.env.KIS_APP_KEY;
+  environment.KIS_APP_KEY;
 
 
 const KIS_APP_SECRET =
-  process.env.KIS_APP_SECRET;
+  environment.KIS_APP_SECRET;
 
 
 // KIS 요청 사이 최소 대기시간
@@ -42,14 +46,14 @@ const KIS_APP_SECRET =
 const KIS_REQUEST_INTERVAL_MS =
   Number.isFinite(
     Number(
-      process.env
+      environment
         .KIS_REQUEST_INTERVAL_MS
     )
   )
     ? Math.max(
         300,
         Number(
-          process.env
+          environment
             .KIS_REQUEST_INTERVAL_MS
         )
       )
@@ -62,14 +66,14 @@ const KIS_REQUEST_INTERVAL_MS =
 const KIS_OHLCV_CACHE_TTL_MS =
   Number.isFinite(
     Number(
-      process.env
+      environment
         .KIS_OHLCV_CACHE_TTL_MS
     )
   )
     ? Math.max(
         5000,
         Number(
-          process.env
+          environment
             .KIS_OHLCV_CACHE_TTL_MS
         )
       )
@@ -81,10 +85,10 @@ const KIS_OHLCV_CACHE_TTL_MS =
 // ========================================
 
 let cachedAccessToken =
-  null;
+  tokenState?.accessToken ?? null;
 
 let cachedTokenExpiresAt =
-  0;
+  tokenState?.expiresAt ?? 0;
 
 let tokenRequestPromise =
   null;
@@ -118,7 +122,7 @@ const pendingOHLCVRequests =
 // BASIC HELPERS
 // ========================================
 
-const wait = (
+const wait = waitImpl ?? ((
   ms
 ) =>
   new Promise(
@@ -127,7 +131,7 @@ const wait = (
         resolve,
         ms
       )
-  );
+  ));
 
 
 const validateSymbol = (
@@ -174,6 +178,7 @@ const cloneRows = (rows) => {
   if (rows?.latestSourceIntegrity) copy.latestSourceIntegrity = {
     ...rows.latestSourceIntegrity, missingFields: [...rows.latestSourceIntegrity.missingFields]
   };
+  if (rows?.observationDaily) copy.observationDaily = JSON.parse(JSON.stringify(rows.observationDaily));
   return copy;
 };
 
@@ -621,7 +626,8 @@ const fetchDailyOHLCVChunk =
   async ({
     symbol,
     startDate,
-    endDate
+    endDate,
+    observation = false
   }) => {
 
     if (
@@ -635,8 +641,7 @@ const fetchDailyOHLCVChunk =
     }
 
 
-    const maxAttempts =
-      4;
+    const maxAttempts = observation ? 1 : 4;
 
 
     for (
@@ -673,6 +678,9 @@ const fetchDailyOHLCVChunk =
         const normalized = rows
           .map(
             (row) => ({
+              ...(observation ? {adjustmentFlag: ['Y','N'].includes(row.mod_yn) ? row.mod_yn : null,
+                splitCode: /^\d{1,3}$/.test(String(row.flng_cls_code??'')) ? String(row.flng_cls_code) : null,
+                splitRate: parseNumber(row.prtt_rate)} : {}),
               dataMetadata: dataFreshness({ source: 'KIS', date: row.stck_bsop_date, receivedAt }),
               date:
                 sourceDate(row.stck_bsop_date)?.replaceAll('-', '') ?? null,
@@ -711,6 +719,7 @@ const fetchDailyOHLCVChunk =
                 'KIS_OPEN_API'
             })
           );
+        if (observation) return normalized;
         const requiredFields = ['open', 'high', 'low', 'close', 'volume'];
         const datesVerified = normalized.length > 0 && normalized.every(row => row.date) &&
           new Set(normalized.map(row => row.date)).size === normalized.length;
@@ -809,7 +818,8 @@ const loadKisDailyOHLCV =
     {
       startDate,
       endDate,
-      maxBars
+      maxBars,
+      observationTargetDate
     }
   ) => {
 
@@ -817,6 +827,9 @@ const loadKisDailyOHLCV =
       new Map();
 
     let latestSourceIntegrity = null;
+    const observation = observationTargetDate !== undefined;
+    const pages = [];
+    const daily = observation ? require('./observationDaily') : null;
 
 
     let currentEndDate =
@@ -832,8 +845,7 @@ const loadKisDailyOHLCV =
         startDate &&
       allRows.size <
         maxBars &&
-      safetyCount <
-        10
+      safetyCount < (observation ? 2 : 10)
     ) {
       safetyCount +=
         1;
@@ -843,9 +855,23 @@ const loadKisDailyOHLCV =
         await fetchDailyOHLCVChunk({
           symbol,
           startDate,
-          endDate:
-            currentEndDate
+          endDate: currentEndDate,
+          observation
         });
+
+      if (observation) {
+        pages.push({startDate,endDate:currentEndDate,rows});
+        const selection=daily.selectDailyRows(pages,observationTargetDate);
+        if(selection.conflictDates.length)break;
+        // Only valid in-range dates drive pagination, never a future/invalid row.
+        const valid=rows.filter(r=>daily.validRow(r)&&r.date>=startDate&&r.date<=currentEndDate);
+        if(!valid.length||selection.selectedCount>=130)break;
+        const oldest=valid.map(r=>r.date).sort()[0];
+        const next=shiftDate(oldest,-1);
+        if(next>=currentEndDate)break;
+        currentEndDate=next;
+        continue;
+      }
 
       // The first request covers the latest source date. Later pages are historical.
       if (latestSourceIntegrity === null) latestSourceIntegrity = rows.latestSourceIntegrity;
@@ -902,6 +928,14 @@ const loadKisDailyOHLCV =
     }
 
 
+    if(observation) {
+      const selection=daily.selectDailyRows(pages,observationTargetDate);
+      const result=selection.calculationRows.map(r=>({...r}));
+      result.observationDaily=selection;
+      result.latestSourceIntegrity={sourceBusinessDate:selection.targetPresent?observationTargetDate:null,
+        complete:selection.targetPresent&&!selection.conflictDates.length,missingFields:selection.issueCodes};
+      return result;
+    }
     const result = [
       ...allRows.values()
     ]
@@ -946,6 +980,10 @@ const fetchKisDailyOHLCV =
     }
 
 
+    const observationTargetDate=options.observationTargetDate;
+    if(observationTargetDate!==undefined&&(!require('./observationDaily').isTargetDate(observationTargetDate)||
+      options.endDate!==observationTargetDate.replaceAll('-','')))throw Error('INVALID_TARGET_DATE');
+
     const endDate =
       options.endDate ||
       getKoreaToday();
@@ -980,7 +1018,7 @@ const fetchKisDailyOHLCV =
         symbol,
         startDate,
         endDate,
-        maxBars
+        maxBars, 'J', 'D', '0', observationTargetDate ?? 'DEFAULT'
       ].join(':');
 
 
@@ -1042,7 +1080,8 @@ const fetchKisDailyOHLCV =
         {
           startDate,
           endDate,
-          maxBars
+          maxBars,
+          observationTargetDate
         }
       );
 
@@ -1089,6 +1128,14 @@ const fetchKisDailyOHLCV =
 // EXPORT
 // ========================================
 
-module.exports = {
-  fetchKisDailyOHLCV
+return {fetchKisDailyOHLCV,
+  // Reuse a cached token, never another reader's pending unbudgeted request or OHLCV cache.
+  forkWithTransport(fetchImpl, {waitImpl}={}) {
+    if(typeof fetchImpl!=='function')throw Error('TRANSPORT_REQUIRED');
+    return createKisMarketData({fetchImpl,waitImpl,environment:{
+      KIS_APP_KEY,KIS_APP_SECRET,KIS_BASE_URL,KIS_REQUEST_INTERVAL_MS,KIS_OHLCV_CACHE_TTL_MS
+    }},{accessToken:cachedAccessToken,expiresAt:cachedTokenExpiresAt});
+  }
 };
+}
+module.exports = {...createKisMarketData(),createKisMarketData};

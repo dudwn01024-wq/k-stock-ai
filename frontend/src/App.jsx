@@ -1,4 +1,8 @@
 import PaperPanel from './PaperPanel.jsx';
+import PaperAccess from './PaperAccess.jsx';
+import ObservationPanel from './ObservationPanel.jsx';
+import CandidateOverview from './CandidateOverview.jsx';
+import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -12,7 +16,6 @@ import {
   Info,
   CheckCircle,
   AlertTriangle,
-  Server,
   ShieldCheck,
   Clock,
   Target,
@@ -30,7 +33,8 @@ import {
   ResponsiveContainer
 } from 'recharts';
 
-const API_BASE_URL = 'https://k-stock-ai.onrender.com/api';
+const API_BASE_URL = typeof window !== 'undefined' && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
+  ? '/api' : 'https://k-stock-ai.onrender.com/api';
 
 const POPULAR_STOCKS = [
   { name: '삼성전자', code: '005930' },
@@ -317,7 +321,7 @@ recentLow20:
 
     dataPoints:
       payload?.dataPoints ??
-      0,
+      null,
 
     // 새 고급 분석 데이터
     rsi14:
@@ -459,6 +463,13 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [chartTimeframe, setChartTimeframe] = useState('1M');
   const [activeTab, setActiveTab] = useState('detail');
+  const [showDetail, setShowDetail] = useState(false);
+
+  useEffect(() => {
+    if (showDetail && !loading && activeTab === 'detail') {
+      document.getElementById('stock-detail')?.scrollIntoView({ block: 'start' });
+    }
+  }, [showDetail, loading, activeTab]);
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
 
@@ -540,7 +551,7 @@ export default function App() {
       universeSize:
         result?.universeSize ??
         result?.scannedCount ??
-        0,
+        null,
 
       recommendationCount:
         result?.recommendationCount ??
@@ -626,6 +637,8 @@ export default function App() {
       }
 
       await loadRealStockData(targetSymbol, targetName, chartTimeframe);
+      setShowDetail(true);
+      setActiveTab('detail');
     } catch (error) {
       console.error(error);
       setErrorMsg(error?.message || '종목을 찾을 수 없습니다.');
@@ -634,6 +647,7 @@ export default function App() {
   };
 
   const handlePopularStock = (stock) => {
+    setShowDetail(true);
     setActiveTab('detail');
     setSearchQuery(stock.name);
     loadRealStockData(stock.code, stock.name, chartTimeframe);
@@ -694,9 +708,9 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950">
-      <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('detail')}>
+    <div className="public-home min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950">
+      <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
             <TrendingUp className="w-6 h-6 text-slate-950 stroke-[2.5]" />
           </div>
@@ -705,18 +719,17 @@ export default function App() {
               <h1 className="text-xl font-bold tracking-tight text-white font-mono">
                 K-Stock <span className="text-emerald-400">AI</span>
               </h1>
-              <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
-                Real Data Only
-              </span>
             </div>
-            <p className="text-xs text-slate-400">실제 현재가 · 거래대금 · 수급 · 차트 · 뉴스 연동</p>
+            <p className="text-xs text-slate-400">국내주식 데이터와 분석을 한곳에서</p>
           </div>
         </div>
 
-        <div className="flex-1 max-w-xl min-w-[280px]">
+        <div className="home-search">
+          <label htmlFor="stock-search">어떤 종목을 찾으시나요?</label>
           <form onSubmit={handleSearch} className="relative flex items-center">
             <Search className="absolute left-3.5 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
+              id="stock-search"
               type="text"
               className="w-full bg-slate-950/80 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-slate-100 placeholder-slate-500 rounded-xl pl-10 pr-24 py-2 text-sm transition-all outline-none"
               placeholder="종목명 또는 6자리 종목코드"
@@ -764,13 +777,15 @@ export default function App() {
         <div className="flex items-center gap-2">
           <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
           <span>
-            <strong>가짜 데이터 금지:</strong> 회사명 또는 6자리 종목코드로 검색하여 실제 데이터를 불러옵니다.
+            분석 참고용 정보입니다. 후보 선정은 매수 허가가 아니며, 데이터 부족·지연 시 판단을 보류하세요.
           </span>
         </div>
       </div>
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-        {loading && (
+        {activeTab !== 'paper' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
+          error={recommendationError} onSelect={handlePopularStock} onRefresh={loadRecommendations} />}
+        {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
             <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mx-auto" />
             <p className="text-sm text-slate-300">실제 데이터를 불러오는 중입니다...</p>
@@ -787,7 +802,7 @@ export default function App() {
 
         <div className="flex border-b border-slate-800 gap-6 text-sm font-medium text-slate-400 overflow-x-auto">
           <button
-            onClick={() => setActiveTab('detail')}
+            onClick={() => { setShowDetail(true); setActiveTab('detail'); }}
             className={`pb-3 border-b-2 shrink-0 ${
               activeTab === 'detail' ? 'border-emerald-400 text-emerald-400' : 'border-transparent'
             }`}
@@ -802,22 +817,19 @@ export default function App() {
             }`}
           >
             <Newspaper className="w-4 h-4 inline mr-2" />
-            최신 뉴스 ({newsList.length})
+            {activeName} 뉴스 ({newsList.length})
           </button>
-          <button
-            onClick={() => setActiveTab('backend')}
-            className={`pb-3 border-b-2 shrink-0 ${
-              activeTab === 'backend' ? 'border-emerald-400 text-emerald-400' : 'border-transparent'
-            }`}
-          >
-            <Server className="w-4 h-4 inline mr-2" />
-            연결 정보
-          </button>
+
         </div>
 
-        <button onClick={() => setActiveTab('paper')} className="border border-amber-500 text-amber-300 rounded px-3 py-2 mb-4">모의투자 / PAPER</button>
+        <PaperAccess apiBase={API_BASE_URL} active={activeTab==='paper'} onOpen={()=>setActiveTab('paper')}>
+          <PaperPanel apiBase={API_BASE_URL+'/paper'} />
+        </PaperAccess>
+        <ObservationPanel apiBase={API_BASE_URL} stocks={POPULAR_STOCKS} />
 
-        {!loading && activeTab === 'detail' && (
+        {!recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
+          <details className="home-expanded">
+            <summary>후보 조건·가격·AI 해설 펼쳐보기</summary>
           <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
               <div>
@@ -874,7 +886,7 @@ export default function App() {
                     🟡 관심 종목 = 3/4
                   </span>
                   <span className="text-slate-500">
-                    검사 {recommendationData?.universeSize ?? 0}개 · 후보 {recommendationData?.recommendationCount ?? 0}개
+                    검사 {recommendationData?.universeSize ?? '미제공'}개 · 후보 {recommendationData?.recommendationCount ?? '미제공'}개
                   </span>
                 </div>
 
@@ -978,7 +990,7 @@ export default function App() {
                               <p className="text-[11px] text-slate-400">수급 — {describeDataMetadata(item.strategy?.dataMetadata?.supply)}</p>
                             </div>
                             <span className={`px-2 py-1 rounded-lg text-xs font-bold border ${scoreClass}`}>
-                              조건 {item.score ?? 0}/{item.maxScore ?? 3}
+                              조건 {item.score ?? '미제공'}/{item.maxScore ?? '미제공'}
                             </span>
                           </div>
 
@@ -1210,10 +1222,11 @@ export default function App() {
   </div>
 )}
           </section>
+          </details>
         )}
 
-        {!loading && quoteData && activeTab === 'detail' && (
-          <div className="space-y-6">
+        {showDetail && !loading && !errorMsg && quoteData && activeTab === 'detail' && (
+          <div id="stock-detail" className="space-y-6">
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="text-xs text-slate-400 mb-3 space-y-1">
                 <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
@@ -1832,7 +1845,7 @@ export default function App() {
           </div>
         ) : (
           <span className="text-xs text-slate-500">
-            탐지된 주요 캔들패턴 없음
+            {strategyData?.dataPoints > 0 && Array.isArray(strategyData?.candlePatterns?.patterns) ? '탐지된 주요 캔들패턴 없음' : '캔들패턴 데이터 없음'}
           </span>
         )}
       </div>
@@ -1881,7 +1894,7 @@ export default function App() {
           </div>
         ) : (
           <span className="text-xs text-slate-500">
-            탐지된 주요 차트패턴 없음
+            {strategyData?.dataPoints >= 20 && Array.isArray(strategyData?.chartPatterns?.patterns) ? '탐지된 주요 차트패턴 없음' : '차트패턴 데이터 없음'}
           </span>
         )}
       </div>
@@ -1904,7 +1917,7 @@ export default function App() {
           </>
         ) : (
           <span className="text-xs text-slate-500">
-            현재 규칙을 충족하는 5파 구조 없음
+            {strategyData?.dataPoints >= 30 && strategyData?.elliottWave?.detected === false ? '현재 규칙을 충족하는 5파 구조 없음' : '엘리엇파동 데이터 없음'}
           </span>
         )}
       </div>
@@ -1927,7 +1940,7 @@ export default function App() {
         </span>
 
         <span className="text-xl font-bold text-emerald-300">
-          {strategyData?.technicalAssessment?.favorableCount ?? 0}
+          {strategyData?.technicalAssessment?.status === 'DATA_INSUFFICIENT' ? '데이터 없음' : strategyData?.technicalAssessment?.favorableCount ?? '데이터 없음'}
         </span>
       </div>
 
@@ -1937,7 +1950,7 @@ export default function App() {
         </span>
 
         <span className="text-xl font-bold text-amber-300">
-          {strategyData?.technicalAssessment?.cautionCount ?? 0}
+          {strategyData?.technicalAssessment?.status === 'DATA_INSUFFICIENT' ? '데이터 없음' : strategyData?.technicalAssessment?.cautionCount ?? '데이터 없음'}
         </span>
       </div>
 
@@ -1947,7 +1960,7 @@ export default function App() {
         </span>
 
         <span className="text-xl font-bold text-slate-300">
-          {strategyData?.technicalAssessment?.neutralCount ?? 0}
+          {strategyData?.technicalAssessment?.status === 'DATA_INSUFFICIENT' ? '데이터 없음' : strategyData?.technicalAssessment?.neutralCount ?? '데이터 없음'}
         </span>
       </div>
     </div>
@@ -2318,24 +2331,8 @@ export default function App() {
           </section>
         )}
 
-        {activeTab === 'paper' && <PaperPanel apiBase={['localhost','127.0.0.1','[::1]'].includes(window.location.hostname) ? 'http://localhost:5000/api/paper' : API_BASE_URL + '/paper'} />}
 
-        {activeTab === 'backend' && (
-          <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Server className="w-5 h-5 text-emerald-400" />
-              백엔드 연결 정보
-            </h3>
 
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs space-y-2">
-              <p className="text-slate-400">Current API Base URL</p>
-              <code className="text-emerald-400 break-all">{API_BASE_URL}</code>
-              <p className="text-slate-500 pt-2">
-                현재 연결 기능: 종목 검색 / 현재가 / 거래량 / 거래대금 / 외국인·기관 순매수 / 일봉 차트 / 뉴스 / 매매전략 / AI 종합 분석 / 수집 데이터 기반 추천 종목 / 추천 후보 AI 뉴스 분석
-              </p>
-            </div>
-          </section>
-        )}
       </main>
 
       <footer className="border-t border-slate-800/80 bg-slate-950 px-4 lg:px-8 py-4 text-center text-xs text-slate-500 space-y-1">

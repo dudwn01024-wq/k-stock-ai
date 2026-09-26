@@ -1,0 +1,38 @@
+[
+  {
+    "symbol": "005930",
+    "status": "CONDITIONS_MET",
+    "id": "639bea5b-5fac-4cc8-9560-92d11d306373",
+    "screenMatchesRecord": true
+  },
+  {
+    "symbol": "000660",
+    "status": "CONDITIONS_NOT_MET",
+    "id": "b0f5b7bd-6ddf-475e-aaf8-48b1a75ad96b",
+    "screenMatchesRecord": true
+  },
+  {
+    "symbol": "373220",
+    "status": "HELD",
+    "id": "17065c6a-16f0-4457-9884-20ed14da4900",
+    "screenMatchesRecord": true
+  },
+  {
+    "symbol": "035420",
+    "status": "HELD",
+    "id": "4969454b-4988-4887-9330-01c3ea29ea9c",
+    "screenMatchesRecord": true
+  },
+  {
+    "symbol": "005380",
+    "status": "HELD",
+    "id": "8d3aa564-16e0-4afd-bfc2-a1b6542aa8b2",
+    "screenMatchesRecord": true
+  },
+  {
+    "symbol": "035720",
+    "status": "HELD",
+    "id": "3780cbb5-9866-43e5-9de3-86de8b292ec2",
+    "screenMatchesRecord": true
+  }
+]

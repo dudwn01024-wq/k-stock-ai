@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const { dataFreshness, dateConsistency, sourceDate } = require('../services/dataFreshness');
+const { createNaverMarketData } = require('../services/naverMarketData');
 const server = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../frontend/src/App.jsx'), 'utf8');
 const receivedAt = '2026-09-19T05:00:00Z'; // Saturday; synthetic fixture only.
@@ -38,17 +39,13 @@ test('same date cannot prove live freshness or a trading session', () => {
 });
 
 async function quote(basicDate) {
-  const context = vm.createContext({ dataFreshness,dateConsistency, NAVER_HEADERS:{}, console,
-    getLatestDealTrend: data => data.dealTrendInfos[0], getIntegrationInfoValue:()=>null,
-    fetch: async url => ({ok:true,json:async()=>url.endsWith('/basic') ? {
+  const reader = createNaverMarketData({
+    fetchImpl: async url => ({ok:true,json:async()=>url.endsWith('/basic') ? {
       stockName:'Fixture', closePrice:70000, highPrice:71000,lowPrice:69000,
       accumulatedTradingVolume:1500,accumulatedTradingValue:105000000,localTradedAt:basicDate
     } : {dealTrendInfos:[{bizdate:'20260917',foreignerPureBuyQuant:10,organPureBuyQuant:20}]}})
   });
-  vm.runInContext(server.slice(server.indexOf('const parseNumber ='),server.indexOf('const validateSymbol =')) +
-    server.slice(server.indexOf('const fetchStockQuoteData ='), server.indexOf('// STOCK NEWS DATA')) +
-    '\nthis.load=fetchStockQuoteData;',context);
-  return context.load('005930');
+  return reader.fetchStockQuoteData('005930');
 }
 test('actual quote path preserves price and supply structure plus mismatched source dates', async () => {
   const result = await quote('2026-09-18');
@@ -93,11 +90,9 @@ test('actual UI formatter reports UNKNOWN and formats receipt explicitly in Kore
 });
 
 test('news path preserves article fields and never treats publication time as a business date', async () => {
-  const ctx = vm.createContext({dataFreshness,NAVER_HEADERS:{},
-    fetch:async()=>({ok:true,json:async()=>({items:[{title:'Fixture news',datetime:'2026-09-18T12:00:00+09:00',url:'https://example.invalid/article'}]})})});
-  vm.runInContext(server.slice(server.indexOf('const fetchStockNewsBySymbol ='),server.indexOf('// STRATEGY CALCULATION'))+
-    '\nthis.news=fetchStockNewsBySymbol;',ctx);
-  const [item] = await ctx.news('005930');
+  const reader = createNaverMarketData({
+    fetchImpl:async()=>({ok:true,json:async()=>({items:[{title:'Fixture news',datetime:'2026-09-18T12:00:00+09:00',url:'https://example.invalid/article'}]})})});
+  const [item] = await reader.fetchStockNewsBySymbol('005930');
   assert.equal(item.title,'Fixture news'); assert.equal(item.date,'2026-09-18T12:00:00+09:00');
   assert.equal(item.url,'https://example.invalid/article');
   assert.equal(item.dataMetadata.sourceBusinessDate,null);
@@ -164,7 +159,7 @@ test('KIS actual public cache path retains original receivedAt without promoting
   const ctx=vm.createContext({ohlcvCache:new Map(),pendingOHLCVRequests:new Map(),KIS_OHLCV_CACHE_TTL_MS:60000,
     validateSymbol:()=>true,loadKisDailyOHLCV:async()=>{calls++;return [{date:'20260918',close:70000,dataMetadata:metadata}];}});
   vm.runInContext(kis.slice(kis.indexOf('const cloneRows ='),kis.indexOf('const getKoreaToday ='))+
-    kis.slice(kis.indexOf('const fetchKisDailyOHLCV ='),kis.indexOf('module.exports ='))+
+    kis.slice(kis.indexOf('const fetchKisDailyOHLCV ='),kis.indexOf('return {fetchKisDailyOHLCV,'))+
     '\nthis.load=fetchKisDailyOHLCV;',ctx);
   const options={startDate:'20260901',endDate:'20260919',maxBars:20};
   const first=await ctx.load('005930',options), cached=await ctx.load('005930',options);

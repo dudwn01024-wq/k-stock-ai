@@ -1,0 +1,102 @@
+[
+  {
+    "width": 1440,
+    "scenario": "empty",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 1425,
+      "width": 1440
+    }
+  },
+  {
+    "width": 1440,
+    "scenario": "missing",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 1425,
+      "width": 1440
+    }
+  },
+  {
+    "width": 1440,
+    "scenario": "loading",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 1425,
+      "width": 1440
+    }
+  },
+  {
+    "width": 1440,
+    "scenario": "error",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 1425,
+      "width": 1440
+    }
+  },
+  {
+    "width": 1440,
+    "scenario": "stale",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 1425,
+      "width": 1440
+    }
+  },
+  {
+    "width": 390,
+    "scenario": "empty",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 375,
+      "width": 390
+    }
+  },
+  {
+    "width": 390,
+    "scenario": "missing",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 375,
+      "width": 390
+    }
+  },
+  {
+    "width": 390,
+    "scenario": "loading",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 375,
+      "width": 390
+    }
+  },
+  {
+    "width": 390,
+    "scenario": "error",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 375,
+      "width": 390
+    }
+  },
+  {
+    "width": 390,
+    "scenario": "stale",
+    "expectedVisible": true,
+    "paperVisible": false,
+    "geometry": {
+      "scrollWidth": 375,
+      "width": 390
+    }
+  }
+]

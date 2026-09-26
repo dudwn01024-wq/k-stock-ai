@@ -68,6 +68,8 @@ function server({missingSupply=false,missingVolume=false,missingTrend=false,miss
       if(name==='express')return express;if(name==='cors')return ()=>()=>{};if(name==='dotenv')return {config(){}};
       if(name==='./services/paperApi')return require('../services/paperApi');
       if(name==='./services/dataFreshness')return require('../services/dataFreshness');
+      if(name==='./services/naverMarketData')return require('../services/naverMarketData');
+      if(name==='./services/executionMode')return {resolveExecutionMode:()=>({}),installExecutionMode(){}};
       if(name==='./services/kisMarketData')return {fetchKisDailyOHLCV:kisLoader || (async()=>rows)};
       if(name==='./services/chartAnalysis')return {analyzeMovingAverages:()=>({...chart(),ma60:missingTrend?null:98})};
       if(name==='./services/tradingStrategy')return engine;

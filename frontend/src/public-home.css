@@ -1,0 +1,47 @@
+.public-home { font-size: 15px; }
+.public-home .home-header { gap: 20px; }
+.home-search { flex: 1; max-width: 620px; min-width: 260px; }
+.home-search label { display:block; margin-bottom:6px; color:#cbd5e1; font-size:13px; font-weight:600; }
+.public-home .home-search input { min-height:46px; font-size:16px; }
+.candidate-overview { border:1px solid #334155; background:#0f172a; border-radius:20px; padding:24px; }
+.home-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.home-heading h2 { font-size:26px; font-weight:750; color:#f8fafc; margin:4px 0 8px; }
+.home-heading p,.home-notice { color:#94a3b8; font-size:14px; line-height:1.7; }
+.home-heading .home-eyebrow { color:#6ee7b7; font-weight:600; }
+.home-secondary { border:1px solid #475569; border-radius:10px; padding:10px 14px; white-space:nowrap; font-size:14px; }
+.home-secondary:disabled { opacity:.5; }
+.home-notice { margin:18px 0; padding:12px; border-left:3px solid #fbbf24; background:#1e293b; }
+.home-counts { display:flex; gap:24px; padding:0 0 18px; color:#94a3b8; flex-wrap:wrap; }
+.home-counts strong { color:#f8fafc; margin-left:8px; }
+.candidate-list { display:grid; gap:12px; list-style:none; }
+.candidate-card { display:grid; grid-template-columns:1fr 1fr 2fr; gap:16px; padding:20px; background:#020617; border:1px solid #1e293b; border-radius:14px; }
+.candidate-card > * { min-width:0; overflow-wrap:anywhere; }
+.candidate-name button { font-size:18px; font-weight:700; text-align:left; color:#f8fafc; }
+.candidate-name button:hover { color:#6ee7b7; text-decoration:underline; }
+.candidate-name > span { display:block; color:#94a3b8; font-size:13px; margin-top:6px; }
+.candidate-price { display:flex; flex-direction:column; gap:4px; }
+.candidate-price strong { font-size:22px; font-variant-numeric:tabular-nums; }
+.home-label { display:block; color:#94a3b8; font-size:12px; margin-bottom:3px; }
+.candidate-context p { line-height:1.6; font-size:14px; }
+.candidate-context p + p { margin-top:10px; }
+.home-warning,.home-up { color:#fda4af; }
+.home-down { color:#93c5fd; }
+.candidate-time { grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 18px; border-top:1px solid #1e293b; padding-top:12px; color:#94a3b8; font-size:12px; }
+.home-state { padding:32px 8px; text-align:center; }
+.home-expanded { margin-top:16px; }
+.home-expanded > summary { padding:16px; cursor:pointer; color:#cbd5e1; }
+#stock-detail { scroll-margin-top:180px; }
+.public-home button:focus-visible,.public-home summary:focus-visible { outline:2px solid #6ee7b7; outline-offset:4px; }
+@media(max-width:640px) {
+ .home-search { order:3; width:100%; max-width:none; min-width:0; flex-basis:100%; }
+ .public-home .home-header { gap:12px; }
+ .candidate-overview { padding:16px; }
+ .home-heading { align-items:flex-start; flex-direction:column; }
+ .home-heading h2 { font-size:23px; }
+ .home-counts { gap:12px; font-size:13px; }
+ .candidate-card { grid-template-columns:1fr 1fr; padding:14px; gap:16px 12px; }
+ .candidate-price { text-align:right; }
+ .candidate-price strong { font-size:20px; }
+ .candidate-context { grid-column:1 / -1; }
+ .candidate-time { flex-direction:column; }
+}
