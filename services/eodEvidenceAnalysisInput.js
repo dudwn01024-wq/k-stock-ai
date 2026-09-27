@@ -7,6 +7,7 @@ const {sanitizeEvidence}=require('./observationEvidence');
 const {reviewSearchNewsRecord,parsePubDate}=require('./observationSearchNews');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/live-once');
+const REPLAY_ROOT=path.resolve(__dirname,'../.local/strategy-observations/revalidations');
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const specs=Object.freeze({daily:['DAILY_COLLECTION','kis-daily-only'],
   investor:['INVESTOR_COLLECTION','kis-investor-daily-only'],news:['SEARCH_NEWS_COLLECTION','naver-search-news-only']});
@@ -49,15 +50,44 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       return record;
     }catch{throw Error('EOD_EVIDENCE_RECORD_INVALID');}
   }
-  async function build({runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef}={}){
+  async function loadCalendar(ref){
+    if(!uuid(ref))throw Error('EOD_CALENDAR_REF_INVALID');
+    const replayDirectory=testOnly?directory:REPLAY_ROOT;
+    const file=path.join(replayDirectory,`${ref}.json`);
+    try{
+      const root=await fs.realpath(replayDirectory),actual=await fs.realpath(file),stat=await fs.lstat(file);
+      if(path.dirname(actual)!==root||!stat.isFile()||stat.isSymbolicLink()||stat.size>8*1024*1024)
+        throw Error('EOD_CALENDAR_RECORD_INVALID');
+      const replay=JSON.parse(await fs.readFile(file,'utf8'));
+      if(replay.id!==ref||replay.kind!=='HOLIDAY_OFFLINE_REVALIDATION_V1'||
+        !uuid(replay.sourceRecordId)||!uuid(replay.sourceApprovalId)||
+        replay.sourceSchemaVersion!=='HOLIDAY_COLLECTION_V1')throw Error('EOD_CALENDAR_RECORD_INVALID');
+      const sourceFile=path.join(directory,`${replay.sourceRecordId}.json`);
+      const sourceRoot=await fs.realpath(directory),sourcePath=await fs.realpath(sourceFile),sourceStat=await fs.lstat(sourceFile);
+      if(path.dirname(sourcePath)!==sourceRoot||!sourceStat.isFile()||sourceStat.isSymbolicLink()||
+        sourceStat.size>8*1024*1024)throw Error('EOD_CALENDAR_RECORD_INVALID');
+      const holidayRecord=JSON.parse(await fs.readFile(sourceFile,'utf8'));
+      if(holidayRecord.id!==replay.sourceRecordId||holidayRecord.schemaVersion!=='HOLIDAY_COLLECTION_V1'||
+        holidayRecord.scope!=='kis-holiday-calendar-only'||holidayRecord.approvalId!==replay.sourceApprovalId||
+        holidayRecord.testData!==testOnly)throw Error('EOD_CALENDAR_RECORD_INVALID');
+      return {holidayRecord,holidayReplay:replay};
+    }catch{throw Error('EOD_CALENDAR_RECORD_INVALID');}
+  }
+  async function build({runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,calendarEvidenceRef}={}){
     const refs={daily:dailyEvidenceRef,investor:investorEvidenceRef,news:newsEvidenceRef};
     const base={runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,
+      calendarEvidenceRef:calendarEvidenceRef??null,
       dailyReady:false,investorReady:false,newsReady:false,inputReady:false,reasons:[],
       riskReady:false,ledgerInputReady:false,tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
     if(!uuid(runId)||typeof symbol!=='string'||!/^\d{6}$/.test(symbol)||!isBusinessDate(targetDate))
       return {...base,reasons:['EOD_RUN_CONTEXT_INVALID']};
     if(Object.values(refs).some(ref=>!uuid(ref))||new Set(Object.values(refs)).size!==3)
       return {...base,reasons:['EOD_EVIDENCE_REF_INVALID']};
+    let calendarEvidence=null;
+    if(calendarEvidenceRef!==undefined){
+      try{calendarEvidence=await loadCalendar(calendarEvidenceRef);}
+      catch{return {...base,reasons:['CALENDAR_EVIDENCE_INVALID']};}
+    }
     const records={};
     for(const type of ['daily','investor','news']){
       try{records[type]=await load(refs[type],type);}
@@ -133,7 +163,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     if(!eodInputs.daily.complete)reasons.push('DAILY_COMPLETION_UNVERIFIED');
     return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,newsReady:!!newsReady,
       inputReady:reasons.length===0,reasons:[...new Set(reasons)],raw,normalized,derived:{daily:derived},
-      preparedRecord:prepared,eodInputs};
+      preparedRecord:prepared,eodInputs,calendarEvidence};
   }
   return {build};
 }

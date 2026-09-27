@@ -174,6 +174,7 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
   const blockers=Object.entries(sections).flatMap(([group,items])=>items.filter(item=>item.status!==P&&
     item.item!=='calendarCollectionComplete'&&item.item!=='providerValueFinality').map(item=>`${group}.${item.item}`));
   return {symbol:input?.symbol??null,targetDate:input?.targetDate??null,refs,sections,
+    strategyNewsWindow:calendarWindow,
     overallReady:blockers.length===0,analysisAdapterReady:false,blockers,
     riskReady:false,ledgerInputReady:false,tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
 }
