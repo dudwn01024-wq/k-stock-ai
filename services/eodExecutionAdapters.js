@@ -12,6 +12,15 @@ const {executionFor:searchExecution}=require('./observationSearchNewsContract');
 const SCOPES=Object.freeze({daily:'kis-daily-only',investor:'kis-investor-daily-only',news:'naver-search-news-only'});
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
 const defaultRunner=options=>require('./observationMarketData').createOneShotObservation(options);
+const defaultAnalysisRunner=async (input,environment)=>{
+  const {runEodAnalysisFromEvidence}=require('./eodAnalysisAdapter');
+  const analysis=await runEodAnalysisFromEvidence({runId:input.runId,symbol:input.symbol,targetDate:input.targetDate,
+    calendarEvidenceRef:input.calendarEvidenceRef,dailyEvidenceRef:input.evidenceRefs.daily,
+    investorEvidenceRef:input.evidenceRefs.investor,newsEvidenceRef:input.evidenceRefs.news},{environment});
+  return {record:{id:analysis.savedRecordPath?analysis.analysisRunId:null,symbol:analysis.symbol,policy:analysis.policy,
+    eodInputs:{targetBusinessDate:analysis.targetDate},
+    eodReview:{targetBusinessDate:analysis.targetDate,status:'HELD'},analysis}};
+};
 const expectedFor=(symbol,date)=>({
   daily:{scope:SCOPES.daily,symbol,targetDate:date,market:'J',timeframe:'D',adjustedPrice:'0',kisDailyMaxRequests:2,kisTokenMaxRequests:1},
   investor:investorExecution(symbol,date),
@@ -20,11 +29,11 @@ const expectedFor=(symbol,date)=>({
 const matches=(record,expected)=>record?.status==='READY'&&Object.entries(expected).every(([key,value])=>record[key]===value);
 function createEodExecutionAdapters({environment=process.env,dateResolution,approvalIds={},testOnly=false,
   testApprovalDirectory,runnerFactory=defaultRunner,approvalStoreFactory=createObservationApprovalStore,
-  analysisRunner=null}={}){
+  analysisRunner=defaultAnalysisRunner}={}){
   if(resolveExecutionMode(environment.KSTOCK_EXECUTION_MODE,environment.NODE_ENV).mode!=='personal-local')
     throw Error('EOD_ADAPTERS_REQUIRES_PERSONAL_LOCAL');
   if(!testOnly&&(runnerFactory!==defaultRunner||approvalStoreFactory!==createObservationApprovalStore||
-    analysisRunner!==null||testApprovalDirectory!==undefined))throw Error('EOD_ADAPTER_TEST_OPTIONS_FORBIDDEN');
+    analysisRunner!==defaultAnalysisRunner||testApprovalDirectory!==undefined))throw Error('EOD_ADAPTER_TEST_OPTIONS_FORBIDDEN');
   if(testOnly&&(!testApprovalDirectory||runnerFactory===defaultRunner))throw Error('EOD_ADAPTER_TEST_DEPENDENCIES_REQUIRED');
   const approvalStore=approvalStoreFactory({environment,testOnly,testDirectory:testOnly?testApprovalDirectory:undefined});
   const dateSource=async()=>dateResolution;
@@ -44,9 +53,9 @@ function createEodExecutionAdapters({environment=process.env,dateResolution,appr
   async function plan(symbol){
     const targetDate=approvedDate(),ref=dateResolution?.evidenceRef;
     const dateReady=!!targetDate&&typeof ref==='string'&&ref.length>0&&ref.length<=256&&
-      ref.trim()===ref&&!/[\r\n]/.test(ref);
+      ref.trim()===ref&&!/[\r\n]/.test(ref)&&(testOnly||uuid(ref));
     const approval=await approvalState(symbol,targetDate);
-    const analysisAdapterReady=testOnly&&typeof analysisRunner==='function';
+    const analysisAdapterReady=typeof analysisRunner==='function';
     return {runId:randomUUID(),symbol,targetDate:targetDate??null,dateStatus:dateResolution?.selection?.status??'UNKNOWN',
       executable:dateReady&&approval.ready&&analysisAdapterReady,
       requiredApprovals:['daily','investor','news'].map(stage=>({scope:SCOPES[stage],required:true,
@@ -104,7 +113,7 @@ function createEodExecutionAdapters({environment=process.env,dateResolution,appr
       if(Object.values(evidenceRefs).some(value=>!uuid(value)))
         return {normalized:{scope:'KRX_EOD_OBSERVATION',status:'NOT_READY'}};
       const result=await analysisRunner(Object.freeze({runId:context.runId,symbol:input.symbol,
-        targetDate:input.targetBusinessDate,evidenceRefs}));
+        targetDate:input.targetBusinessDate,calendarEvidenceRef:context.dateEvidenceRef,evidenceRefs}),environment);
       const record=result?.record;
       return {record,normalized:Object.freeze({scope:'KRX_EOD_OBSERVATION',symbol:record?.symbol??null,
         targetDate:record?.eodReview?.targetBusinessDate??null,status:record?.eodReview?.status??'UNKNOWN',

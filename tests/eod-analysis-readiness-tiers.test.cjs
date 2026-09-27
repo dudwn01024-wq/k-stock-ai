@@ -4,6 +4,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
 const {randomUUID}=require('node:crypto');
 const {createEodAnalysisReadinessTiers}=require('../services/eodAnalysisReadinessTiers');
+const {createEodAnalysisAdapter}=require('../services/eodAnalysisAdapter');
 const {reviewSearchNewsRecord}=require('../services/observationSearchNews');
 const symbol='005930',targetDate='2026-09-23';
 
@@ -144,4 +145,69 @@ test('SYNTHETIC TEST DATA: symbol/date mismatch and altered parsed news cannot b
   const invalid=await changed.reader.evaluate(changed.refs);
   assert.equal(invalid.news.newsAnalysisReady,false);
   assert.equal(invalid.news.status,'NOT_READY');
+});
+
+const personalEnvironment={KSTOCK_EXECUTION_MODE:'personal-local',NODE_ENV:'development'};
+const adapterFor=directory=>createEodAnalysisAdapter({environment:personalEnvironment,testOnly:true,
+  testDirectory:directory,clock:()=> '2026-09-27T05:00:00.000Z'});
+
+test('SYNTHETIC TEST DATA: offline adapter plans without execution, then returns a provenance-linked partial analysis',async t=>{
+  const h=await setup(t),files=Object.values(h.records).map(r=>path.join(h.directory,`${r.id}.json`));
+  const before=await Promise.all(files.map(file=>fs.readFile(file)));
+  const adapter=adapterFor(h.directory),plan=await adapter.plan(h.refs);
+  assert.equal(plan.analysisAdapterReady,true);assert.equal(plan.executable,true);
+  assert.equal(plan.descriptiveAnalysisReady,true);assert.equal(plan.strictStrategyReady,false);
+  assert.equal(plan.tradeEvidenceReady,false);assert.equal(plan.newsStatus,'NOT_READY');
+  const first=await adapter.run(h.refs),second=await adapter.run(h.refs);
+  assert.match(first.analysisRunId,/^[a-f0-9-]{36}$/);
+  assert.notEqual(first.analysisRunId,second.analysisRunId);
+  assert.equal(first.sourceRunId,h.refs.runId);assert.equal(first.createdAtKst,'2026-09-27T14:00:00.000+09:00');
+  assert.deepEqual(first.evidenceRefs,{calendar:h.refs.calendarEvidenceRef,daily:h.refs.dailyEvidenceRef,
+    investor:h.refs.investorEvidenceRef,news:h.refs.newsEvidenceRef});
+  assert.equal(first.status,'PARTIAL_DESCRIPTIVE');assert.equal(first.calendar.status,'VERIFIED');
+  assert.equal(first.analysisAdapterReady,true);
+  assert.equal(first.technical.status,'READY_WITH_WARNINGS');assert.ok(first.technical.indicators.ma20!==null);
+  assert.equal(first.technical.evidenceRef,h.refs.dailyEvidenceRef);
+  assert.equal(first.investorFlow.status,'READY_WITH_WARNINGS');assert.equal(first.investorFlow.values.foreignerNet,0);
+  assert.equal(first.investorFlow.evidenceRef,h.refs.investorEvidenceRef);
+  assert.equal(first.news.status,'NOT_READY');assert.equal(first.news.usedArticleCount,0);
+  assert.equal(first.news.reason,'TARGET_WINDOW_EVIDENCE_UNAVAILABLE');
+  assert.equal(first.strictStrategyVerdict,'HELD');assert.equal(first.strictStrategyReady,false);
+  assert.equal(first.tradeEvidenceReady,false);assert.equal(first.riskReady,false);assert.equal(first.ledgerInputReady,false);
+  assert.deepEqual(JSON.parse(await fs.readFile(first.savedRecordPath,'utf8')),
+    Object.fromEntries(Object.entries(first).filter(([key])=>key!=='savedRecordPath')));
+  assert.deepEqual({...first,analysisRunId:null,savedRecordPath:null},
+    {...second,analysisRunId:null,savedRecordPath:null});
+  assert.deepEqual(await Promise.all(files.map(file=>fs.readFile(file))),before);
+});
+
+test('SYNTHETIC TEST DATA: invalid calendar, missing daily/investor and wrong identity stay HELD',async t=>{
+  for(const [name,mutate,field] of [
+    ['calendar UNKNOWN',r=>{r.replay.selection.status='UNKNOWN';},'calendar'],
+    ['daily OHLCV missing',r=>{delete r.daily.targetOHLCV.close;},'technical'],
+    ['investor field missing',r=>{delete r.investor.investorSelection.target.values.frgn_ntby_qty;},'investorFlow'],
+    ['symbol mismatch',r=>{r.daily.symbol='000660';},'calendar'],
+    ['target date mismatch',r=>{r.news.targetDate='2026-09-22';},'calendar']
+  ]){
+    const h=await setup(t,mutate),result=await adapterFor(h.directory).run(h.refs);
+    assert.equal(result[field].status,field==='calendar'?'UNKNOWN':'NOT_READY',name);
+    if(field!=='investorFlow')assert.equal(result.status,'HELD',name);
+    assert.equal(result.strictStrategyReady,false);assert.equal(result.tradeEvidenceReady,false);
+    if(result.status==='HELD')assert.equal(result.savedRecordPath,undefined);
+  }
+  const valid=await setup(t),invalid=await adapterFor(valid.directory).run({...valid.refs,
+    calendarEvidenceRef:'../outside'});
+  assert.equal(invalid.status,'HELD');assert.equal(invalid.calendar.status,'UNKNOWN');
+});
+
+test('SYNTHETIC TEST DATA: public adapter is blocked, and offline analysis imports no collectors or approval store',async t=>{
+  const h=await setup(t);
+  assert.throws(()=>createEodAnalysisAdapter({environment:{KSTOCK_EXECUTION_MODE:'public',NODE_ENV:'production'},
+    testOnly:true,testDirectory:h.directory}),/EOD_ANALYSIS_REQUIRES_PERSONAL_LOCAL/);
+  await adapterFor(h.directory).run(h.refs);
+  const forbidden=Object.keys(require.cache).filter(file=>/[\\/](?:observationMarketData|observationHoliday|kisMarketData|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/.test(file));
+  assert.deepEqual(forbidden,[]);
+  assert.doesNotMatch(await fs.readFile(path.join(__dirname,'../services/eodAnalysisAdapter.js'),'utf8'),
+    /observationApproval|\.issue\(|\.consume\(/);
+  assert.throws(()=>fetch('https://example.com'),/EXTERNAL_NETWORK_FORBIDDEN/);
 });

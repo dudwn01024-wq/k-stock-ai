@@ -45,6 +45,7 @@ function tierResult(input,audit,strictReview=null){
     runId:input.runId??null,symbol:input.symbol??null,targetDate:input.targetDate??null,
     evidenceRefs:{calendar:input.calendarEvidenceRef??null,daily:input.dailyEvidenceRef??null,
       investor:input.investorEvidenceRef??null,news:input.newsEvidenceRef??null},
+    evidenceValidationReasons:input.reasons??[],
     calendar:{status:calendarReady?'VERIFIED':'UNKNOWN',decisionWindowComplete:calendarReady,
       evidenceRef:input.calendarEvidenceRef??null},
     technical:{status:technicalReady?'READY_WITH_WARNINGS':'NOT_READY',

@@ -74,12 +74,20 @@ test('TEST FIXTURE: plan reads approval state without consuming or calling runne
   for(const id of Object.values(h.ids))assert.equal((await h.store.inspect(id)).status,'READY');
   assert.deepEqual(h.calls,[]);assert.deepEqual(h.analysis,[]);
 });
+test('TEST FIXTURE: built-in evidence-only analysis adapter is ready while plan itself runs no child',async t=>{
+  const h=await setup(t),adapters=createEodExecutionAdapters({...h.options,analysisRunner:undefined});
+  const plan=await adapters.plan(symbol);
+  assert.equal(plan.analysisAdapterReady,true);assert.equal(plan.executable,true);
+  assert.deepEqual(h.calls,[]);assert.deepEqual(h.analysis,[]);
+  for(const id of Object.values(h.ids))assert.equal((await h.store.inspect(id)).status,'READY');
+});
 test('TEST FIXTURE: one date and distinct approvals reach existing runner interfaces, then evidence refs reach analysis',async t=>{
   const h=await setup(t),result=await createEodExecutionAdapters(h.options).run(symbol);
   assert.deepEqual(h.calls.map(call=>call.scope),['kis-daily-only','kis-investor-daily-only','naver-search-news-only']);
   assert.equal(new Set(h.calls.map(call=>call.approvalId)).size,3);
   assert.equal(h.analysis.length,1);assert.equal(h.analysis[0].runId,result.runId);
-  assert.deepEqual(Object.keys(h.analysis[0]).sort(),['evidenceRefs','runId','symbol','targetDate']);
+  assert.deepEqual(Object.keys(h.analysis[0]).sort(),['calendarEvidenceRef','evidenceRefs','runId','symbol','targetDate']);
+  assert.equal(h.analysis[0].calendarEvidenceRef,dateResolution.evidenceRef);
   assert.equal(h.analysis[0].symbol,symbol);assert.equal(h.analysis[0].targetDate,date);
   assert.deepEqual(h.analysis[0].evidenceRefs,{daily:result.evidenceRefs.daily,
     investor:result.evidenceRefs.investor,news:result.evidenceRefs.news});
