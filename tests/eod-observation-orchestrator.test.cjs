@@ -25,7 +25,7 @@ function setup({resolved={selection:selection(),evidenceRef:'TEST_DATE_EVIDENCE_
       assert.equal(Object.hasOwn(input,'probeDateCutoff'),false);
     }
     if(changes[stage] instanceof Error)throw changes[stage];
-    const record={symbol:context.symbol,scope:{daily:'kis-daily-only',investor:'kis-investor-daily-only',
+    const record={id:`TEST_${stage}`,symbol:context.symbol,scope:{daily:'kis-daily-only',investor:'kis-investor-daily-only',
       news:'naver-search-news-only'}[stage],targetBusinessDate:context.targetDate,status:'COLLECTED'};
     if(stage==='news'){
       delete record.targetBusinessDate;
@@ -57,6 +57,7 @@ test('TEST FIXTURE: one VERIFIED date and runId reach all four children; no trad
   assert.deepEqual([result.dailyStatus,result.investorStatus,result.newsStatus,result.observationStatus],
     ['COLLECTED','COLLECTED','COMPLETE','HELD']);
   assert.equal(result.overallStatus,'HELD');assert.equal(result.riskReady,false);
+  assert.deepEqual(result.evidenceRefs,{daily:'TEST_daily',investor:'TEST_investor',news:'TEST_news',observation:'TEST_observation'});
   assert.equal(result.ledgerInputReady,false);assert.match(result.tradeAuthorization,/주문 기능 미연결/);
   await assert.rejects(runner.run('005930'),/EOD_ORCHESTRATION_ALREADY_USED/);
 });
@@ -96,6 +97,15 @@ test('TEST FIXTURE: probe cutoff mismatch and incomplete news cannot initiate mo
   assert.equal(held.overallStatus,'INCOMPLETE');assert.equal(held.newsStatus,'INCOMPLETE');
   assert.deepEqual(incomplete.calls,['daily','investor','news']);
 });
+test('TEST FIXTURE: missing evidence reference and evidence-only analysis NOT_READY remain held',async()=>{
+  const missing=setup({changes:{investor:{id:null}}});
+  const result=await createEodObservationOrchestrator(missing.options).run('005930');
+  assert.equal(result.overallStatus,'HELD');assert.equal(result.reason,'INVESTOR_EVIDENCE_REF_MISSING');
+  assert.deepEqual(missing.calls,['daily','investor']);
+  const pending=setup();pending.options.children.observation=async()=>({normalized:{status:'NOT_READY'}});
+  const blocked=await createEodObservationOrchestrator(pending.options).run('005930');
+  assert.equal(blocked.observationStatus,'NOT_READY');assert.equal(blocked.overallStatus,'HELD');
+});
 test('TEST FIXTURE: failed child stops without another date, provider, or retry',async()=>{
   const h=setup({changes:{investor:Error('TEST_FAILURE')}});
   const result=await createEodObservationOrchestrator(h.options).run('005930');
@@ -109,7 +119,7 @@ test('TEST FIXTURE: run date is fixed even if the clock later changes',async()=>
   h.options.children.daily=async context=>{
     current='2026-09-28T16:00:00+09:00';
     h.calls.push('daily');h.contexts.push(context);
-    return {record:{scope:'kis-daily-only',symbol:'005930',targetBusinessDate:context.targetDate,status:'COLLECTED'}};
+    return {record:{id:'TEST_daily',scope:'kis-daily-only',symbol:'005930',targetBusinessDate:context.targetDate,status:'COLLECTED'}};
   };
   const result=await createEodObservationOrchestrator(h.options).run('005930');
   assert.equal(result.targetDate,date);assert.equal(result.createdAtKst,'2026-09-27T16:00:00.000+09:00');

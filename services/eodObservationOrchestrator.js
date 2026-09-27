@@ -38,7 +38,10 @@ function createEodObservationOrchestrator({environment=process.env,dateSource,ch
     const base={runId:randomUUID(),symbol,targetDate:null,probeDateCutoff:null,dateStatus:'UNKNOWN',dateEvidenceRef:null,
       createdAtKst:kstInstant(now)};
     const statuses={dailyStatus:'NOT_RUN',investorStatus:'NOT_RUN',newsStatus:'NOT_RUN',observationStatus:'NOT_RUN'};
+    const evidenceRefs={daily:null,investor:null,news:null,observation:null};
+    const childSummaries={daily:null,investor:null,news:null,observation:null};
     const result=(context,overallStatus,reason)=>({runContext:context,...context,...statuses,overallStatus,reason,
+      evidenceRefs:{...evidenceRefs},childSummaries:{...childSummaries},
       riskReady:false,ledgerInputReady:false,tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'});
     if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))return result(Object.freeze(base),'HELD','INVALID_SYMBOL');
     let resolved;
@@ -56,13 +59,25 @@ function createEodObservationOrchestrator({environment=process.env,dateSource,ch
         ...(stage==='news'?{probeDateCutoff:context.targetDate}:{})});
       try{child=await children[stage](context,input,Object.freeze({...prior}));}
       catch{statuses[`${stage}Status`]='FAILED';return result(context,'HELD',`${stage.toUpperCase()}_FAILED`);}
+      if(stage==='observation'&&child?.normalized?.status==='NOT_READY'){
+        statuses.observationStatus='NOT_READY';return result(context,'HELD','EOD_EVIDENCE_ONLY_ANALYSIS_NOT_READY');
+      }
       const record=child?.record;
       if(!matches(stage,record,context)){
         statuses[`${stage}Status`]='MISMATCH';
         return result(context,'HELD',`${stage.toUpperCase()}_DATE_OR_SCOPE_MISMATCH`);
       }
-      const status=childStatus(stage,record);
+      const rawStatus=childStatus(stage,record);
+      const declared=child?.normalized?.status;
+      const status=['HELD','INCOMPLETE','FAILED','UNKNOWN'].includes(declared)?declared:rawStatus;
       statuses[`${stage}Status`]=typeof status==='string'?status:'UNKNOWN';
+      const evidenceRef=child?.normalized?.evidenceRef??record?.id;
+      if(!safeRef(evidenceRef))return result(context,'HELD',`${stage.toUpperCase()}_EVIDENCE_REF_MISSING`);
+      evidenceRefs[stage]=evidenceRef;
+      const normalized=child?.normalized;
+      if(normalized)childSummaries[stage]={scope:normalized.scope??null,symbol:normalized.symbol??null,
+        targetDate:normalized.targetDate??null,status:normalized.status??null,evidenceRef,
+        requestCount:Number.isInteger(normalized.requestCount)?normalized.requestCount:null,source:normalized.source??null};
       prior[stage]=child;
       if(stage==='daily'||stage==='investor'){
         if(status!=='COLLECTED')return result(context,status==='INCOMPLETE'?'INCOMPLETE':'HELD',`${stage.toUpperCase()}_NOT_COMPLETE`);
