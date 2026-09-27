@@ -1,11 +1,13 @@
 'use strict';
 const {SCOPE:INVESTOR}=require('./observationInvestorContract');
 const {SCOPE:NEWS}=require('./observationNewsContract');
+const {SCOPE:SEARCH_NEWS}=require('./observationSearchNewsContract');
 const HOLIDAY='kis-holiday-calendar-only';
 const FULL='full-observation',DAILY='kis-daily-only';
 function assertScope(scope,executionMode) {
-  if(scope!==FULL&&scope!==DAILY&&scope!==INVESTOR&&scope!==NEWS&&scope!==HOLIDAY)throw Error('OBSERVATION_SCOPE_INVALID');
+  if(scope!==FULL&&scope!==DAILY&&scope!==INVESTOR&&scope!==NEWS&&scope!==HOLIDAY&&scope!==SEARCH_NEWS)throw Error('OBSERVATION_SCOPE_INVALID');
   if(scope===HOLIDAY&&executionMode!=='personal-local')throw Error('HOLIDAY_SCOPE_REQUIRES_PERSONAL_LOCAL');
+  if(scope===SEARCH_NEWS&&executionMode!=='personal-local')throw Error('SEARCH_NEWS_SCOPE_REQUIRES_PERSONAL_LOCAL');
   if(scope===NEWS&&executionMode!=='personal-local')throw Error('NEWS_SCOPE_REQUIRES_PERSONAL_LOCAL');
   if(scope===INVESTOR&&executionMode!=='personal-local')throw Error('INVESTOR_SCOPE_REQUIRES_PERSONAL_LOCAL');
   if(scope===DAILY&&executionMode!=='personal-local')throw Error('DAILY_SCOPE_REQUIRES_PERSONAL_LOCAL');
@@ -20,18 +22,18 @@ function dailyRequestOptions(options={}) {
 // A narrower admission check, before the unchanged common budget/HTTP transport.
 function scopeTransport(scope,guardedFetch) {
   if(scope===FULL)return guardedFetch;
-  if(scope!==DAILY&&scope!==INVESTOR&&scope!==NEWS&&scope!==HOLIDAY)throw Error('OBSERVATION_SCOPE_INVALID');
-  const {classify,classifyInvestor,classifyNews,classifyHoliday}=require('./observationHttpBudget');
+  if(scope!==DAILY&&scope!==INVESTOR&&scope!==NEWS&&scope!==HOLIDAY&&scope!==SEARCH_NEWS)throw Error('OBSERVATION_SCOPE_INVALID');
+  const {classify,classifyInvestor,classifyNews,classifyHoliday,classifySearchNews}=require('./observationHttpBudget');
   let stopped=false;
   return async(value,options)=>{
     if(stopped)throw Error('OBSERVATION_SCOPE_STOPPED');
     try {
-      const kind=(scope===INVESTOR?classifyInvestor:scope===NEWS?classifyNews:scope===HOLIDAY?classifyHoliday:classify)(value,options);
-      if(!(scope===HOLIDAY?['kisHoliday','kisToken']:scope===NEWS?['naverNews']:scope===INVESTOR?['kisInvestor','kisToken']:['kisDaily','kisToken']).includes(kind))throw Error('OBSERVATION_SCOPE_REQUEST_FORBIDDEN');
+      const kind=(scope===SEARCH_NEWS?classifySearchNews:scope===INVESTOR?classifyInvestor:scope===NEWS?classifyNews:scope===HOLIDAY?classifyHoliday:classify)(value,options);
+      if(!(scope===SEARCH_NEWS?['searchNews']:scope===HOLIDAY?['kisHoliday','kisToken']:scope===NEWS?['naverNews']:scope===INVESTOR?['kisInvestor','kisToken']:['kisDaily','kisToken']).includes(kind))throw Error('OBSERVATION_SCOPE_REQUEST_FORBIDDEN');
       return await guardedFetch(value,options);
     } catch {
       stopped=true;throw Error('OBSERVATION_SCOPE_REQUEST_FAILED');
     }
   };
 }
-module.exports={FULL,DAILY,INVESTOR,NEWS,HOLIDAY,assertScope,dailyRequestOptions,scopeTransport};
+module.exports={FULL,DAILY,INVESTOR,NEWS,HOLIDAY,SEARCH_NEWS,assertScope,dailyRequestOptions,scopeTransport};

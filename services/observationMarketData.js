@@ -17,6 +17,7 @@ function createMarketDataProvider({kisReader,budget,scope=FULL,executionMode,dai
   assertScope(scope,executionMode);
   if(scope==='kis-investor-daily-only')throw Error('INVESTOR_PROVIDER_REQUIRED');
   if(scope==='naver-news-only')throw Error('NEWS_PROVIDER_REQUIRED');
+  if(scope==='naver-search-news-only')throw Error('SEARCH_NEWS_PROVIDER_REQUIRED');
   const options=dailyRequestOptions(dailyOptions);
   // Capture only allowlisted data fields after the unchanged budget admits HTTP.
   const evidence=createEvidenceCollector(scopeTransport(scope,budget.fetch));
@@ -67,7 +68,8 @@ function createMarketDataProvider({kisReader,budget,scope=FULL,executionMode,dai
 
 function createOneShotObservation({approved=false,testOnly=false,testTransport,testJournalPath,testKisReader,
   credentialSource='GENERIC',environment=process.env,scope=FULL,dailyOptions,approvalId,testApprovalDirectory,
-  directory=path.resolve(__dirname,'../.local/strategy-observations'),requestTimeoutMs=10000,totalTimeoutMs=60000,testCalendar,testPublicationMeaning,newsOptions}={}) {
+  directory=path.resolve(__dirname,'../.local/strategy-observations'),requestTimeoutMs=10000,totalTimeoutMs=60000,testCalendar,testPublicationMeaning,newsOptions,searchNewsOptions}={}) {
+  if(scope==='naver-search-news-only')return require('./observationSearchNews').createSearchNewsObservation({environment,approvalId,testOnly,testTransport,testApprovalDirectory,directory,requestTimeoutMs,totalTimeoutMs,credentialSource,dailyOptions,testKisReader,newsOptions,searchNewsOptions});
   if(scope==='naver-news-only')return require('./observationNews').createNewsObservation({environment,approvalId,testOnly,testTransport,testApprovalDirectory,testJournalPath,directory,requestTimeoutMs,totalTimeoutMs,credentialSource,dailyOptions,testKisReader,testCalendar,testPublicationMeaning,newsOptions});
   if(scope==='kis-investor-daily-only')return require('./observationInvestor').createInvestorObservation({environment,credentialSource,approvalId,testOnly,testTransport,testApprovalDirectory,testJournalPath,directory,requestTimeoutMs,totalTimeoutMs,dailyOptions});
   if(!testOnly&&(testTransport||testJournalPath||testKisReader||testApprovalDirectory))throw Error('TEST_OPTIONS_FORBIDDEN');
