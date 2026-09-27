@@ -101,9 +101,11 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     const raw={daily:{targetOHLCV:daily.targetOHLCV??null,evidence:dailyEvidence},
       investor:{target:target?{rawPath:target.rawPath,values:target.values}:null,
         evidence:investorEvidence},
-      news:{pages:news.pages.map(page=>({page:page.page,items:page.items.map(item=>({
+      news:{query:news.query??null,targetDate:news.targetDate,probeDateCutoff:news.probeDateCutoff,
+        review:news.review??null,pages:news.pages.map(page=>({page:page.page,
+        requestedQuery:page.requestedQuery??null,items:page.items.map(item=>({
         title:item.title??null,originallink:item.originallink??null,link:item.link??null,
-        description:item.description??null,pubDateRaw:item.pubDateRaw??null,
+        description:item.description??null,pubDateRaw:item.pubDateRaw??null,receivedAt:item.receivedAt??null,
         fieldPaths:item.fieldPaths??null}))}))}};
     const derived=dailyReady?calculateDailyInputs(selection):null;
     const normalized={daily:{targetOHLCV:dailyReady?{...daily.targetOHLCV}:null,
@@ -114,7 +116,8 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       institutionBuy:investorReady?values.orgn_shnu_vol:null,institutionSell:investorReady?values.orgn_seln_vol:null,
       finality:supply?.strategyUse?.finality??'UNKNOWN'},
     news:{articles:news.pages.flatMap(page=>page.items.map(item=>({pubDateRaw:item.pubDateRaw??null,
-      pubDateParsed:item.pubDateParsed??null,meaning:item.pubDateMeaning??null}))),
+      pubDateParsed:item.pubDateParsed??null,meaning:item.pubDateMeaning??null,
+      receivedAt:item.receivedAt??null}))),
       collectionStatus:news.review?.collectionStatus??null,fullCoverageProven:news.review?.fullCoverageProven===true}};
     // Existing EOD policy alone owns assessment; a saved collection never proves session completion/finality.
     const prepared={symbol,dailySelection:selection,evidence:dailyEvidence,
