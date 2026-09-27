@@ -1,6 +1,7 @@
 'use strict';
 // Server/local use only. No HTTP routes, provider, credentials or automatic issuance.
 const fs=require('node:fs/promises'),path=require('node:path');
+const {isDeepStrictEqual}=require('node:util');
 const {resolveExecutionMode}=require('./executionMode');
 const {isTargetDate}=require('./observationDaily');
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/approvals');
@@ -19,9 +20,12 @@ const {SCOPE:searchScope,executionFor:searchExecution,ORIGIN:searchOrigin,API_PA
 const searchKeys=['scope','symbol','query','targetDate','probeDateCutoff','sort','display','start','searchNewsMaxRequests'];
 const searchWindowKeys=['scope','mode','symbol','query','targetDate','calendarEvidenceRef',
   'windowStartKst','windowEndKst','sort','display','initialStart','startStep','maxRequests'];
+const searchRollingKeys=['scope','mode','symbol','query','sort','display','initialStart','startStep',
+  'maxRequestsPerPoll','expectedArchiveId','expectedWatermark','expectedArchiveRevision'];
 const {PAGE_SIZE,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
 const conditionKeys=value=>value?.scope===holidayScope?holidayKeys:value?.scope===searchScope?
-  value.mode==='target-window'?searchWindowKeys:searchKeys:value?.scope===investorScope?investorKeys:value?.scope===newsScope?
+  value.mode==='target-window'?searchWindowKeys:value.mode==='rolling-poll'?searchRollingKeys:searchKeys:
+  value?.scope===investorScope?investorKeys:value?.scope===newsScope?
   Object.hasOwn(value,'maxPages')?Object.hasOwn(value,'probeDateCutoff')?newsProbeKeys:newsPagedKeys:newsKeys:keys;
 function conditions(value) {
   if(value?.scope===holidayScope){
@@ -55,7 +59,8 @@ function conditions(value) {
     value.kisDailyMaxRequests!==2||value.kisTokenMaxRequests!==1)throw Error('APPROVAL_CONDITIONS_INVALID');
   return Object.fromEntries(keys.map(k=>[k,value[k]]));
 }
-const same=(a,b)=>a.scope===b.scope&&conditionKeys(a).join(',')===conditionKeys(b).join(',')&&conditionKeys(b).every(k=>a[k]===b[k]);
+const same=(a,b)=>a.scope===b.scope&&conditionKeys(a).join(',')===conditionKeys(b).join(',')&&
+  conditionKeys(b).every(k=>isDeepStrictEqual(a[k],b[k]));
 const timestamp=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T/.test(v)&&Number.isFinite(Date.parse(v));
 async function immutable(file,record) {
   // Exclusive creation is the cross-process arbitration point. A torn file still blocks reuse.
@@ -136,7 +141,7 @@ function assertApprovalRequest(lease,url,group,counts) {
     return;
   }
   if(info.conditions.scope===searchScope){
-    const c=info.conditions,expectedStart=c.mode==='target-window'?
+    const c=info.conditions,expectedStart=c.mode==='target-window'||c.mode==='rolling-poll'?
       c.initialStart+(counts.searchNews??0)*c.startStep:c.start+(counts.searchNews??0)*c.display;
     if(group!=='searchNews'||url.origin!==searchOrigin||url.pathname!==searchPath||
       url.searchParams.get('query')!==c.query||url.searchParams.get('display')!==String(c.display)||
@@ -166,5 +171,5 @@ function assertApprovalRequest(lease,url,group,counts) {
 }
 function approvalScope(lease){const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.scope;}
 function approvalNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==newsScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.naverNewsMaxRequests;}
-function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.mode==='target-window'?info.conditions.maxRequests:info.conditions.searchNewsMaxRequests;}
+function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.mode==='target-window'?info.conditions.maxRequests:info.conditions.mode==='rolling-poll'?info.conditions.maxRequestsPerPoll:info.conditions.searchNewsMaxRequests;}
 module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalNewsLimit,approvalSearchNewsLimit};

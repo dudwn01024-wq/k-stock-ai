@@ -3,6 +3,7 @@
 // NAVER Search News runner can supply a durable, scope-bound collection record.
 const fs=require('node:fs/promises'),path=require('node:path');
 const {randomUUID}=require('node:crypto');
+const {isDeepStrictEqual}=require('node:util');
 const {stockNameFor}=require('./stockCatalog');
 const {parsePubDate,searchArticleIdentity,searchArticleSignature}=require('./observationSearchNews');
 
@@ -13,10 +14,16 @@ const kstInstant=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}
   Number.isFinite(Date.parse(value));
 const nowKst=()=>new Date(Date.now()+9*3600000).toISOString().replace('Z','+09:00');
 const samePath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+async function writeExclusive(file,value){
+  let handle;
+  try{handle=await fs.open(file,'wx',0o600);await handle.writeFile(JSON.stringify(value));await handle.sync();}
+  finally{await handle?.close();}
+}
 const safeText=value=>typeof value==='string'?value.slice(0,1000):null;
 const queryFor=symbol=>{const query=stockNameFor(symbol);if(!/^\d{6}$/.test(symbol??'')||!query)throw Error('NEWS_ARCHIVE_SYMBOL_INVALID');return query;};
 const validLimit=value=>Number.isInteger(value)&&value>=1&&value<=MAX_REQUESTS_PER_POLL;
 const initialState=(archiveId,symbol,query)=>({schemaVersion:'ROLLING_NEWS_ARCHIVE_V1',archiveId,symbol,query,
+  archiveRevision:0,
   newestSeenPubDate:null,oldestSeenPubDate:null,lastSuccessfulPollAtKst:null,watermark:null,
   continuityStatus:'NOT_STARTED',searchResultContinuityProven:false,requestHistory:[],articleCount:0,
   articles:[],warnings:[],fullCoverageProven:false});
@@ -67,20 +74,26 @@ function materialize(manifest,events){
   let priorPollRunId=null;
   for(const [index,event] of events.entries()){
     state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
-    if(event.schemaVersion!=='ROLLING_NEWS_POLL_V1'||event.testData!==true||
-      event.source!=='SYNTHETIC_TEST_RESPONSE'||event.archiveId!==manifest.archiveId||
+    if(event.schemaVersion!=='ROLLING_NEWS_POLL_V1'||event.testData!==manifest.testData||
+      !['SYNTHETIC_TEST_RESPONSE','SYNTHETIC_TEST_TRANSPORT','NAVER_API_HUB_SEARCH_NEWS'].includes(event.source)||
+      (event.source!=='SYNTHETIC_TEST_RESPONSE'&&!uuid(event.approvalId))||
+      (event.source!=='SYNTHETIC_TEST_RESPONSE'&&event.bootstrap!==(state.watermark===null))||
+      event.archiveId!==manifest.archiveId||
       event.symbol!==manifest.symbol||event.query!==manifest.query||!uuid(event.pollRunId)||
       event.sequence!==index+1||event.priorPollRunId!==priorPollRunId||!kstInstant(event.receivedAtKst)||
-      !validLimit(event.maxRequestsPerPoll)||!Array.isArray(event.pages)||!Array.isArray(event.requests)||
+      !validLimit(event.maxRequestsPerPoll)||
+      event.maxRequestsPerPoll!==(state.watermark===null?1:MAX_REQUESTS_PER_POLL)||
+      !Array.isArray(event.pages)||!Array.isArray(event.requests)||
       event.requests.length>event.maxRequestsPerPoll||event.pages.length>event.requests.length||
+      event.failed===false&&event.requests.some(request=>request.outcome==='FAILED')||
       event.requests.some((r,i)=>r.start!==1+i*DISPLAY||r.display!==DISPLAY||r.sort!=='date'||
         !['RESPONSE','FAILED'].includes(r.outcome))||
       event.pages.some((p,i)=>p.start!==1+i*DISPLAY||!Array.isArray(p.items)||p.items.length>DISPLAY||
-        event.requests[i]?.outcome!=='RESPONSE'))
+        event.requests[i]?.outcome!=='RESPONSE'||event.requests[i]?.returnedCount!==p.items.length))
       throw Error('NEWS_ARCHIVE_RECORD_INVALID');
     const review=assessPoll(state,event.pages,{failed:event.failed===true,maxRequestsPerPoll:event.maxRequestsPerPoll});
     if(JSON.stringify(review)!==JSON.stringify(event.review))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
-    for(const page of event.pages)for(const item of page.items){
+    if(['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status))for(const page of event.pages)for(const item of page.items){
       const identity=searchArticleIdentity(item),signature=searchArticleSignature(item),parsed=parsePubDate(item.pubDateRaw);
       if(JSON.stringify(parsed)!==JSON.stringify(item.pubDateParsed))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       if(parsed){
@@ -100,16 +113,19 @@ function materialize(manifest,events){
     if(['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status)){
       state.watermark=review.watermark;state.lastSuccessfulPollAtKst=event.receivedAtKst;
     }
-    state.continuityStatus=review.status;
-    state.searchResultContinuityProven=review.searchResultContinuityProven&&state.warnings.length===0;
-    state.requestHistory.push({pollRunId:event.pollRunId,receivedAtKst:event.receivedAtKst,
+    if(review.status!=='FAILED'){
+      state.continuityStatus=review.status;
+      state.searchResultContinuityProven=review.searchResultContinuityProven&&state.warnings.length===0;
+    }
+    state.requestHistory.push({pollRunId:event.pollRunId,approvalId:event.approvalId??null,
+      receivedAtKst:event.receivedAtKst,
       requests:event.requests,starts:event.requests.map(r=>r.start),requestCount:event.requests.length,
       rawArticleCount:event.pages.reduce((count,page)=>count+page.items.length,0),status:review.status,
       stopReason:review.stopReason,warnings:review.warnings});
-    state.warnings.push(...review.warnings);
+    if(review.status!=='FAILED')state.warnings.push(...review.warnings);
     if(review.status==='GAP_DETECTED')state.warnings.push('POLL_GAP_DETECTED');
-    if(review.status==='FAILED')state.warnings.push('POLL_REQUEST_FAILED');
-    if(state.warnings.length)state.searchResultContinuityProven=false;
+    if(review.status!=='FAILED'&&state.warnings.length)state.searchResultContinuityProven=false;
+    state.archiveRevision=event.sequence;
     priorPollRunId=event.pollRunId;
   }
   state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
@@ -122,6 +138,13 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
   if(testOnly?!testDirectory:testDirectory!==undefined)throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
   const root=testOnly?path.resolve(testDirectory):ROOT;
   const location=symbol=>path.join(root,symbol);
+  const reservations=new WeakMap();
+  async function ensureRoot(){
+    await fs.mkdir(root,{recursive:true});
+    const stat=await fs.lstat(root);
+    if(!stat.isDirectory()||stat.isSymbolicLink()||!samePath(await fs.realpath(root),root))
+      throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+  }
   async function safeFile(file,parent){
     const [realParent,realFile,stat]=await Promise.all([fs.realpath(parent),fs.realpath(file),fs.lstat(file)]);
     if(path.dirname(realFile)!==realParent||!stat.isFile()||stat.isSymbolicLink()||stat.size>16*1024*1024)
@@ -137,33 +160,108 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         !samePath(await fs.realpath(root),root)||!dirStat.isDirectory()||dirStat.isSymbolicLink()||
         path.dirname(await fs.realpath(dir))!==await fs.realpath(root))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       const manifest=await safeFile(manifestFile,dir);
-      if(manifest.schemaVersion!=='ROLLING_NEWS_MANIFEST_V1'||manifest.testData!==true||
+      if(manifest.schemaVersion!=='ROLLING_NEWS_MANIFEST_V1'||manifest.testData!==testOnly||
         !uuid(manifest.archiveId)||
         manifest.symbol!==symbol||manifest.query!==query)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       const pollDir=path.join(dir,'polls'),pollStat=await fs.lstat(pollDir);
       if(!pollStat.isDirectory()||pollStat.isSymbolicLink()||path.dirname(await fs.realpath(pollDir))!==await fs.realpath(dir))
         throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       const names=await fs.readdir(pollDir);
-      if(names.some(name=>!/^\d{6}-[a-f0-9-]{36}\.json$/.test(name)))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      if(names.some(name=>!/^\d{6}(?:-[a-f0-9-]{36})?\.json$/.test(name)))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       const events=[];
       for(const name of names.sort())events.push(await safeFile(path.join(pollDir,name),pollDir));
       return materialize(manifest,events);
     }catch{throw Error('NEWS_ARCHIVE_RECORD_INVALID');}
   }
-  async function planPoll({symbol,maxRequestsPerPoll=MAX_REQUESTS_PER_POLL}={}){
+  async function planPoll({symbol,maxRequestsPerPoll}={}){
     const query=queryFor(symbol);
-    if(!validLimit(maxRequestsPerPoll))throw Error('NEWS_ARCHIVE_POLL_LIMIT_INVALID');
     const archive=await read(symbol);
+    const requiredLimit=archive?.watermark?MAX_REQUESTS_PER_POLL:1;
+    if(maxRequestsPerPoll!==undefined&&maxRequestsPerPoll!==requiredLimit)
+      throw Error('NEWS_ARCHIVE_POLL_LIMIT_INVALID');
+    maxRequestsPerPoll=requiredLimit;
     return {symbol,query,archiveId:archive?.archiveId??null,watermark:archive?.watermark??null,
+      archiveRevision:archive?.archiveRevision??0,
       display:DISPLAY,sort:'date',initialStart:1,startStep:DISPLAY,maxRequestsPerPoll,
       allowedStarts:Array.from({length:maxRequestsPerPoll},(_,i)=>1+i*DISPLAY),
       collectionIntervalMinutes:null,trigger:'EXPLICIT_INTERNAL_ONLY',fullCoverageProven:false};
   }
-  async function collectSyntheticPoll({symbol,maxRequestsPerPoll=MAX_REQUESTS_PER_POLL,readPage,
+  async function reservePoll(plan){
+    if(!plan||!validLimit(plan.maxRequestsPerPoll)||plan.display!==DISPLAY||plan.sort!=='date'||
+      plan.initialStart!==1||plan.startStep!==DISPLAY||
+      !isDeepStrictEqual(plan.allowedStarts,Array.from({length:plan.maxRequestsPerPoll},(_,i)=>1+i*DISPLAY)))
+      throw Error('NEWS_ARCHIVE_PLAN_INVALID');
+    const current=await planPoll({symbol:plan.symbol});
+    if(current.query!==plan.query||current.archiveId!==plan.archiveId||
+      current.maxRequestsPerPoll!==plan.maxRequestsPerPoll||
+      current.archiveRevision!==plan.archiveRevision||!isDeepStrictEqual(current.watermark,plan.watermark))
+      throw Error('ARCHIVE_STATE_CHANGED');
+    await ensureRoot();
+    // An exclusive, revision-specific reservation survives a crash. A stale run cannot be retried silently.
+    const file=path.join(root,`.${plan.symbol}-${plan.archiveRevision}.reservation`);
+    try{await writeExclusive(file,{symbol:plan.symbol,archiveRevision:plan.archiveRevision,
+      archiveId:plan.archiveId,watermark:plan.watermark});}
+    catch(error){throw Error(error.code==='EEXIST'?'ARCHIVE_STATE_CHANGED':'NEWS_ARCHIVE_RESERVATION_FAILED');}
+    const lease=Object.freeze({});reservations.set(lease,{plan,used:false});
+    return lease;
+  }
+  async function appendPoll(lease,{approvalId,requests,pages,failed=false,receivedAtKst=nowKst()}={}){
+    const info=reservations.get(lease);
+    if(!info||info.used||!uuid(approvalId)||!kstInstant(receivedAtKst)||
+      !Array.isArray(requests)||!Array.isArray(pages))
+      throw Error('NEWS_ARCHIVE_POLL_INVALID');
+    info.used=true;
+    const {plan}=info,prior=await read(plan.symbol);
+    if((prior?.archiveId??null)!==plan.archiveId||(prior?.archiveRevision??0)!==plan.archiveRevision||
+      !isDeepStrictEqual(prior?.watermark??null,plan.watermark))throw Error('ARCHIVE_STATE_CHANGED');
+    const pollRunId=randomUUID(),archiveId=prior?.archiveId??randomUUID();
+    const review=assessPoll(prior,pages,{failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
+    const event={schemaVersion:'ROLLING_NEWS_POLL_V1',archiveId,pollRunId,approvalId,
+      bootstrap:prior?.watermark==null,symbol:plan.symbol,
+      query:plan.query,priorPollRunId:prior?.requestHistory.at(-1)?.pollRunId??null,
+      sequence:plan.archiveRevision+1,receivedAtKst,maxRequestsPerPoll:plan.maxRequestsPerPoll,
+      requests,pages,failed,review,testData:testOnly,
+      source:testOnly?'SYNTHETIC_TEST_TRANSPORT':'NAVER_API_HUB_SEARCH_NEWS'};
+    if(requests.length>plan.maxRequestsPerPoll||pages.length>requests.length||
+      !failed&&requests.some(request=>request.outcome==='FAILED')||
+      requests.some((request,index)=>request.start!==plan.allowedStarts[index]||request.display!==DISPLAY||
+        request.sort!=='date'||!['RESPONSE','FAILED'].includes(request.outcome))||
+      pages.some((page,index)=>page.start!==plan.allowedStarts[index]||!Array.isArray(page.items)||
+        page.items.length>DISPLAY||requests[index]?.outcome!=='RESPONSE'||
+        requests[index]?.returnedCount!==page.items.length))
+      throw Error('NEWS_ARCHIVE_POLL_INVALID');
+    await ensureRoot();
+    const dir=location(plan.symbol),name=`${String(event.sequence).padStart(6,'0')}.json`;
+    let file;
+    if(!prior){
+      const stage=path.join(root,`.${plan.symbol}-stage-${pollRunId}`);
+      await fs.mkdir(path.join(stage,'polls'),{recursive:true});
+      const manifest={schemaVersion:'ROLLING_NEWS_MANIFEST_V1',archiveId,symbol:plan.symbol,
+        query:plan.query,createdAtKst:receivedAtKst,testData:testOnly};
+      await writeExclusive(path.join(stage,'manifest.json'),manifest);
+      await writeExclusive(path.join(stage,'polls',name),event);
+      await fs.rename(stage,dir);file=path.join(dir,'polls',name);
+    }else{
+      // Atomic hard-link publication prevents a partial event or a competing writer replacing a revision.
+      const pollDir=path.join(dir,'polls');
+      const [dirStat,pollStat,realDir,realPoll]=await Promise.all([
+        fs.lstat(dir),fs.lstat(pollDir),fs.realpath(dir),fs.realpath(pollDir)]);
+      if(!dirStat.isDirectory()||dirStat.isSymbolicLink()||!pollStat.isDirectory()||
+        pollStat.isSymbolicLink()||path.dirname(realDir)!==await fs.realpath(root)||
+        path.dirname(realPoll)!==realDir)throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+      const stage=path.join(root,`.${plan.symbol}-stage-${pollRunId}.json`);
+      await writeExclusive(stage,event);
+      file=path.join(pollDir,name);
+      await fs.link(stage,file);await fs.unlink(stage);
+    }
+    return {event,archive:await read(plan.symbol),recordPath:file};
+  }
+  async function collectSyntheticPoll({symbol,maxRequestsPerPoll,readPage,
     receivedAtKst=nowKst()}={}){
     if(!testOnly||typeof readPage!=='function')throw Error('NEWS_ARCHIVE_LIVE_POLL_NOT_CONNECTED');
     if(!kstInstant(receivedAtKst))throw Error('NEWS_ARCHIVE_TIME_INVALID');
     const plan=await planPoll({symbol,maxRequestsPerPoll}),prior=await read(symbol),pages=[],requests=[];
+    maxRequestsPerPoll=plan.maxRequestsPerPoll;
     let failed=false;
     for(const start of plan.allowedStarts){
       const request={requestIndex:requests.length+1,start,display:DISPLAY,sort:'date',outcome:'FAILED'};
@@ -241,6 +339,6 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         ...(archive&&(!Number.isFinite(collectedThrough)||collectedThrough<end)?['WINDOW_END_NOT_COLLECTED']:[]),
         ...(archive?.warnings??[]),...(archive&&!archive.searchResultContinuityProven?['POLL_CONTINUITY_NOT_PROVEN']:[])]};
   }
-  return {read,planPoll,collectSyntheticPoll,selectNewsForEodWindow};
+  return {read,planPoll,reservePoll,appendPoll,collectSyntheticPoll,selectNewsForEodWindow};
 }
-module.exports={createRollingNewsArchiveStore,assessPoll,MAX_REQUESTS_PER_POLL};
+module.exports={createRollingNewsArchiveStore,assessPoll,nowKst,MAX_REQUESTS_PER_POLL};

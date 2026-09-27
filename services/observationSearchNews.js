@@ -2,6 +2,7 @@
 // Separate historical-news probe. No server route, strategy, account, KIS or AI import.
 const fs=require('node:fs/promises'),path=require('node:path');
 const {randomUUID}=require('node:crypto');
+const {isDeepStrictEqual}=require('node:util');
 const {SCOPE,ORIGIN,API_PATH,DOCUMENT,LIVE_MAX_REQUESTS,executionFor}=require('./observationSearchNewsContract');
 const {assertScope,scopeTransport}=require('./observationScope');
 const {resolveExecutionMode}=require('./executionMode');
@@ -87,20 +88,34 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
   if(credentialSource!=='GENERIC'||dailyOptions!==undefined||testKisReader!==undefined||newsOptions!==undefined)throw Error('SEARCH_NEWS_OPTIONS_FORBIDDEN');
   const localRoot=path.resolve(__dirname,'../.local/strategy-observations');
   if(testOnly){if(typeof testTransport!=='function'||!testApprovalDirectory||!directory)throw Error('TEST_DEPENDENCIES_REQUIRED');}
-  else if(searchNewsOptions?.mode!=='target-window'&&searchNewsOptions?.searchNewsMaxRequests!==LIVE_MAX_REQUESTS||testTransport!==undefined||
+  else if(!['target-window','rolling-poll'].includes(searchNewsOptions?.mode)&&
+    searchNewsOptions?.searchNewsMaxRequests!==LIVE_MAX_REQUESTS||testTransport!==undefined||
     testApprovalDirectory!==undefined||path.resolve(directory??localRoot)!==localRoot)
     throw Error('SEARCH_NEWS_LIVE_LIMIT_NOT_APPROVED');
   let used=false;
   return {async observe(symbol,{targetBusinessDate}={}){
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
+    const {createRollingNewsArchiveStore,assessPoll,nowKst}=require('./rollingNewsArchive');
     const execution=executionFor(symbol,targetBusinessDate,searchNewsOptions);
-    if(!testOnly&&execution.mode!=='target-window'&&execution.searchNewsMaxRequests!==LIVE_MAX_REQUESTS)
+    if(!testOnly&&!['target-window','rolling-poll'].includes(execution.mode)&&
+      execution.searchNewsMaxRequests!==LIVE_MAX_REQUESTS)
       throw Error('SEARCH_NEWS_LIVE_LIMIT_NOT_APPROVED');
     if(execution.mode==='target-window'){
       const plan=await planEodNewsTargetWindow({symbol,targetDate:targetBusinessDate,
         calendarEvidenceRef:execution.calendarEvidenceRef,testOnly,testDirectory:testOnly?directory:undefined});
       if(!plan.executable||plan.windowStartKst!==execution.windowStartKst||
         plan.windowEndKst!==execution.windowEndKst)throw Error('SEARCH_NEWS_WINDOW_UNVERIFIED');
+    }
+    const rollingStore=execution.mode==='rolling-poll'?createRollingNewsArchiveStore({testOnly,
+      testDirectory:testOnly?path.join(directory,'rolling-archive'):undefined}):null;
+    let rollingPlan=null;
+    if(rollingStore){
+      rollingPlan=await rollingStore.planPoll({symbol});
+      if(rollingPlan.query!==execution.query||rollingPlan.archiveId!==execution.expectedArchiveId||
+        rollingPlan.maxRequestsPerPoll!==execution.maxRequestsPerPoll||
+        rollingPlan.archiveRevision!==execution.expectedArchiveRevision||
+        !isDeepStrictEqual(rollingPlan.watermark,execution.expectedWatermark))
+        throw Error('ARCHIVE_STATE_CHANGED');
     }
     const keyId=environment.NAVER_API_HUB_API_KEY_ID,key=environment.NAVER_API_HUB_API_KEY;
     if(typeof keyId!=='string'||!keyId.trim()||typeof key!=='string'||!key.trim())throw Error('SEARCH_NEWS_CREDENTIALS_MISSING');
@@ -109,14 +124,21 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
     let budget,resultId=null;
     try {
       budget=await createObservationHttpBudget({approvalLease:lease,testTransport,requestTimeoutMs,totalTimeoutMs});
-      const fetch=scopeTransport(SCOPE,budget.fetch),pages=[];
-      await budget.run(async()=>{
-        for(let index=0;index<(execution.mode==='target-window'?execution.maxRequests:execution.searchNewsMaxRequests);index++){
+      const rollingLease=rollingStore?await rollingStore.reservePoll(rollingPlan):null;
+      const fetch=scopeTransport(SCOPE,budget.fetch),pages=[],rollingRequests=[];
+      let pollingError=null;
+      try{await budget.run(async()=>{
+        for(let index=0;index<(execution.mode==='target-window'?execution.maxRequests:
+          execution.mode==='rolling-poll'?execution.maxRequestsPerPoll:execution.searchNewsMaxRequests);index++){
           budget.assertActive();
-          const start=execution.mode==='target-window'?execution.initialStart+index*execution.startStep:
+          const start=execution.mode==='target-window'||execution.mode==='rolling-poll'?
+            execution.initialStart+index*execution.startStep:
             execution.start+index*execution.display,url=new URL(API_PATH,ORIGIN);
           url.searchParams.set('query',execution.query);url.searchParams.set('display',String(execution.display));
           url.searchParams.set('start',String(start));url.searchParams.set('sort',execution.sort);url.searchParams.set('format','json');
+          const attempt=execution.mode==='rolling-poll'?{requestIndex:index+1,start,
+            display:execution.display,sort:execution.sort,outcome:'FAILED'}:null;
+          if(attempt)rollingRequests.push(attempt);
           const response=await fetch(url.href,{headers:{'X-NCP-APIGW-API-KEY-ID':keyId,'X-NCP-APIGW-API-KEY':key}});
           const data=await response.json();
           if(!Array.isArray(data.items)||data.items.length>execution.display||data.start!==start||data.display!==execution.display)
@@ -133,14 +155,28 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
             requestedSort:execution.sort,requestedFormat:'json',apiPath:API_PATH,document:DOCUMENT,receivedAt,
             returnedCount:items.length,total:Number.isInteger(data.total)?data.total:null,
             lastBuildDate:safeText(data.lastBuildDate),items});
+          if(attempt){attempt.outcome='RESPONSE';attempt.returnedCount=items.length;}
           // Both modes remain collection evidence, never a strategy news verdict.
-          if(execution.mode==='target-window'){
+          if(execution.mode==='rolling-poll'){
+            const review=assessPoll(rollingPlan.archiveId?await rollingStore.read(symbol):null,pages,
+              {maxRequestsPerPoll:execution.maxRequestsPerPoll});
+            if(!rollingPlan.watermark||review.watermarkReached||review.warnings.length||items.length===0)break;
+          }else if(execution.mode==='target-window'){
             const review=reviewTargetWindowPages(pages,execution);
             if(review.lowerBoundaryReached||review.pubDateInvalidCount||!review.observedDescendingOrder||
               review.duplicateConflicts.length||items.length===0)break;
           }else if(items.some(item=>item.pubDateParsed?.seoulDate<=execution.probeDateCutoff)||items.length===0)break;
         }
-      });
+      });}catch(error){if(!rollingStore)throw error;pollingError=error;}
+      if(rollingStore){
+        const saved=await rollingStore.appendPoll(rollingLease,{approvalId:lease.approvalId,
+          requests:rollingRequests,pages,
+          failed:pollingError!==null,receivedAtKst:nowKst()});
+        resultId=saved.event.pollRunId;
+        if(pollingError)throw pollingError;
+        return {record:saved.event,archive:saved.archive,recordPath:saved.recordPath,
+          review:saved.event.review,requests:budget.report()};
+      }
       const record={schemaVersion:'OBSERVATION_V2',recordType:'SEARCH_NEWS_COLLECTION',id:randomUUID(),
         approvalId:lease.approvalId,scope:SCOPE,symbol,targetDate:targetBusinessDate,
         probeDateCutoff:execution.probeDateCutoff??null,query:execution.query,sort:execution.sort,

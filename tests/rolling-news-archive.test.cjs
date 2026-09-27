@@ -14,12 +14,13 @@ async function withStore(fn){
   try{return await fn(createRollingNewsArchiveStore({testOnly:true,testDirectory:dir}),dir);}
   finally{await fs.rm(dir,{recursive:true,force:true});}
 }
-const poll=(store,readPage,maxRequestsPerPoll=5)=>store.collectSyntheticPoll({symbol:'005930',
+const poll=(store,readPage,maxRequestsPerPoll)=>store.collectSyntheticPoll({symbol:'005930',
   readPage,maxRequestsPerPoll,receivedAtKst:'2026-09-27T16:00:00+09:00'});
 
 test('initial snapshot and one-page watermark are distinct from full coverage',()=>withStore(async store=>{
   const plan=await store.planPoll({symbol:'005930'});
-  assert.deepEqual(plan.allowedStarts,[1,101,201,301,401]);
+  assert.deepEqual(plan.allowedStarts,[1]);
+  assert.equal(plan.maxRequestsPerPoll,1);
   assert.equal(plan.trigger,'EXPLICIT_INTERNAL_ONLY');
   assert.equal(plan.collectionIntervalMinutes,null);
   const first=await poll(store,async ({start})=>page(start,[article(0)]));
@@ -84,7 +85,8 @@ test('parse failure, chronology reversal, duplicate conflict and failed request 
   const result=await poll(store,async ({start})=>page(start,[article(4),conflict]));
   assert.equal(result.event.review.status,'UNVERIFIED');
   assert.equal(result.event.review.duplicateConflictCount,1);
-  assert.equal(result.archive.articles.some(item=>item.identity===conflict.originallink),false);
+  assert.equal(result.archive.articles.some(item=>item.identity===conflict.originallink),true);
+  assert.ok(result.archive.warnings.includes('ARTICLE_IDENTITY_CONFLICT'));
   let calls=0;
   const failed=await poll(store,async()=>{calls++;throw Error('synthetic failure');});
   assert.equal(calls,1);
