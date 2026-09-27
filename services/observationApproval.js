@@ -13,10 +13,16 @@ const newsKeys=['scope','symbol','targetDate','page','pageSize','naverNewsMaxReq
 const newsPagedKeys=['scope','symbol','targetDate','pageSize','maxPages','naverNewsMaxRequests'];
 const newsProbeKeys=[...newsPagedKeys,'probeDateCutoff'];
 const newsScope='naver-news-only';
+const {SCOPE:searchScope,executionFor:searchExecution,ORIGIN:searchOrigin,API_PATH:searchPath}=require('./observationSearchNewsContract');
+const searchKeys=['scope','symbol','query','targetDate','probeDateCutoff','sort','display','start','searchNewsMaxRequests'];
 const {PAGE_SIZE,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
-const conditionKeys=value=>value?.scope===investorScope?investorKeys:value?.scope===newsScope?
+const conditionKeys=value=>value?.scope===searchScope?searchKeys:value?.scope===investorScope?investorKeys:value?.scope===newsScope?
   Object.hasOwn(value,'maxPages')?Object.hasOwn(value,'probeDateCutoff')?newsProbeKeys:newsPagedKeys:newsKeys:keys;
 function conditions(value) {
+  if(value?.scope===searchScope){
+    if(Object.keys(value).sort().join(',')!==[...searchKeys].sort().join(','))throw Error('APPROVAL_CONDITIONS_INVALID');
+    try{return searchExecution(value.symbol,value.targetDate,value);}catch{throw Error('APPROVAL_CONDITIONS_INVALID');}
+  }
   if(value?.scope===newsScope){
     const selected=conditionKeys(value);
     if(Object.keys(value).sort().join(',')!==[...selected].sort().join(',')||value.symbol!=='005930'||!isTargetDate(value.targetDate)||
@@ -110,6 +116,14 @@ function assertApprovalExecution(lease,execution) {
 }
 function assertApprovalRequest(lease,url,group,counts) {
   const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');
+  if(info.conditions.scope===searchScope){
+    const c=info.conditions;
+    if(group!=='searchNews'||url.origin!==searchOrigin||url.pathname!==searchPath||
+      url.searchParams.get('query')!==c.query||url.searchParams.get('display')!==String(c.display)||
+      url.searchParams.get('start')!==String(c.start+(counts.searchNews??0)*c.display)||
+      url.searchParams.get('sort')!==c.sort||url.searchParams.get('format')!=='json')throw Error('APPROVAL_RANGE_MISMATCH');
+    return;
+  }
   if(info.conditions.scope===newsScope){
     const c=info.conditions;
     const page=Object.hasOwn(c,'maxPages')?(counts.naverNews??0)+1:c.page;
@@ -132,4 +146,5 @@ function assertApprovalRequest(lease,url,group,counts) {
 }
 function approvalScope(lease){const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.scope;}
 function approvalNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==newsScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.naverNewsMaxRequests;}
-module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalNewsLimit};
+function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.searchNewsMaxRequests;}
+module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalNewsLimit,approvalSearchNewsLimit};

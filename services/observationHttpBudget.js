@@ -50,6 +50,19 @@ function classifyNews(value,options={}) {
     PAGE_SIZES.some(size=>pageSize===String(size))&&fixedQuery(u,{pageSize,page}))return 'naverNews';
   throw Error('REQUEST_NOT_ALLOWED');
 }
+function classifySearchNews(value,options={}) {
+  const {ORIGIN,API_PATH}=require('./observationSearchNewsContract');
+  const u=new URL(value),q=u.searchParams,display=Number(q.get('display')),start=Number(q.get('start'));
+  const headers=Object.fromEntries(Object.entries(options.headers??{}).map(([k,v])=>[k.toLowerCase(),v]));
+  if(u.origin===ORIGIN&&!u.username&&!u.password&&!u.hash&&u.pathname===API_PATH&&
+    (options.method??'GET').toUpperCase()==='GET'&&Number.isInteger(display)&&display>=1&&display<=100&&
+    Number.isInteger(start)&&start>=1&&start+display-1<=1000&&
+    typeof q.get('query')==='string'&&q.get('query').length>0&&q.get('sort')==='date'&&q.get('format')==='json'&&
+    fixedQuery(u,{query:q.get('query'),display:String(display),start:String(start),sort:'date',format:'json'})&&
+    typeof headers['x-ncp-apigw-api-key-id']==='string'&&headers['x-ncp-apigw-api-key-id']&&
+    typeof headers['x-ncp-apigw-api-key']==='string'&&headers['x-ncp-apigw-api-key'])return 'searchNews';
+  throw Error('REQUEST_NOT_ALLOWED');
+}
 function transport(url,options) {
   return new Promise((resolve,reject)=>{
     const request=https.request(url,{method:options.method,headers:options.headers,agent:false,signal:options.signal},response=>{
@@ -70,10 +83,12 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   const file=approval?approval.claimApprovalJournal(approvalLease,!!testTransport):testTransport?testJournalPath:RUN_FILE;
   if(!file)throw Error('JOURNAL_REQUIRED');
   const approvalKind=approval?approval.approvalScope(approvalLease):null;
-  const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only';
-  const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:LIMITS;
+  const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only',searchNews=approvalKind==='naver-search-news-only';
+  const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:
+    searchNews?{...LIMITS,searchNews:approval.approvalSearchNewsLimit(approvalLease)}:LIMITS;
   const counts={kisDaily:0,naverQuote:0,naverNews:0,kisToken:0},seen=new Set();
   if(investor)counts.kisInvestor=0;
+  if(searchNews)counts.searchNews=0;
   let stopped=false,busy=false,blocked=0,reason=null,activeController=null;
   const started=Date.now(),deadline=started+totalTimeoutMs;
   const snapshot=()=>({symbol:'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
@@ -88,13 +103,14 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
       if(stopped)throw Error('RUN_STOPPED');
       if(busy)throw Error('CONCURRENT_REQUEST_BLOCKED');
       if(Date.now()>=deadline)throw Error('TOTAL_TIMEOUT');
-      group=(investor?classifyInvestor:news?classifyNews:classify)(value,options);url=new URL(value);url.searchParams.sort();
+      group=(searchNews?classifySearchNews:investor?classifyInvestor:news?classifyNews:classify)(value,options);url=new URL(value);url.searchParams.sort();
       if(approval)approval.assertApprovalRequest(approvalLease,url,group,counts);
       if(seen.has(url.href))throw Error('AUTOMATIC_RETRY_BLOCKED');
       if(counts[group]>=limits[group])throw Error('REQUEST_LIMIT_REACHED');
       // Refuse unexpected transport features, proxy/cookie injection, or another auth path.
       if(Object.keys(options).some(k=>!['method','headers','body'].includes(k)))throw Error('REQUEST_NOT_ALLOWED');
-      const allowedHeaders=group.startsWith('kis')?['content-type','authorization','appkey','appsecret','tr_id']:['user-agent','referer','accept','content-type'];
+      const allowedHeaders=group==='searchNews'?['x-ncp-apigw-api-key-id','x-ncp-apigw-api-key','accept']:
+        group.startsWith('kis')?['content-type','authorization','appkey','appsecret','tr_id']:['user-agent','referer','accept','content-type'];
       if(Object.keys(options.headers??{}).some(k=>!allowedHeaders.includes(k.toLowerCase())))throw Error('REQUEST_NOT_ALLOWED');
       if(group!=='kisToken'&&options.body!==undefined)throw Error('REQUEST_NOT_ALLOWED');
     }catch(error){blocked++;stop(['RUN_STOPPED','CONCURRENT_REQUEST_BLOCKED','TOTAL_TIMEOUT','AUTOMATIC_RETRY_BLOCKED','REQUEST_LIMIT_REACHED'].includes(error.message)?error.message:'REQUEST_NOT_ALLOWED');throw Error(reason);}
@@ -136,4 +152,4 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
     },
     async close(){stop('RUN_FINISHED');activeController?.abort();await fs.writeFile(file,JSON.stringify({...snapshot(),state:'FINISHED'},null,2),{mode:0o600});}};
 }
-module.exports={createObservationHttpBudget,classify,classifyInvestor,classifyNews,LIMITS,RUN_FILE};
+module.exports={createObservationHttpBudget,classify,classifyInvestor,classifyNews,classifySearchNews,LIMITS,RUN_FILE};
