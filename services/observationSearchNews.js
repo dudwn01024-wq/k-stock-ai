@@ -10,6 +10,9 @@ const {createObservationHttpBudget}=require('./observationHttpBudget');
 const {planEodNewsTargetWindow}=require('./eodNewsTargetWindow');
 
 const safeText=value=>typeof value==='string'?value.slice(0,1000):null;
+const searchArticleIdentity=item=>item?.originallink||item?.link||null;
+const searchArticleSignature=item=>JSON.stringify([item?.title,item?.originallink,item?.link,
+  item?.description,item?.pubDateRaw]);
 const seoulDate=value=>{
   const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'})
     .formatToParts(new Date(value));
@@ -50,9 +53,9 @@ function reviewTargetWindowPages(pages,{windowStartKst,windowEndKst,maxRequests,
       if(value<start)lowerBoundaryReached=true;
     }
     // NAVER search has no article ID. Prefer the provided original URL, then NAVER URL.
-    const key=item.originallink||item.link;
+    const key=searchArticleIdentity(item);
     all.push({key,page:page.page,offset});
-    const signature=JSON.stringify([item.title,item.originallink,item.link,item.description,item.pubDateRaw]);
+    const signature=searchArticleSignature(item);
     if(key&&seen.has(key)){
       if(seen.get(key).signature===signature)duplicates.push({key,page:page.page,offset});
       else{conflicts.add(key);duplicateConflicts.push({key,page:page.page,offset});}
@@ -156,4 +159,5 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
     } finally {try{await budget?.close();}finally{await store.finish(lease,resultId);}}
   }};
 }
-module.exports={parsePubDate,reviewSearchNewsRecord,reviewTargetWindowPages,createSearchNewsObservation};
+module.exports={parsePubDate,searchArticleIdentity,searchArticleSignature,reviewSearchNewsRecord,
+  reviewTargetWindowPages,createSearchNewsObservation};
