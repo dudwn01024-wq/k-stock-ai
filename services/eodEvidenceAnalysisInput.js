@@ -165,7 +165,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       inputReady:reasons.length===0,reasons:[...new Set(reasons)],raw,normalized,derived:{daily:derived},
       preparedRecord:prepared,eodInputs,calendarEvidence};
   }
-  return {build};
+  return {build,loadCalendar};
 }
 
 // Pure reuse of the existing EOD evaluator. No provider, credential or network dependency.

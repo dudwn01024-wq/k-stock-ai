@@ -17,8 +17,11 @@ const newsProbeKeys=[...newsPagedKeys,'probeDateCutoff'];
 const newsScope='naver-news-only';
 const {SCOPE:searchScope,executionFor:searchExecution,ORIGIN:searchOrigin,API_PATH:searchPath}=require('./observationSearchNewsContract');
 const searchKeys=['scope','symbol','query','targetDate','probeDateCutoff','sort','display','start','searchNewsMaxRequests'];
+const searchWindowKeys=['scope','mode','symbol','query','targetDate','calendarEvidenceRef',
+  'windowStartKst','windowEndKst','sort','display','initialStart','startStep','maxRequests'];
 const {PAGE_SIZE,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
-const conditionKeys=value=>value?.scope===holidayScope?holidayKeys:value?.scope===searchScope?searchKeys:value?.scope===investorScope?investorKeys:value?.scope===newsScope?
+const conditionKeys=value=>value?.scope===holidayScope?holidayKeys:value?.scope===searchScope?
+  value.mode==='target-window'?searchWindowKeys:searchKeys:value?.scope===investorScope?investorKeys:value?.scope===newsScope?
   Object.hasOwn(value,'maxPages')?Object.hasOwn(value,'probeDateCutoff')?newsProbeKeys:newsPagedKeys:newsKeys:keys;
 function conditions(value) {
   if(value?.scope===holidayScope){
@@ -27,8 +30,9 @@ function conditions(value) {
     return Object.fromEntries(holidayKeys.map(k=>[k,value[k]]));
   }
   if(value?.scope===searchScope){
-    if(Object.keys(value).sort().join(',')!==[...searchKeys].sort().join(','))throw Error('APPROVAL_CONDITIONS_INVALID');
-    try{return searchExecution(value.symbol,value.targetDate,value);}catch{throw Error('APPROVAL_CONDITIONS_INVALID');}
+    if(Object.keys(value).sort().join(',')!==[...conditionKeys(value)].sort().join(','))throw Error('APPROVAL_CONDITIONS_INVALID');
+    try{const {scope,symbol,targetDate,...options}=value;return searchExecution(symbol,targetDate,options);}
+    catch{throw Error('APPROVAL_CONDITIONS_INVALID');}
   }
   if(value?.scope===newsScope){
     const selected=conditionKeys(value);
@@ -132,10 +136,11 @@ function assertApprovalRequest(lease,url,group,counts) {
     return;
   }
   if(info.conditions.scope===searchScope){
-    const c=info.conditions;
+    const c=info.conditions,expectedStart=c.mode==='target-window'?
+      c.initialStart+(counts.searchNews??0)*c.startStep:c.start+(counts.searchNews??0)*c.display;
     if(group!=='searchNews'||url.origin!==searchOrigin||url.pathname!==searchPath||
       url.searchParams.get('query')!==c.query||url.searchParams.get('display')!==String(c.display)||
-      url.searchParams.get('start')!==String(c.start+(counts.searchNews??0)*c.display)||
+      url.searchParams.get('start')!==String(expectedStart)||
       url.searchParams.get('sort')!==c.sort||url.searchParams.get('format')!=='json')throw Error('APPROVAL_RANGE_MISMATCH');
     return;
   }
@@ -161,5 +166,5 @@ function assertApprovalRequest(lease,url,group,counts) {
 }
 function approvalScope(lease){const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.scope;}
 function approvalNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==newsScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.naverNewsMaxRequests;}
-function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.searchNewsMaxRequests;}
+function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.mode==='target-window'?info.conditions.maxRequests:info.conditions.searchNewsMaxRequests;}
 module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalNewsLimit,approvalSearchNewsLimit};

@@ -7,6 +7,7 @@ const {assertScope,scopeTransport}=require('./observationScope');
 const {resolveExecutionMode}=require('./executionMode');
 const {createObservationApprovalStore}=require('./observationApproval');
 const {createObservationHttpBudget}=require('./observationHttpBudget');
+const {planEodNewsTargetWindow}=require('./eodNewsTargetWindow');
 
 const safeText=value=>typeof value==='string'?value.slice(0,1000):null;
 const seoulDate=value=>{
@@ -34,6 +35,48 @@ function reviewSearchNewsRecord(record){
       ...(dated.length<articles.length?['NEWS_PUBDATE_INVALID_OR_MISSING']:[]),
       ...(firstReachedPage===null?['PROBE_DATE_NOT_REACHED']:[])]};
 }
+function reviewTargetWindowPages(pages,{windowStartKst,windowEndKst,maxRequests,requestLimit}={}){
+  const start=Date.parse(windowStartKst),end=Date.parse(windowEndKst),seen=new Map(),conflicts=new Set();
+  const duplicates=[],duplicateConflicts=[],candidates=[],all=[];
+  let prior=Infinity,ordered=true,invalidCount=0,upperBoundaryReached=false,lowerBoundaryReached=false;
+  for(const page of pages)for(const [offset,item] of page.items.entries()){
+    const parsed=parsePubDate(item.pubDateRaw),value=Date.parse(parsed?.instant??'');
+    const valid=Number.isFinite(value)&&parsed.instant===item.pubDateParsed?.instant;
+    if(!valid)invalidCount++;
+    else{
+      if(value>prior)ordered=false;
+      prior=value;
+      if(value<=end)upperBoundaryReached=true;
+      if(value<start)lowerBoundaryReached=true;
+    }
+    // NAVER search has no article ID. Prefer the provided original URL, then NAVER URL.
+    const key=item.originallink||item.link;
+    all.push({key,page:page.page,offset});
+    const signature=JSON.stringify([item.title,item.originallink,item.link,item.description,item.pubDateRaw]);
+    if(key&&seen.has(key)){
+      if(seen.get(key).signature===signature)duplicates.push({key,page:page.page,offset});
+      else{conflicts.add(key);duplicateConflicts.push({key,page:page.page,offset});}
+    }else if(key)seen.set(key,{signature,page:page.page,offset});
+    if(valid&&value>=start&&value<=end)candidates.push({key,page:page.page,offset});
+  }
+  const candidateRefs=candidates.filter(item=>!item.key||!conflicts.has(item.key)&&
+    seen.get(item.key)?.page===item.page&&seen.get(item.key)?.offset===item.offset);
+  const targetWindowTraversalComplete=upperBoundaryReached&&lowerBoundaryReached&&ordered&&
+    invalidCount===0&&duplicateConflicts.length===0;
+  const stopReason=lowerBoundaryReached?'LOWER_BOUNDARY_REACHED':
+    pages.at(-1)?.items.length===0?'EMPTY_PAGE':pages.length===(maxRequests??requestLimit)?'REQUEST_LIMIT_REACHED':'NOT_STOPPED';
+  return {windowStartKst,windowEndKst,upperBoundaryReached,lowerBoundaryReached,
+    targetWindowTraversalComplete,stopReason,windowStatus:targetWindowTraversalComplete?'BOUNDED_REACHED':
+      invalidCount||!ordered||duplicateConflicts.length?'UNVERIFIED':'INCOMPLETE',
+    candidateRefs,candidateCount:candidateRefs.length,rawCount:pages.reduce((n,page)=>n+page.items.length,0),
+    deduplicatedCount:all.filter(item=>!item.key||!conflicts.has(item.key)&&
+      seen.get(item.key)?.page===item.page&&seen.get(item.key)?.offset===item.offset).length,
+    duplicates,duplicateConflicts,pubDateInvalidCount:invalidCount,observedDescendingOrder:ordered,
+    fullCoverageProven:false,strategyNewsStatus:'HELD',
+    reasonCodes:['SEARCH_RESULTS_BOUNDED','FULL_COVERAGE_NOT_PROVEN',
+      ...(invalidCount?['NEWS_PUBDATE_INVALID_OR_MISSING']:[]),...(!ordered?['NEWS_RESULT_ORDER_UNVERIFIED']:[]),
+      ...(duplicateConflicts.length?['NEWS_DUPLICATE_CONFLICT']:[])]};
+}
 function createSearchNewsObservation({environment=process.env,approvalId,testOnly=false,testTransport,testApprovalDirectory,directory,
   requestTimeoutMs=10000,totalTimeoutMs=60000,credentialSource='GENERIC',dailyOptions,testKisReader,newsOptions,searchNewsOptions}={}){
   const mode=resolveExecutionMode(environment.KSTOCK_EXECUTION_MODE,environment.NODE_ENV).mode;
@@ -41,14 +84,21 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
   if(credentialSource!=='GENERIC'||dailyOptions!==undefined||testKisReader!==undefined||newsOptions!==undefined)throw Error('SEARCH_NEWS_OPTIONS_FORBIDDEN');
   const localRoot=path.resolve(__dirname,'../.local/strategy-observations');
   if(testOnly){if(typeof testTransport!=='function'||!testApprovalDirectory||!directory)throw Error('TEST_DEPENDENCIES_REQUIRED');}
-  else if(searchNewsOptions?.searchNewsMaxRequests!==LIVE_MAX_REQUESTS||testTransport!==undefined||
+  else if(searchNewsOptions?.mode!=='target-window'&&searchNewsOptions?.searchNewsMaxRequests!==LIVE_MAX_REQUESTS||testTransport!==undefined||
     testApprovalDirectory!==undefined||path.resolve(directory??localRoot)!==localRoot)
     throw Error('SEARCH_NEWS_LIVE_LIMIT_NOT_APPROVED');
   let used=false;
   return {async observe(symbol,{targetBusinessDate}={}){
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
     const execution=executionFor(symbol,targetBusinessDate,searchNewsOptions);
-    if(!testOnly&&execution.searchNewsMaxRequests!==LIVE_MAX_REQUESTS)throw Error('SEARCH_NEWS_LIVE_LIMIT_NOT_APPROVED');
+    if(!testOnly&&execution.mode!=='target-window'&&execution.searchNewsMaxRequests!==LIVE_MAX_REQUESTS)
+      throw Error('SEARCH_NEWS_LIVE_LIMIT_NOT_APPROVED');
+    if(execution.mode==='target-window'){
+      const plan=await planEodNewsTargetWindow({symbol,targetDate:targetBusinessDate,
+        calendarEvidenceRef:execution.calendarEvidenceRef,testOnly,testDirectory:testOnly?directory:undefined});
+      if(!plan.executable||plan.windowStartKst!==execution.windowStartKst||
+        plan.windowEndKst!==execution.windowEndKst)throw Error('SEARCH_NEWS_WINDOW_UNVERIFIED');
+    }
     const keyId=environment.NAVER_API_HUB_API_KEY_ID,key=environment.NAVER_API_HUB_API_KEY;
     if(typeof keyId!=='string'||!keyId.trim()||typeof key!=='string'||!key.trim())throw Error('SEARCH_NEWS_CREDENTIALS_MISSING');
     const store=createObservationApprovalStore({environment,testOnly,testDirectory:testOnly?testApprovalDirectory:undefined});
@@ -58,9 +108,10 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
       budget=await createObservationHttpBudget({approvalLease:lease,testTransport,requestTimeoutMs,totalTimeoutMs});
       const fetch=scopeTransport(SCOPE,budget.fetch),pages=[];
       await budget.run(async()=>{
-        for(let index=0;index<execution.searchNewsMaxRequests;index++){
+        for(let index=0;index<(execution.mode==='target-window'?execution.maxRequests:execution.searchNewsMaxRequests);index++){
           budget.assertActive();
-          const start=execution.start+index*execution.display,url=new URL(API_PATH,ORIGIN);
+          const start=execution.mode==='target-window'?execution.initialStart+index*execution.startStep:
+            execution.start+index*execution.display,url=new URL(API_PATH,ORIGIN);
           url.searchParams.set('query',execution.query);url.searchParams.set('display',String(execution.display));
           url.searchParams.set('start',String(start));url.searchParams.set('sort',execution.sort);url.searchParams.set('format','json');
           const response=await fetch(url.href,{headers:{'X-NCP-APIGW-API-KEY-ID':keyId,'X-NCP-APIGW-API-KEY':key}});
@@ -79,17 +130,25 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
             requestedSort:execution.sort,requestedFormat:'json',apiPath:API_PATH,document:DOCUMENT,receivedAt,
             returnedCount:items.length,total:Number.isInteger(data.total)?data.total:null,
             lastBuildDate:safeText(data.lastBuildDate),items});
-          // Calendar-date probe only. It is never strategy-window evidence.
-          if(items.some(item=>item.pubDateParsed?.seoulDate<=execution.probeDateCutoff)||items.length===0)break;
+          // Both modes remain collection evidence, never a strategy news verdict.
+          if(execution.mode==='target-window'){
+            const review=reviewTargetWindowPages(pages,execution);
+            if(review.lowerBoundaryReached||review.pubDateInvalidCount||!review.observedDescendingOrder||
+              review.duplicateConflicts.length||items.length===0)break;
+          }else if(items.some(item=>item.pubDateParsed?.seoulDate<=execution.probeDateCutoff)||items.length===0)break;
         }
       });
       const record={schemaVersion:'OBSERVATION_V2',recordType:'SEARCH_NEWS_COLLECTION',id:randomUUID(),
         approvalId:lease.approvalId,scope:SCOPE,symbol,targetDate:targetBusinessDate,
-        probeDateCutoff:execution.probeDateCutoff,query:execution.query,sort:execution.sort,start:execution.start,
-        display:execution.display,requestLimit:execution.searchNewsMaxRequests,
+        probeDateCutoff:execution.probeDateCutoff??null,query:execution.query,sort:execution.sort,
+        start:execution.start??execution.initialStart,display:execution.display,
+        requestLimit:execution.searchNewsMaxRequests??execution.maxRequests,
+        ...(execution.mode==='target-window'?{mode:execution.mode,calendarEvidenceRef:execution.calendarEvidenceRef,
+          windowStartKst:execution.windowStartKst,windowEndKst:execution.windowEndKst}:{}),
         dataLabel:testOnly?'테스트 데이터':'읽기 전용 뉴스 검색',pages,requestCounts:budget.report().counts,
         strategyEvaluated:false,riskReady:false,ledgerInputReady:false,tradeAuthorization:'NOT_EVALUATED',orderConnected:false};
       record.review=reviewSearchNewsRecord(record);
+      if(execution.mode==='target-window')record.targetWindowReview=reviewTargetWindowPages(pages,execution);
       const folder=path.join(testOnly?path.resolve(directory):localRoot,testOnly?'test':'live-once');await fs.mkdir(folder,{recursive:true});
       await fs.writeFile(path.join(folder,`${record.id}.json`),JSON.stringify(record,null,2),{flag:'wx',mode:0o600});
       resultId=record.id;
@@ -97,4 +156,4 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
     } finally {try{await budget?.close();}finally{await store.finish(lease,resultId);}}
   }};
 }
-module.exports={parsePubDate,reviewSearchNewsRecord,createSearchNewsObservation};
+module.exports={parsePubDate,reviewSearchNewsRecord,reviewTargetWindowPages,createSearchNewsObservation};
