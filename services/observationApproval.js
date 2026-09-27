@@ -9,14 +9,21 @@ const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9
 const keys=['scope','symbol','targetDate','market','timeframe','adjustedPrice','kisDailyMaxRequests','kisTokenMaxRequests'];
 const investorKeys=['scope','symbol','targetDate','market','kisInvestorMaxRequests','kisTokenMaxRequests'];
 const investorScope='kis-investor-daily-only';
+const holidayKeys=['scope','queryBaseDate','kisHolidayMaxRequests','kisTokenMaxRequests'];
+const holidayScope='kis-holiday-calendar-only';
 const newsKeys=['scope','symbol','targetDate','page','pageSize','naverNewsMaxRequests'];
 const newsPagedKeys=['scope','symbol','targetDate','pageSize','maxPages','naverNewsMaxRequests'];
 const newsProbeKeys=[...newsPagedKeys,'probeDateCutoff'];
 const newsScope='naver-news-only';
 const {PAGE_SIZE,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
-const conditionKeys=value=>value?.scope===investorScope?investorKeys:value?.scope===newsScope?
+const conditionKeys=value=>value?.scope===holidayScope?holidayKeys:value?.scope===investorScope?investorKeys:value?.scope===newsScope?
   Object.hasOwn(value,'maxPages')?Object.hasOwn(value,'probeDateCutoff')?newsProbeKeys:newsPagedKeys:newsKeys:keys;
 function conditions(value) {
+  if(value?.scope===holidayScope){
+    if(Object.keys(value).sort().join(',')!==[...holidayKeys].sort().join(',')||!isTargetDate(value.queryBaseDate)||
+      value.kisHolidayMaxRequests!==1||value.kisTokenMaxRequests!==1)throw Error('APPROVAL_CONDITIONS_INVALID');
+    return Object.fromEntries(holidayKeys.map(k=>[k,value[k]]));
+  }
   if(value?.scope===newsScope){
     const selected=conditionKeys(value);
     if(Object.keys(value).sort().join(',')!==[...selected].sort().join(',')||value.symbol!=='005930'||!isTargetDate(value.targetDate)||
@@ -110,6 +117,14 @@ function assertApprovalExecution(lease,execution) {
 }
 function assertApprovalRequest(lease,url,group,counts) {
   const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');
+  if(info.conditions.scope===holidayScope){
+    if(group==='kisToken')return;
+    const c=info.conditions,q=url.searchParams;
+    if(group!=='kisHoliday'||url.pathname!=='/uapi/domestic-stock/v1/quotations/chk-holiday'||
+      q.get('BASS_DT')!==c.queryBaseDate.replaceAll('-','')||q.get('CTX_AREA_FK')!==''||q.get('CTX_AREA_NK')!==''||
+      counts.kisHoliday!==0)throw Error('APPROVAL_RANGE_MISMATCH');
+    return;
+  }
   if(info.conditions.scope===newsScope){
     const c=info.conditions;
     const page=Object.hasOwn(c,'maxPages')?(counts.naverNews??0)+1:c.page;

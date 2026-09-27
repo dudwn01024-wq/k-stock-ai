@@ -42,6 +42,15 @@ function classifyInvestor(value,options={}) {
   if(classify(value,options)==='kisToken')return 'kisToken';
   throw Error('REQUEST_NOT_ALLOWED');
 }
+function classifyHoliday(value,options={}) {
+  const {API_PATH,TR_ID}=require('./kisHolidayCalendar');
+  const u=new URL(value),q=u.searchParams,date=q.get('BASS_DT');
+  if(u.origin==='https://openapi.koreainvestment.com:9443'&&!u.username&&!u.password&&!u.hash&&u.pathname===API_PATH&&
+    (options.method??'GET').toUpperCase()==='GET'&&/^\d{8}$/.test(date)&&options.headers?.tr_id===TR_ID&&
+    fixedQuery(u,{BASS_DT:date,CTX_AREA_FK:'',CTX_AREA_NK:''}))return 'kisHoliday';
+  if(classify(value,options)==='kisToken')return 'kisToken';
+  throw Error('REQUEST_NOT_ALLOWED');
+}
 function classifyNews(value,options={}) {
   const {API_PATH,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
   const u=new URL(value),page=u.searchParams.get('page'),pageSize=u.searchParams.get('pageSize');
@@ -56,7 +65,8 @@ function transport(url,options) {
       const chunks=[];let size=0;
       response.on('data',chunk=>{size+=chunk.length;if(size>4*1024*1024){request.destroy();reject(Error('RESPONSE_TOO_LARGE'));}else chunks.push(chunk);});
       response.on('error',()=>reject(Error('NETWORK_FAILED')));
-      response.on('end',()=>{try{resolve({status:response.statusCode,data:JSON.parse(Buffer.concat(chunks).toString('utf8'))});}catch{reject(Error('INVALID_JSON'));}});
+      response.on('end',()=>{try{resolve({status:response.statusCode,data:JSON.parse(Buffer.concat(chunks).toString('utf8')),
+        headers:{tr_cont:response.headers.tr_cont??null}});}catch{reject(Error('INVALID_JSON'));}});
     });
     request.on('error',()=>reject(Error('NETWORK_FAILED')));
     if(options.body)request.write(options.body);
@@ -70,13 +80,15 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   const file=approval?approval.claimApprovalJournal(approvalLease,!!testTransport):testTransport?testJournalPath:RUN_FILE;
   if(!file)throw Error('JOURNAL_REQUIRED');
   const approvalKind=approval?approval.approvalScope(approvalLease):null;
-  const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only';
-  const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:LIMITS;
+  const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only',holiday=approvalKind==='kis-holiday-calendar-only';
+  const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:
+    holiday?{...LIMITS,kisHoliday:1}:LIMITS;
   const counts={kisDaily:0,naverQuote:0,naverNews:0,kisToken:0},seen=new Set();
   if(investor)counts.kisInvestor=0;
+  if(holiday)counts.kisHoliday=0;
   let stopped=false,busy=false,blocked=0,reason=null,activeController=null;
   const started=Date.now(),deadline=started+totalTimeoutMs;
-  const snapshot=()=>({symbol:'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
+  const snapshot=()=>({symbol:holiday?null:'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
   await fs.mkdir(path.dirname(file),{recursive:true});
   // Never remove this marker. A fresh process cannot reset this approval's counters.
   await fs.writeFile(file,JSON.stringify({...snapshot(),state:'STARTED'}),{flag:'wx',mode:0o600});
@@ -88,7 +100,7 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
       if(stopped)throw Error('RUN_STOPPED');
       if(busy)throw Error('CONCURRENT_REQUEST_BLOCKED');
       if(Date.now()>=deadline)throw Error('TOTAL_TIMEOUT');
-      group=(investor?classifyInvestor:news?classifyNews:classify)(value,options);url=new URL(value);url.searchParams.sort();
+      group=(investor?classifyInvestor:news?classifyNews:holiday?classifyHoliday:classify)(value,options);url=new URL(value);url.searchParams.sort();
       if(approval)approval.assertApprovalRequest(approvalLease,url,group,counts);
       if(seen.has(url.href))throw Error('AUTOMATIC_RETRY_BLOCKED');
       if(counts[group]>=limits[group])throw Error('REQUEST_LIMIT_REACHED');
@@ -110,10 +122,11 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
       if(!Number.isInteger(response.status))throw Error('HTTP_FAILED');
       if(response.status<200||response.status>=300)throw Error(response.status>=300&&response.status<400?'REDIRECT_BLOCKED':'HTTP_FAILED');
       if(!response.data||typeof response.data!=='object')throw Error('INVALID_JSON');
-      if((group==='kisDaily'||group==='kisInvestor')&&response.data.rt_cd!=='0')throw Error('PROVIDER_FAILED');
+      if((group==='kisDaily'||group==='kisInvestor'||group==='kisHoliday')&&response.data.rt_cd!=='0')throw Error('PROVIDER_FAILED');
       if(group==='kisToken'&&!response.data.access_token)throw Error('AUTH_FAILED');
       if(response.data.error||response.data.errorCode)throw Error('PROVIDER_FAILED');
-      return {ok:true,status:response.status,json:async()=>response.data};
+      return {ok:true,status:response.status,json:async()=>response.data,
+        ...(group==='kisHoliday'?{headers:{tr_cont:response.headers?.tr_cont??null}}:{})};
     }catch(error){stop(['REQUEST_TIMEOUT','REDIRECT_BLOCKED','HTTP_FAILED','PROVIDER_FAILED','AUTH_FAILED','INVALID_JSON'].includes(error.message)?error.message:'NETWORK_FAILED');throw Error(reason);}
     finally{clearTimeout(timer);busy=false;activeController=null;}
   };
@@ -136,4 +149,4 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
     },
     async close(){stop('RUN_FINISHED');activeController?.abort();await fs.writeFile(file,JSON.stringify({...snapshot(),state:'FINISHED'},null,2),{mode:0o600});}};
 }
-module.exports={createObservationHttpBudget,classify,classifyInvestor,classifyNews,LIMITS,RUN_FILE};
+module.exports={createObservationHttpBudget,classify,classifyInvestor,classifyNews,classifyHoliday,LIMITS,RUN_FILE};
