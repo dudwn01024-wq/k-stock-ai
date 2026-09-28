@@ -10,6 +10,7 @@ const {createEvidenceCollector}=require('./observationEvidence');
 const {resolveExecutionMode}=require('./executionMode');
 const {FULL,DAILY,assertScope,dailyRequestOptions,scopeTransport}=require('./observationScope');
 const {createObservationApprovalStore}=require('./observationApproval');
+const {createKisReadOnlyTokenCache,issueKisLiveToken}=require('./kisReadOnlyTokenCache');
 const executionFor=(symbol,targetDate,options)=>({scope:DAILY,symbol,targetDate,market:options.market,timeframe:options.timeframe,
   adjustedPrice:options.adjustedPrice,kisDailyMaxRequests:2,kisTokenMaxRequests:1});
 
@@ -96,8 +97,13 @@ function createOneShotObservation({approved=false,testOnly=false,testTransport,t
       budget=await createObservationHttpBudget({testTransport,testJournalPath,approvalLease,requestTimeoutMs,totalTimeoutMs});
       // The existing server credential loader must run BEFORE this import in a future approved run.
       const existingReader=testOnly?testKisReader:require('./kisMarketData');
+      const tokenCache=selected&&scope===DAILY?createKisReadOnlyTokenCache({testOnly,
+        testDirectory:testOnly?path.join(path.dirname(testApprovalDirectory),'kis-token-cache'):undefined}):null;
+      const tokenProvider=tokenCache?()=>tokenCache.getToken({source:'KIS_LIVE',credentials:selected,
+        issue:()=>issueKisLiveToken(selected,budget.fetch)}):undefined;
       // Do not fork the generic reader's token cache into a differently authenticated LIVE reader.
-      const kisReader=selected?existingReader.createKisMarketData({environment:selected,fetchImpl:budget.fetch,waitImpl:budget.wait}):existingReader;
+      const kisReader=selected?existingReader.createKisMarketData({environment:selected,
+        fetchImpl:budget.fetch,waitImpl:budget.wait,tokenProvider}):existingReader;
       const provider=createMarketDataProvider({kisReader,budget,scope,executionMode,dailyOptions});
       const service=createObservationService({provider,testOnly,directory,scope,executionMode});
       const result=await budget.run(()=>service.observe(symbol,{targetBusinessDate}));

@@ -8,6 +8,7 @@ const {resolveExecutionMode}=require('./executionMode');
 const {selectObservationCredentials}=require('./observationCredentials');
 const {createObservationApprovalStore}=require('./observationApproval');
 const {createObservationHttpBudget}=require('./observationHttpBudget');
+const {createKisReadOnlyTokenCache,issueKisLiveToken}=require('./kisReadOnlyTokenCache');
 const {holidayRequest,sanitizeHolidayPage,calendarFromPages,createHolidayCollectionStore}=require('./kisHolidayCalendar');
 const {resolveLatestCompletedTradingDay}=require('./latestCompletedTradingDay');
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations');
@@ -61,11 +62,11 @@ function createHolidayObservation({environment=process.env,credentialSource,appr
       budget=await createObservationHttpBudget({approvalLease:lease,testTransport,requestTimeoutMs,totalTimeoutMs});
       budget.assertApproval(execution);
       const guarded=scopeTransport(HOLIDAY,budget.fetch);
+      const tokenCache=createKisReadOnlyTokenCache({testOnly,
+        testDirectory:testOnly?path.join(path.dirname(testApprovalDirectory),'kis-token-cache'):undefined});
       const result=await budget.run(async()=>{
-        const tokenResponse=await guarded(credentials.KIS_BASE_URL+'/oauth2/tokenP',{method:'POST',headers:{'content-type':'application/json'},
-          body:JSON.stringify({grant_type:'client_credentials',appkey:credentials.KIS_APP_KEY,appsecret:credentials.KIS_APP_SECRET})});
-        const token=(await tokenResponse.json()).access_token;
-        if(typeof token!=='string'||!token||/\s/.test(token))throw Error('AUTH_FAILED');
+        const token=await tokenCache.getToken({source:'KIS_LIVE',credentials,
+          issue:()=>issueKisLiveToken(credentials,guarded)});
         budget.assertActive();
         const request=holidayRequest({bassDt:requestBassDt});
         const url=new URL(request.path,credentials.KIS_BASE_URL);url.search=new URLSearchParams(request.params);

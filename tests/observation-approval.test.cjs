@@ -97,7 +97,9 @@ test('TEST approval: new explicit ID executes separately without changing prior 
   const h=await setup(t),legacyBefore=await legacy(),first=await h.issue();await h.run(first);
   const firstDir=path.join(h.testApprovalDirectory,first),before=new Map();
   for(const file of await fs.readdir(firstDir))before.set(file,await fs.readFile(path.join(firstDir,file)));
-  const second=await h.issue();await h.run(second);assert.notEqual(first,second);assert.equal(h.requests.length,6);
+  const second=await h.issue(),secondResult=await h.run(second);
+  assert.notEqual(first,second);assert.equal(h.requests.length,5);
+  assert.equal(secondResult.requests.counts.kisToken,0);
   for(const [file,content] of before)assert.deepEqual(await fs.readFile(path.join(firstDir,file)),content);
   assert.deepEqual(await legacy(),legacyBefore);
   assert.equal((await h.store.inspect(first)).status,'CONSUMED');assert.equal((await h.store.inspect(second)).status,'CONSUMED');

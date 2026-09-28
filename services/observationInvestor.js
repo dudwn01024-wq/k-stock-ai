@@ -8,6 +8,8 @@ const {createObservationApprovalStore}=require('./observationApproval');
 const {createObservationHttpBudget}=require('./observationHttpBudget');
 const {selectObservationCredentials}=require('./observationCredentials');
 const {resolveExecutionMode}=require('./executionMode');
+const path=require('node:path');
+const {createKisReadOnlyTokenCache,issueKisLiveToken}=require('./kisReadOnlyTokenCache');
 
 function reviewInvestorEvidence(input,targetDate) {
   if(!isTargetDate(targetDate))throw Error('INVALID_TARGET_DATE');
@@ -42,7 +44,7 @@ function reviewInvestorEvidence(input,targetDate) {
     issueCodes:[...new Set(issues)],unit:{kind:'QUANTITY',label:'수량/거래량',scale:'UNVERIFIED',document:FIELD_DOCUMENT},
     strategyUse:{status:'HELD',finality:'UNKNOWN',finalizedAt:null,sessionScope:'UNKNOWN',reason:'SUPPLY_FINALITY_UNVERIFIED'}};
 }
-function createInvestorProvider({credentials,budget,executionMode}){
+function createInvestorProvider({credentials,budget,executionMode,tokenCache}){
   assertScope(SCOPE,executionMode);
   const collector=createEvidenceCollector(scopeTransport(SCOPE,budget.fetch));let used=false;
   const provider=async(symbol,{targetBusinessDate}={})=>{
@@ -50,12 +52,10 @@ function createInvestorProvider({credentials,budget,executionMode}){
     budget.assertApproval(executionFor(symbol,targetBusinessDate));
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
     budget.assertActive();
-    // New isolated adapter uses the existing selected LIVE bundle and guarded OAuth route.
-    // No generic token cache, automatic renewal, pagination or retry. No token leaves this call.
-    const auth=await collector.fetch(credentials.KIS_BASE_URL+'/oauth2/tokenP',{method:'POST',headers:{'content-type':'application/json'},
-      body:JSON.stringify({grant_type:'client_credentials',appkey:credentials.KIS_APP_KEY,appsecret:credentials.KIS_APP_SECRET})});
-    const token=(await auth.json()).access_token;
-    if(typeof token!=='string'||!token||/\s/.test(token))throw Error('AUTH_FAILED');
+    // Approval is checked before even reading the shared, credential-bound LIVE cache.
+    const issue=()=>issueKisLiveToken(credentials,collector.fetch);
+    const token=tokenCache?await tokenCache.getToken({source:'KIS_LIVE',credentials,issue}):
+      (await issue()).token;
     budget.assertActive();
     const url=new URL(API_PATH,credentials.KIS_BASE_URL);
     url.search=new URLSearchParams({FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:symbol,FID_INPUT_DATE_1:targetBusinessDate.replaceAll('-',''),FID_ORG_ADJ_PRC:'',FID_ETC_CLS_CODE:''});
@@ -82,7 +82,9 @@ function createInvestorObservation({environment=process.env,credentialSource,app
     const lease=await store.consume(approvalId,executionFor(symbol,targetBusinessDate));let budget,resultId=null;
     try{
       budget=await createObservationHttpBudget({approvalLease:lease,testTransport,requestTimeoutMs,totalTimeoutMs});
-      const provider=createInvestorProvider({credentials,budget,executionMode:mode});
+      const tokenCache=createKisReadOnlyTokenCache({testOnly,
+        testDirectory:testOnly?path.join(path.dirname(testApprovalDirectory),'kis-token-cache'):undefined});
+      const provider=createInvestorProvider({credentials,budget,executionMode:mode,tokenCache});
       const service=require('./strategyObservation').createObservationService({provider,scope:SCOPE,executionMode:mode,testOnly,directory});
       const result=await budget.run(()=>service.observe(symbol,{targetBusinessDate}));resultId=result.record.id;
       return {...result,requests:budget.report()};

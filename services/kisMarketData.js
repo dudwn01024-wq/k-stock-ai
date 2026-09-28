@@ -1,6 +1,6 @@
 const { dataFreshness, sourceDate } = require('./dataFreshness');
 // Per-reader transport/cache scope; the default server reader keeps its existing behavior.
-function createKisMarketData({environment=process.env,fetchImpl=(...args)=>globalThis.fetch(...args),waitImpl}={}, tokenState=null) {
+function createKisMarketData({environment=process.env,fetchImpl=(...args)=>globalThis.fetch(...args),waitImpl,tokenProvider}={}, tokenState=null) {
 const fetch=fetchImpl;
 
 // ========================================
@@ -479,6 +479,7 @@ const requestNewAccessToken =
 const getKisAccessToken =
   async () => {
     assertKisConfig();
+    if(tokenProvider)return tokenProvider();
 
     const now =
       Date.now();
@@ -1132,7 +1133,7 @@ return {fetchKisDailyOHLCV,
   // Reuse a cached token, never another reader's pending unbudgeted request or OHLCV cache.
   forkWithTransport(fetchImpl, {waitImpl}={}) {
     if(typeof fetchImpl!=='function')throw Error('TRANSPORT_REQUIRED');
-    return createKisMarketData({fetchImpl,waitImpl,environment:{
+    return createKisMarketData({fetchImpl,waitImpl,tokenProvider,environment:{
       KIS_APP_KEY,KIS_APP_SECRET,KIS_BASE_URL,KIS_REQUEST_INTERVAL_MS,KIS_OHLCV_CACHE_TTL_MS
     }},{accessToken:cachedAccessToken,expiresAt:cachedTokenExpiresAt});
   }
