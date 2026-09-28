@@ -6,6 +6,7 @@ const {resolveExecutionMode}=require('./executionMode');
 const {DEFAULT_POLICY,policyFor,slotFor}=require('./rollingNewsScheduler');
 const {fingerprint,conditions}=require('./rollingNewsAutomationGrant');
 const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
+const {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery');
 const {createEodEvidenceAnalysisInput}=require('./eodEvidenceAnalysisInput');
 const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
 const EXPECTED_ARCHIVE_ID='c5b05a70-3830-457f-8804-79c6f882dda3';
@@ -22,8 +23,10 @@ const kstAt=millis=>new Date(millis+9*3600000).toISOString().replace('Z','+09:00
 const todayKst=()=>kstAt(Date.now());
 const dateAt=millis=>kstAt(millis).slice(0,10);
 const nextDate=date=>new Date(Date.parse(date+'T00:00:00Z')+86400000).toISOString().slice(0,10);
-function previewDates(start){
-  const dates=[],end=Date.parse(start)+VALIDITY_HOURS*3600000;
+function previewDates(start,coverageEndsAtKst){
+  const dates=[],end=coverageEndsAtKst?Date.parse(coverageEndsAtKst):Date.parse(start)+VALIDITY_HOURS*3600000;
+  if(!Number.isFinite(end)||end<=Date.parse(start)||end>Date.parse(start)+VALIDITY_HOURS*3600000)
+    throw Error('PILOT_COVERAGE_END_INVALID');
   for(let date=start.slice(0,10);date<=dateAt(end-1);date=nextDate(date))dates.push(date);
   return dates;
 }
@@ -48,12 +51,12 @@ async function loadCalendar({calendarEvidenceRef,testOnly,testCalendar}){
 }
 async function planRollingNewsPilot({calendarEvidenceRef,environment=process.env,
   testOnly=false,testDirectory,testCalendar,currentTime,policy=PILOT_POLICY,
-  expectedArchiveId=EXPECTED_ARCHIVE_ID}={}){
+  expectedArchiveId=EXPECTED_ARCHIVE_ID,coverageEndsAtKst}={}){
   if(!testOnly&&(testDirectory!==undefined||testCalendar!==undefined||currentTime!==undefined||
     expectedArchiveId!==EXPECTED_ARCHIVE_ID))throw Error('PILOT_TEST_INPUT_FORBIDDEN');
   const normalized=policyFor(policy),now=testOnly?currentTime:todayKst();
   if(!kstInstant(now))throw Error('PILOT_CURRENT_TIME_INVALID');
-  const blockers=[],dates=previewDates(now),symbol=normalized.trackedSymbols[0]?.symbol;
+  const blockers=[],dates=previewDates(now,coverageEndsAtKst),symbol=normalized.trackedSymbols[0]?.symbol;
   const local=resolveExecutionMode(environment.KSTOCK_EXECUTION_MODE,environment.NODE_ENV).mode==='personal-local';
   if(!local)blockers.push('PERSONAL_LOCAL_REQUIRED');
   if(normalized.trackedSymbols.length!==1||symbol!=='005930'||
@@ -86,10 +89,22 @@ async function planRollingNewsPilot({calendarEvidenceRef,environment=process.env
     testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
   let archive=null;
   try{archive=await archiveStore.read(symbol);}catch{blockers.push('ARCHIVE_RECORD_INVALID');}
-  const archiveReady=Boolean(archive&&archive.archiveId===expectedArchiveId&&
-    Number.isInteger(archive.archiveRevision)&&archive.archiveRevision>0&&archive.watermark&&
-    archive.continuityStatus==='VERIFIED'&&archive.searchResultContinuityProven===true);
-  if(!archiveReady)blockers.push('ARCHIVE_NOT_READY');
+  let activeSegment=null,segmentInvalid=false;
+  try{activeSegment=(await createRollingNewsGapRecovery({testOnly,
+    testDirectory:testOnly?testDirectory:undefined}).readActive(symbol))?.active??null;}
+  catch{segmentInvalid=true;}
+  const archiveCoverageReady=Boolean(archive&&archive.continuityStatus==='VERIFIED'&&
+    archive.searchResultContinuityProven===true&&!activeSegment?.gapBefore);
+  const rollingCollectionReady=Boolean(archive&&archive.archiveId===expectedArchiveId&&
+    Number.isInteger(archive.archiveRevision)&&archive.archiveRevision>0&&!segmentInvalid&&
+    (activeSegment?activeSegment.archiveRevision===archive.archiveRevision&&
+      Number.isInteger(activeSegment.segmentRevision)&&activeSegment.segmentRevision>0&&
+      activeSegment.segmentId&&(activeSegment.collectionWatermark??activeSegment.watermark)&&
+      activeSegment.continuityStatus!=='HELD_GAP_RECOVERY_REQUIRED'&&
+      activeSegment.continuityStatus!=='GAP_DETECTED':archive.watermark&&
+      archive.continuityStatus!=='GAP_DETECTED'));
+  const archiveReady=rollingCollectionReady;
+  if(!rollingCollectionReady)blockers.push(segmentInvalid?'SEGMENT_STATE_INVALID':'ARCHIVE_NOT_READY');
   const executable=blockers.length===0;
   return {executable,trackedSymbols:normalized.trackedSymbols,timezone:normalized.timezone,
     regularSession:normalized.regularSession,afterClose:normalized.afterClose,
@@ -101,7 +116,11 @@ async function planRollingNewsPilot({calendarEvidenceRef,environment=process.env
     calendarEvidenceRef:calendarEvidenceRef??null,calendarCoverageReady,calendarCoverage:coverage,
     coveragePreviewCheckedAtKst:now,archiveId:archive?.archiveId??null,
     archiveRevision:archive?.archiveRevision??null,archiveWatermarkPresent:Boolean(archive?.watermark),
-    archiveReady,automationGrantReady:executable,automationEnabled:false,fullCoverageProven:false,
+    activeSegmentId:activeSegment?.segmentId??null,activeSegmentRevision:activeSegment?.segmentRevision??null,
+    collectionWatermark:activeSegment?.collectionWatermark??activeSegment?.watermark??
+      archive?.watermark??null,
+    rollingCollectionReady,archiveCoverageReady,archiveReady,
+    automationGrantReady:executable,automationEnabled:false,fullCoverageProven:false,
     strictStrategyReady:false,tradeEvidenceReady:false,riskReady:false,ledgerInputReady:false,
     blockers};
 }

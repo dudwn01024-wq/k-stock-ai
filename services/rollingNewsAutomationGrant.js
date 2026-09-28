@@ -108,6 +108,46 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
     const records=await usageRecords(grantId,kstDate);
     return {polls:records.length,requests:records.reduce((sum,record)=>sum+record.maxRequests,0)};
   }
+  // The grant directories are immutable attribution records. The budget domain is
+  // shared by every grant on the same KST day, including revoked grants.
+  async function dailyUsage(kstDate){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(kstDate))throw Error('NEWS_AUTOMATION_DATE_INVALID');
+    let names;try{names=await fs.readdir(root);}catch(e){if(e.code==='ENOENT')names=[];else throw e;}
+    const records=[];
+    for(const name of names){
+      if(name==='daily-ledger')continue;
+      if(!uuid(name))throw Error('NEWS_AUTOMATION_DIRECTORY_INVALID');
+      records.push(...await usageRecords(name,kstDate));
+    }
+    let pollSuccessCount=0,httpRequestCount=0,httpCountConfirmed=true,lastPollAtKst=null;
+    const pollRunIds=new Set(),grantIds=new Set();
+    for(const record of records){
+      grantIds.add(record.grantId);
+      const approvalDir=testOnly?path.resolve(root,'../approvals',record.plannedApprovalId):
+        path.resolve(__dirname,'../.local/strategy-observations/approvals',record.plannedApprovalId);
+      try{
+        const journal=await readFile(path.join(approvalDir,'requests.json'),approvalDir);
+        if(journal.state!=='FINISHED')httpCountConfirmed=false;
+        else if(!Number.isInteger(journal.counts?.searchNews)||journal.counts.searchNews<0||
+          journal.counts.searchNews>record.maxRequests)throw Error('NEWS_AUTOMATION_USAGE_INVALID');
+        else httpRequestCount+=journal.counts.searchNews;
+      }catch(e){if(e.code==='ENOENT')httpCountConfirmed=false;else throw e;}
+      const slotRoot=testOnly?path.resolve(root,'../slots','005930'):
+        path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler/005930');
+      try{
+        const slot=await readFile(path.join(slotRoot,record.schedulerSlotKey+'.result.json'),slotRoot);
+        if(slot.status==='SUCCESS')pollSuccessCount++;
+        if(uuid(slot.pollRunId))pollRunIds.add(slot.pollRunId);
+        if(slot.completedAtKst&&Number.isFinite(Date.parse(slot.completedAtKst))&&
+          (!lastPollAtKst||Date.parse(slot.completedAtKst)>Date.parse(lastPollAtKst)))
+          lastPollAtKst=slot.completedAtKst;
+      }catch(e){if(e.code!=='ENOENT')throw e;}
+    }
+    return {budgetDomain:'rolling-news-automation',kstDate,pollAttemptCount:records.length,
+      pollSuccessCount,httpRequestCount:httpCountConfirmed?httpRequestCount:null,
+      httpBudgetCommitted:records.reduce((sum,record)=>sum+record.maxRequests,0),
+      grantIds:[...grantIds].sort(),pollRunIds:[...pollRunIds].sort(),lastPollAtKst};
+  }
   async function reserve({grantId,plan,currentTime}={}){
     if(!kst(currentTime)||!plan?.pollPlan||!uuid(grantId))throw Error('NEWS_AUTOMATION_RESERVATION_INVALID');
     const grant=await read(grantId),day=currentTime.slice(0,10);
@@ -117,25 +157,33 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
     const dir=await folder(grantId),usageRoot=path.join(dir,'usage'),dayDir=path.join(usageRoot,day);
     await fs.mkdir(usageRoot,{recursive:true});await fs.mkdir(dayDir,{recursive:true});
     await safeDir(usageRoot,dir);await safeDir(dayDir,usageRoot);
-    const lock=path.join(dayDir,'lock.json'),token=randomUUID();
+    const ledgerRoot=path.join(root,'daily-ledger');await fs.mkdir(ledgerRoot,{recursive:true});
+    await safeDir(ledgerRoot,root);
+    const lock=path.join(ledgerRoot,day+'.lock.json'),token=randomUUID();
     try{await write(lock,{grantId,token});}catch(e){if(e.code==='EEXIST')return {status:'BUDGET_LOCKED'};throw e;}
     try{
       if((await read(grantId))?.revokedAtKst)return {status:'GRANT_REVOKED'};
-      const used=await usage(grantId,day),limit=plan.pollPlan.maxRequestsPerPoll;
-      if(used.polls>=grant.maxPollsPerKstDay||used.requests+limit>grant.maxRequestsPerKstDay)
+      const used=await dailyUsage(day),limit=plan.pollPlan.maxRequestsPerPoll;
+      if(used.pollAttemptCount>=grant.maxPollsPerKstDay||
+        used.httpBudgetCommitted+limit>grant.maxRequestsPerKstDay)
         return {status:'DAILY_LIMIT_REACHED',used};
       const reservationId=randomUUID(),plannedApprovalId=randomUUID();
       await write(path.join(dayDir,reservationId+'.json'),{reservationId,grantId,kstDate:day,
         schedulerSlotKey:plan.slotKey,archiveId:plan.archiveId,archiveRevision:plan.archiveRevision,
         maxRequests:limit,plannedApprovalId,reservedAtKst:clock()});
+      const updated=await dailyUsage(day);
+      const snapshot={...updated,updatedAtKst:clock()};
+      const staged=path.join(ledgerRoot,day+'.'+reservationId+'.tmp');
+      await write(staged,snapshot);
+      await fs.rename(staged,path.join(ledgerRoot,day+'.json'));
       return {status:'RESERVED',reservationId,plannedApprovalId,
-        used:{polls:used.polls+1,requests:used.requests+limit}};
+        used:{polls:updated.pollAttemptCount,requests:updated.httpBudgetCommitted}};
     }finally{
-      const record=await readFile(lock,dayDir);if(record.token!==token)throw Error('NEWS_AUTOMATION_LOCK_INVALID');
+      const record=await readFile(lock,ledgerRoot);if(record.token!==token)throw Error('NEWS_AUTOMATION_LOCK_INVALID');
       await fs.unlink(lock);
     }
   }
-  return {issue,read,revoke,usage,usageRecords,reserve};
+  return {issue,read,revoke,usage,usageRecords,dailyUsage,reserve};
 }
 async function planAutomationGrant({grantId,schedulerPlan,policy={},automationPolicy=DEFAULT_AUTOMATION_POLICY,
   currentTime,environment=process.env,grantStore}={}){
@@ -161,9 +209,9 @@ async function planAutomationGrant({grantId,schedulerPlan,policy={},automationPo
     schedulerPlan.pollPlan.symbol!==schedulerPlan.symbol||schedulerPlan.pollPlan.query!==schedulerPlan.query||
     schedulerPlan.pollPlan.maxRequestsPerPoll>grant.maxRequestsPerKstDay)
     return {...base,status:'REQUEST_RANGE_NOT_ALLOWED'};
-  const used=await grantStore.usage(grantId,currentTime.slice(0,10));
-  if(used.polls>=grant.maxPollsPerKstDay||
-    used.requests+schedulerPlan.pollPlan.maxRequestsPerPoll>grant.maxRequestsPerKstDay)
+  const used=await grantStore.dailyUsage(currentTime.slice(0,10));
+  if(used.pollAttemptCount>=grant.maxPollsPerKstDay||
+    used.httpBudgetCommitted+schedulerPlan.pollPlan.maxRequestsPerPoll>grant.maxRequestsPerKstDay)
     return {...base,status:'DAILY_LIMIT_REACHED',used};
   return {...base,automationGrantReady:true,status:'READY',used,
     oneShotExecution:schedulerPlan.pollPlan.execution,maxRequestsReserved:schedulerPlan.pollPlan.maxRequestsPerPoll};

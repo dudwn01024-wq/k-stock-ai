@@ -1,14 +1,13 @@
 'use strict';
 // Local pilot activation only. Poll transport remains in the existing approved runner.
 const fs=require('node:fs/promises'),path=require('node:path');
+const {randomUUID}=require('node:crypto');
 const {resolveExecutionMode}=require('./executionMode');
 const {PILOT_POLICY,planRollingNewsPilot,validatePilotPolicy,grantDraftAtIssuance}=
   require('./rollingNewsAutomationPilot');
 const {createAutomationGrantStore,runGrantedRollingPoll,fingerprint}=require('./rollingNewsAutomationGrant');
 const {planRollingNewsSchedule,policyFor}=require('./rollingNewsScheduler');
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-automation-activation');
-const APPROVAL_ROOT=path.resolve(__dirname,'../.local/strategy-observations/approvals');
-const SLOT_ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler/005930');
 const FILE='active.json';
 const uuid=value=>typeof value==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
 const kstNow=()=>new Date(Date.now()+9*3600000).toISOString().replace('Z','+09:00');
@@ -19,6 +18,19 @@ function store({testOnly=false,testDirectory}={}){
   const root=testOnly?path.resolve(testDirectory):ROOT,file=path.join(root,FILE);
   async function read(){
     try{
+      const current=await readLocalJson(path.join(root,'current.json'),root);
+      if(current){
+        if(current.schemaVersion!=='ROLLING_NEWS_ACTIVATION_POINTER_V1'||!uuid(current.activationId))
+          throw Error('PILOT_ACTIVATION_RECORD_INVALID');
+        const generations=path.join(root,'generations');
+        const value=await readLocalJson(path.join(generations,current.activationId+'.json'),generations);
+        if(!value||value.schemaVersion!=='ROLLING_NEWS_REACTIVATION_V1'||
+          value.activationId!==current.activationId||!uuid(value.grantId)||
+          !uuid(value.predecessorGrantId)||value.grantId===value.predecessorGrantId||
+          !uuid(value.calendarEvidenceRef)||typeof value.enabled!=='boolean')
+          throw Error('PILOT_ACTIVATION_RECORD_INVALID');
+        return value;
+      }
       const [dir,actual,stat]=await Promise.all([fs.realpath(root),fs.realpath(file),fs.lstat(file)]);
       if(dir!==root||path.dirname(actual)!==dir||!stat.isFile()||stat.isSymbolicLink()||stat.size>8192)
         throw Error('PILOT_ACTIVATION_RECORD_INVALID');
@@ -44,7 +56,34 @@ function store({testOnly=false,testDirectory}={}){
     try{await handle.writeFile(JSON.stringify(value,null,2));await handle.sync();}finally{await handle.close();}
     return read();
   }
-  return {read,create};
+  async function createGeneration(value){
+    if(value.schemaVersion!=='ROLLING_NEWS_REACTIVATION_V1'||!uuid(value.activationId)||
+      !uuid(value.grantId)||!uuid(value.predecessorGrantId)||
+      value.grantId===value.predecessorGrantId)throw Error('PILOT_ACTIVATION_RECORD_INVALID');
+    const lock=path.join(root,'generation.lock'),token=randomUUID();
+    await fs.writeFile(lock,token,{flag:'wx',mode:0o600});
+    try{
+      const previous=await read();
+      if(!previous||previous.enabled||previous.grantId!==value.predecessorGrantId||
+        (previous.activationId??null)!==value.predecessorActivationId)
+        throw Error('PILOT_REACTIVATION_PREDECESSOR_CHANGED');
+      const generations=path.join(root,'generations');
+      await fs.mkdir(generations,{recursive:true});
+      if(path.dirname(await fs.realpath(generations))!==await fs.realpath(root)||
+        (await fs.lstat(generations)).isSymbolicLink())throw Error('PILOT_ACTIVATION_DIRECTORY_INVALID');
+      const handle=await fs.open(path.join(generations,value.activationId+'.json'),'wx',0o600);
+      try{await handle.writeFile(JSON.stringify(value,null,2));await handle.sync();}finally{await handle.close();}
+      const pointer=path.join(root,'current.json'),stage=path.join(root,'.'+randomUUID()+'.tmp');
+      await fs.writeFile(stage,JSON.stringify({schemaVersion:'ROLLING_NEWS_ACTIVATION_POINTER_V1',
+        activationId:value.activationId}),{flag:'wx',mode:0o600});
+      await fs.rename(stage,pointer);
+      return read();
+    }finally{
+      if(await fs.readFile(lock,'utf8')!==token)throw Error('PILOT_ACTIVATION_LOCK_INVALID');
+      await fs.unlink(lock);
+    }
+  }
+  return {read,create,createGeneration};
 }
 async function activatePilot({calendarEvidenceRef,environment=process.env,userApproved=false,
   testOnly=false,testDirectory,testCalendar,currentTime,expectedArchiveId}={}){
@@ -138,35 +177,16 @@ async function pilotStatus({environment=process.env,testOnly=false,testDirectory
   const grant=await grants.read(activation.grantId);
   const active=Boolean(activation.enabled&&grant?.enabled&&!grant.revokedAtKst&&
     Date.parse(now)>=Date.parse(grant.validFromKst)&&Date.parse(now)<Date.parse(grant.expiresAtKst));
-  const reservations=await grants.usageRecords(activation.grantId,day);
-  let pollSuccessCount=0,httpRequestCount=0,confirmed=true,lastPollAtKst=null;
-  for(const reservation of reservations){
-    const approvalRoot=testOnly?path.join(testDirectory,'approvals',reservation.plannedApprovalId):
-      path.join(APPROVAL_ROOT,reservation.plannedApprovalId);
-    const journal=await readLocalJson(path.join(approvalRoot,'requests.json'),approvalRoot);
-    if(journal){
-      if(journal.state!=='FINISHED')confirmed=false;
-      else if(!Number.isInteger(journal.counts?.searchNews)||journal.counts.searchNews<0||
-        journal.counts.searchNews>reservation.maxRequests)throw Error('PILOT_STATUS_RECORD_INVALID');
-      else httpRequestCount+=journal.counts.searchNews;
-    }
-    const slotRoot=testOnly?path.join(testDirectory,'slots','005930'):SLOT_ROOT;
-    const slot=await readLocalJson(path.join(slotRoot,`${reservation.schedulerSlotKey}.result.json`),slotRoot);
-    if(slot){
-      if(slot.status==='SUCCESS')pollSuccessCount++;
-      if(slot.completedAtKst&&(!lastPollAtKst||Date.parse(slot.completedAtKst)>Date.parse(lastPollAtKst)))
-        lastPollAtKst=slot.completedAtKst;
-    }
-  }
+  const usage=await grants.dailyUsage(day);
   return {automationEnabled:active,status:active?'ACTIVE':grant?.revokedAtKst?'REVOKED':
     !activation.enabled?'ACTIVATION_DISABLED':'EXPIRED',
     grantId:activation.grantId,validFromKst:grant?.validFromKst??null,
     expiresAtKst:grant?.expiresAtKst??null,archiveId:activation.archiveId,
     archiveRevisionAtActivation:activation.archiveRevisionAtActivation,
-    pollAttemptCount:reservations.length,pollSuccessCount,
-    httpRequestCount:confirmed?httpRequestCount:null,
-    httpRequestBudgetReserved:reservations.reduce((sum,record)=>sum+record.maxRequests,0),
-    lastPollAtKst};
+    pollAttemptCount:usage.pollAttemptCount,pollSuccessCount:usage.pollSuccessCount,
+    httpRequestCount:usage.httpRequestCount,
+    httpRequestBudgetReserved:usage.httpBudgetCommitted,
+    lastPollAtKst:usage.lastPollAtKst};
 }
 async function startPilotWorker({environment=process.env,onResult=()=>{}}={}){
   if(!local(environment))return {started:false,reason:'PUBLIC_MODE_FORBIDDEN'};
@@ -193,4 +213,6 @@ async function startPilotWorker({environment=process.env,onResult=()=>{}}={}){
   return {started:true,grantId:activation.grantId,stop(){stopped=true;clearTimeout(timer);}};
 }
 module.exports={activatePilot,tickPilot,startPilotWorker,pilotStatus,
-  readPilotActivation:options=>store(options).read()};
+  readPilotActivation:options=>store(options).read(),
+  createReactivationGeneration:({testOnly=false,testDirectory,value}={})=>
+    store({testOnly,testDirectory}).createGeneration(value)};
