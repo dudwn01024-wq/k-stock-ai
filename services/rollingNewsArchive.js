@@ -5,6 +5,7 @@ const fs=require('node:fs/promises'),path=require('node:path');
 const {randomUUID,createHash}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {stockNameFor}=require('./stockCatalog');
+const {articleIdFor}=require('./rollingNewsArticleId');
 const {parsePubDate,searchArticleIdentity,searchArticleSignature}=require('./observationSearchNews');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-archive');
@@ -295,6 +296,11 @@ function materialize(manifest,events){
     priorPollRunId=event.pollRunId;
   }
   state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
+  state.articles=state.articles.map(article=>({...article,
+    articleId:articleIdFor(manifest.archiveId,article.identity)}));
+  if(state.activeSegment?.articles)state.activeSegment={...state.activeSegment,
+    articles:state.activeSegment.articles.map(article=>({...article,
+      articleId:articleIdFor(manifest.archiveId,article.identity)}))};
   state.articleCount=state.articles.length;
   if(conflicted.size)state.warnings.push('ARTICLE_IDENTITY_CONFLICT');
   return state;

@@ -3,6 +3,7 @@
 const fs=require('node:fs/promises'),path=require('node:path');
 const {randomUUID}=require('node:crypto');
 const {resolveExecutionMode}=require('./executionMode');
+const {articleIdFor}=require('./rollingNewsArticleId');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/news-archive-lifecycle');
 const TRACKING_REASONS=Object.freeze(['ANALYSIS_CANDIDATE','WATCHLIST','USER_SEARCH','ACTIVE_ANALYSIS']);
@@ -86,11 +87,14 @@ function createNewsTrackingStore({testOnly=false,testDirectory,environment=proce
 // An analysis reference is an explicit archive article identity, not an opaque news evidenceRef.
 // Until that mapping is audited, old articles remain protected from any future prune.
 function planNewsPruning({archives=[],segmentsBySymbol={},analysisReferences=[],
-  analysisReferencesComplete=false,asOfKst,retentionPolicy=DEFAULT_RETENTION}={}){
+  analysisReferencesComplete=false,legacyUnmappedSymbols=[],legacyUnmappedAnalysisCount=0,
+  asOfKst,retentionPolicy=DEFAULT_RETENTION}={}){
   if(!kstInstant(asOfKst)||!Number.isInteger(retentionPolicy.retentionDays)||
     retentionPolicy.retentionDays<1||!Number.isInteger(retentionPolicy.analysisEvidenceRetentionDays)||
     retentionPolicy.analysisEvidenceRetentionDays<1||!Array.isArray(archives)||
-    !Array.isArray(analysisReferences)||typeof analysisReferencesComplete!=='boolean')
+    !Array.isArray(analysisReferences)||typeof analysisReferencesComplete!=='boolean'||
+    !Array.isArray(legacyUnmappedSymbols)||legacyUnmappedSymbols.some(symbol=>!symbolValid(symbol))||
+    !Number.isInteger(legacyUnmappedAnalysisCount)||legacyUnmappedAnalysisCount<0)
     throw Error('NEWS_PRUNING_PLAN_INVALID');
   const cutoffMs=Date.parse(asOfKst)-retentionPolicy.retentionDays*86400000;
   const cutoffKst=new Date(cutoffMs+9*3600000).toISOString().replace('Z','+09:00');
@@ -98,10 +102,14 @@ function planNewsPruning({archives=[],segmentsBySymbol={},analysisReferences=[],
   for(const ref of analysisReferences){
     if(typeof ref?.archiveId!=='string'||typeof ref.identity!=='string'||
       typeof ref.analysisRunId!=='string')throw Error('NEWS_PRUNING_REFERENCE_INVALID');
-    const key=`${ref.archiveId}\u0000${ref.identity}`;
+    const articleId=articleIdFor(ref.archiveId,ref.identity);
+    if(ref.articleId!==undefined&&ref.articleId!==articleId)
+      throw Error('NEWS_PRUNING_REFERENCE_INVALID');
+    const key=`${ref.archiveId}\u0000${articleId}`;
     refs.set(key,[...(refs.get(key)??[]),ref.analysisRunId]);
   }
   const details=[],affectedArchives=[];
+  const legacySymbols=new Set(legacyUnmappedSymbols);
   for(const archive of archives){
     if(!symbolValid(archive?.symbol)||typeof archive.archiveId!=='string'||
       !Array.isArray(archive.articles))throw Error('NEWS_PRUNING_ARCHIVE_INVALID');
@@ -126,15 +134,19 @@ function planNewsPruning({archives=[],segmentsBySymbol={},analysisReferences=[],
         details.push({archiveId:archive.archiveId,symbol:archive.symbol,identity:identity??null,
           retentionClass:'ROLLING_7D',disposition:'PROTECTED_INVALID_METADATA'});continue;
       }
-      const usedBy=refs.get(`${archive.archiveId}\u0000${identity}`)??[];
+      const articleId=articleIdFor(archive.archiveId,identity);
+      if(article.articleId!==undefined&&article.articleId!==articleId)
+        throw Error('NEWS_PRUNING_ARCHIVE_INVALID');
+      const usedBy=refs.get(`${archive.archiveId}\u0000${articleId}`)??[];
       const analysisUsed=article.retentionClass==='ANALYSIS_EVIDENCE'||usedBy.length>0;
       const boundary=protectedIds.has(identity)||boundaryPollIds.has(article.sourcePollRunId??article.pollRunId)||
         boundaryDates.has(article.pubDateRaw);
       const disposition=analysisUsed?'PROTECTED_BY_ANALYSIS':boundary?'PROTECTED_COLLECTION_BOUNDARY':
-        at>=cutoffMs?'RECENT':!analysisReferencesComplete?'PROTECTED_REFERENCE_AUDIT_INCOMPLETE':
+        at>=cutoffMs?'RECENT':legacySymbols.has(archive.symbol)?'PROTECTED_LEGACY_MAPPING_UNVERIFIED':
+          !analysisReferencesComplete?'PROTECTED_REFERENCE_AUDIT_INCOMPLETE':
           'ELIGIBLE_FOR_REMOVAL';
       if(disposition==='ELIGIBLE_FOR_REMOVAL')candidates++;
-      details.push({archiveId:archive.archiveId,symbol:archive.symbol,identity,
+      details.push({archiveId:archive.archiveId,symbol:archive.symbol,identity,articleId,
         pubDate:article.pubDateParsed.instant,url:article.originallink??article.link??null,
         retentionClass:analysisUsed?'ANALYSIS_EVIDENCE':'ROLLING_7D',
         analysisUsed,analysisRunIds:usedBy,disposition});
@@ -149,7 +161,13 @@ function planNewsPruning({archives=[],segmentsBySymbol={},analysisReferences=[],
     eligibleForRemoval:count('ELIGIBLE_FOR_REMOVAL'),
     protectedByAnalysis:count('PROTECTED_BY_ANALYSIS'),
     protectedByCollection:count('PROTECTED_COLLECTION_BOUNDARY'),
+    protectedConservatively:count('PROTECTED_LEGACY_MAPPING_UNVERIFIED')+
+      count('PROTECTED_REFERENCE_AUDIT_INCOMPLETE'),
+    legacyUnmappedAnalysisCount,
     protectedByUnknownReferences:count('PROTECTED_REFERENCE_AUDIT_INCOMPLETE'),
+    legacyPotentialArticles:details.filter(item=>legacySymbols.has(item.symbol)).length,
+    retentionCandidates:details.filter(item=>item.pubDate&&
+      Date.parse(item.pubDate)<cutoffMs).length,
     recentArticles:count('RECENT'),affectedArchives,articles:details,
     deletionExecutable:false,actualDeleted:0,fullCoverageProven:false};
 }
@@ -158,6 +176,7 @@ async function planStoredNewsPruning({asOfKst,testOnly=false,testDirectory}={}){
   if(testOnly?!testDirectory:testDirectory!==undefined)throw Error('NEWS_PRUNING_DIRECTORY_INVALID');
   const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
   const {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery');
+  const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
   const store=createRollingNewsArchiveStore({testOnly,
     testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
   const segmentStore=createRollingNewsGapRecovery({testOnly,testDirectory});
@@ -166,10 +185,11 @@ async function planStoredNewsPruning({asOfKst,testOnly=false,testDirectory}={}){
     archives.push(await store.read(symbol));
     segmentsBySymbol[symbol]=(await segmentStore.readActive(symbol))?.segments??[];
   }
-  // Existing EOD news evidenceRefs are record IDs, not article identities. Until a
-  // verified resolver maps them, no old article is safe to classify for deletion.
+  const audit=await createNewsEvidenceBundleStore({testOnly,testDirectory}).auditAnalysisRecords();
   return planNewsPruning({archives,segmentsBySymbol,asOfKst,
-    analysisReferencesComplete:false});
+    analysisReferences:audit.references,analysisReferencesComplete:true,
+    legacyUnmappedSymbols:audit.legacySymbols,
+    legacyUnmappedAnalysisCount:audit.legacyUnmappedAnalysisCount});
 }
 
 module.exports={TRACKING_REASONS,DEFAULT_RETENTION,createNewsTrackingStore,
