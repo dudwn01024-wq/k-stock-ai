@@ -38,7 +38,9 @@ async function fixture(t){
   await archive.collectSyntheticPoll({symbol,receivedAtKst:'2026-09-27T10:00:00+09:00',
     readPage:async()=>page(1,[old])});
   const gap=await archive.collectSyntheticPoll({symbol,receivedAtKst:'2026-09-28T12:30:00+09:00',
-    readPage:async({start})=>page(start,[news(0,`gap-${start}`)])});
+    readPage:async({start})=>page(start,start===1?
+      Array.from({length:8},(_,i)=>news(-i,`gap-${start}-${i}`)):
+      [news(-100-start,`gap-${start}`)])});
   assert.equal(gap.event.review.status,'GAP_DETECTED');
   const segments=createRollingNewsGapRecovery({testOnly:true,testDirectory});
   await segments.bootstrap({symbol,sourcePollRunId:gap.event.pollRunId});
@@ -100,7 +102,7 @@ test('within-page inversion and parse failure remain distinct; normal pages keep
 });
 
 test('stored synthetic drift replay prepares observed article plan without modifying records',async t=>{
-  const f=await fixture(t),anchor=news(0,'gap-1');
+  const f=await fixture(t),anchor=news(0,'gap-1-0');
   const {result,calls}=await followUp(f,[[news(5,'a'),news(3,'b')],[news(4,'c'),anchor]]);
   assert.deepEqual(calls,[1,101]);
   assert.equal(result.record.review.status,'UNVERIFIED');
@@ -132,7 +134,7 @@ test('stored synthetic drift replay prepares observed article plan without modif
 });
 
 test('inverted page and unparseable article never create complete observed coverage',async t=>{
-  const f=await fixture(t),anchor=news(0,'gap-1');
+  const f=await fixture(t),anchor=news(0,'gap-1-0');
   const {result}=await followUp(f,[[news(1,'a'),news(2,'b'),
     {...news(3,'bad'),pubDate:'INVALID_SYNTHETIC_DATE'},anchor]]);
   const replay=await createRollingNewsPageDrift({testOnly:true,
@@ -143,4 +145,67 @@ test('inverted page and unparseable article never create complete observed cover
   assert.equal(replay.applyPlan.ready,false);
   assert.equal(replay.continuityProven,false);
   assert.equal(replay.newObservedArticleCount,2);
+});
+
+test('atomic synthetic apply separates 187 observed articles from unverified coverage',async t=>{
+  const f=await fixture(t);
+  const first=Array.from({length:100},(_,i)=>news(300-i,`observed-${i}`));
+  const secondNew=Array.from({length:87},(_,i)=>news(203-i,`observed-${100+i}`));
+  const second=[];
+  for(const [i,item] of secondNew.entries()){
+    second.push(item);
+    if(i>=82)second.push(item);
+  }
+  second.push(...Array.from({length:8},(_,i)=>news(-i,`gap-1-${i}`)));
+  assert.equal(second.length,100);
+  const {result,calls}=await followUp(f,[first,second]);
+  assert.deepEqual(calls,[1,101]);
+  const drift=createRollingNewsPageDrift({testOnly:true,testDirectory:f.testDirectory});
+  const replay=await drift.replay({symbol,pollRunId:result.record.pollRunId});
+  assert.equal(replay.rawArticleCount,200);
+  assert.equal(replay.newObservedArticleCount,187);
+  assert.equal(replay.existingReappearanceCount,8);
+  assert.equal(replay.duplicateWithinPollCount,5);
+  assert.equal(replay.pageBoundaryDrift,true);
+  const sourceFile=path.join(f.testDirectory,'rolling-archive',symbol,'polls',
+    '000004.json');
+  const sourceBefore=await fs.readFile(sourceFile),before=await f.archive.read(symbol);
+  const activeBefore=(await f.segments.readActive(symbol)).active;
+  assert.equal(before.archiveRevision,4);
+  assert.equal(activeBefore.segmentRevision,2);
+  await assert.rejects(f.archive.appendObservedApply(replay.applyPlan,{
+    appliedAtKst:'2026-09-28T13:00:00+09:00',
+    testBeforePublish:async()=>{throw Error('SYNTHETIC_TEST_FAILURE');}}),
+  /SYNTHETIC_TEST_FAILURE/);
+  assert.equal((await f.archive.read(symbol)).archiveRevision,4);
+  assert.deepEqual((await f.segments.readActive(symbol)).active.watermark,activeBefore.watermark);
+  const applied=await f.archive.appendObservedApply(replay.applyPlan,{
+    appliedAtKst:'2026-09-28T13:00:01+09:00'});
+  assert.equal(applied.archive.archiveRevision,5);
+  assert.equal(applied.archive.articleCount,before.articleCount+187);
+  assert.equal(applied.archive.searchResultContinuityProven,false);
+  assert.ok(applied.archive.warnings.includes('PAGE_BOUNDARY_DRIFT'));
+  const active=(await f.segments.readActive(symbol)).active;
+  assert.equal(active.segmentRevision,3);
+  assert.equal(active.continuityProven,false);
+  assert.equal(active.gapBefore,true);
+  assert.equal(active.fullCoverageProven,false);
+  assert.equal(active.coverageStatus,'UNVERIFIED');
+  assert.equal(active.collectionWatermark.identity,first[0].originallink);
+  assert.deepEqual(active.watermark,active.collectionWatermark);
+  assert.deepEqual((await f.archive.planPoll({symbol})).watermark,active.collectionWatermark);
+  const selected=await f.archive.selectNewsForEodWindow({symbol,
+    windowStartKst:'2026-09-28T15:55:00+09:00',
+    windowEndKst:'2026-09-28T16:00:00+09:00'});
+  assert.ok(selected.observedArticleCount>0);
+  assert.equal(selected.status,'ARCHIVE_WINDOW_INCOMPLETE');
+  assert.equal(selected.observedCoverageStatus,'UNVERIFIED');
+  assert.equal(selected.strictNewsStatus,'HELD');
+  assert.deepEqual(await fs.readFile(sourceFile),sourceBefore);
+  const replayAfter=await drift.replay({symbol,pollRunId:result.record.pollRunId});
+  assert.equal(replayAfter.applyPlan.ready,false);
+  assert.equal(replayAfter.applyPlan.status,'ALREADY_APPLIED');
+  await assert.rejects(f.archive.appendObservedApply(replay.applyPlan),
+    /ARCHIVE_OR_SEGMENT_STATE_CHANGED/);
+  assert.equal((await f.archive.read(symbol)).articleCount,before.articleCount+187);
 });

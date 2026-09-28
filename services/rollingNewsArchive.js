@@ -2,7 +2,7 @@
 // Offline archive. Live polling is deliberately unconnected until an approved
 // NAVER Search News runner can supply a durable, scope-bound collection record.
 const fs=require('node:fs/promises'),path=require('node:path');
-const {randomUUID}=require('node:crypto');
+const {randomUUID,createHash}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {stockNameFor}=require('./stockCatalog');
 const {parsePubDate,searchArticleIdentity,searchArticleSignature}=require('./observationSearchNews');
@@ -26,6 +26,7 @@ const segmentArticle=(item,event)=>({identity:searchArticleIdentity(item),signat
   title:item.title??null,originallink:item.originallink??null,link:item.link??null,
   description:item.description??null,pubDateRaw:item.pubDateRaw,pubDateParsed:parsePubDate(item.pubDateRaw),
   sourcePollRunId:event.pollRunId,firstSeenAtKst:event.receivedAtKst});
+const eventDigest=event=>createHash('sha256').update(JSON.stringify(event)).digest('hex');
 const initialState=(archiveId,symbol,query)=>({schemaVersion:'ROLLING_NEWS_ARCHIVE_V1',archiveId,symbol,query,
   archiveRevision:0,
   newestSeenPubDate:null,oldestSeenPubDate:null,lastSuccessfulPollAtKst:null,watermark:null,
@@ -112,6 +113,71 @@ function materialize(manifest,events){
   let priorPollRunId=null,gapSeed=null,segmentState=null;
   for(const [index,event] of events.entries()){
     state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
+    if(event.schemaVersion==='ROLLING_NEWS_OBSERVED_APPLY_V1'){
+      const source=events.find(item=>item.pollRunId===event.sourcePollRunId),
+        chronology=source?.pages&&reviewPageChronology(source.pages),
+        first=source?.pages?.[0]?.items?.[0],
+        parsedFirst=parsePubDate(first?.pubDateRaw),
+        expectedWatermark=first&&parsedFirst?{
+          identity:searchArticleIdentity(first),signature:searchArticleSignature(first),
+          pubDateRaw:first.pubDateRaw,instant:parsedFirst.instant}:null;
+      if(event.testData!==manifest.testData||event.archiveId!==manifest.archiveId||
+        event.symbol!==manifest.symbol||event.query!==manifest.query||
+        event.sequence!==index+1||!uuid(event.applyId)||
+        !uuid(event.sourcePollRunId)||!kstInstant(event.appliedAtKst)||
+        !segmentState||!source||source.sequence>=event.sequence||
+        source.segment?.segmentId!==event.segmentId||
+        source.review?.status!=='UNVERIFIED'||source.review.watermarkReached!==true||
+        event.sourceDigest!==eventDigest(source)||
+        event.expectedArchiveRevision!==state.archiveRevision||
+        event.expectedSegmentRevision!==segmentState.segmentRevision||
+        event.segmentId!==segmentState.segmentId||
+        !isDeepStrictEqual(event.expectedWatermark,segmentState.watermark)||
+        !isDeepStrictEqual(event.collectionWatermark,expectedWatermark)||
+        chronology.withinPageChronologyValid!==true||
+        chronology.pageBoundaryDrift!==true||chronology.parseFailureCount!==0||
+        source.failed||source.requests.length!==source.pages.length||
+        source.requests.some(request=>request.outcome!=='RESPONSE')||
+        state.requestHistory.some(item=>item.type==='OBSERVED_APPLY'&&
+          item.sourcePollRunId===event.sourcePollRunId))
+        throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      const byIdentity=new Map(segmentState.articles.map(article=>[article.identity,article]));
+      const additions=new Map();
+      for(const page of source.pages)for(const item of page.items){
+        const article=segmentArticle(item,source),parsed=article.pubDateParsed;
+        if(!article.identity||!article.signature||!parsed)
+          throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+        const earlier=byIdentity.get(article.identity)??additions.get(article.identity);
+        if(earlier){if(earlier.signature!==article.signature)throw Error('NEWS_ARCHIVE_RECORD_INVALID');continue;}
+        additions.set(article.identity,{...article,archiveId:manifest.archiveId,
+          segmentId:segmentState.segmentId,pubDate:item.pubDateRaw,
+          observationStatus:'OBSERVED_UNVERIFIED'});
+      }
+      if(additions.size!==event.observedArticleCount||!additions.size)
+        throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      for(const article of additions.values()){
+        byIdentity.set(article.identity,article);
+        const existing=seen.get(article.identity);
+        if(existing&&existing.signature!==article.signature)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+        if(!existing)seen.set(article.identity,article);
+      }
+      segmentState={...segmentState,segmentRevision:segmentState.segmentRevision+1,
+        articles:[...byIdentity.values()],articleCount:byIdentity.size,
+        watermark:expectedWatermark,collectionWatermark:expectedWatermark,
+        bootstrap:false,hasUnverifiedPoll:true,continuityProven:false,
+        continuityStatus:'UNVERIFIED',coverageStatus:'UNVERIFIED',
+        warnings:[...new Set([...(segmentState.warnings??[]),'PAGE_BOUNDARY_DRIFT'])]};
+      state.activeSegment=segmentState;
+      state.requestHistory.push({type:'OBSERVED_APPLY',applyId:event.applyId,
+        sourcePollRunId:event.sourcePollRunId,segmentId:event.segmentId,
+        segmentRevisionBefore:event.expectedSegmentRevision,
+        receivedAtKst:event.appliedAtKst,status:'UNVERIFIED',
+        warning:'PAGE_BOUNDARY_DRIFT',observedArticleCount:additions.size});
+      state.warnings.push('PAGE_BOUNDARY_DRIFT');
+      state.searchResultContinuityProven=false;
+      state.archiveRevision=event.sequence;
+      continue;
+    }
     if(event.schemaVersion!=='ROLLING_NEWS_POLL_V1'||event.testData!==manifest.testData||
       !['SYNTHETIC_TEST_RESPONSE','SYNTHETIC_TEST_TRANSPORT','NAVER_API_HUB_SEARCH_NEWS'].includes(event.source)||
       (event.source!=='SYNTHETIC_TEST_RESPONSE'&&!uuid(event.approvalId))||
@@ -168,6 +234,8 @@ function materialize(manifest,events){
       segmentState={...segmentState,segmentRevision:segmentState.segmentRevision+1,
         articles:[...byIdentity.values()],articleCount:byIdentity.size,
         watermark:review.status==='VERIFIED'?review.watermark:segmentState.watermark,
+        collectionWatermark:review.status==='VERIFIED'?review.watermark:
+          segmentState.collectionWatermark??segmentState.watermark,
         collectedThroughKst:review.status==='VERIFIED'?event.receivedAtKst:segmentState.collectedThroughKst,
         bootstrap:review.status==='VERIFIED'?false:segmentState.bootstrap,
         hasUnverifiedPoll:segmentState.hasUnverifiedPoll||review.status==='UNVERIFIED',
@@ -290,12 +358,14 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).readActive(symbol);
     if(archive?.continuityStatus==='GAP_DETECTED'&&!active)throw Error('SEGMENT_STATE_INVALID');
     if(active?.active.continuityStatus==='GAP_DETECTED')throw Error('HELD_GAP_RECOVERY_REQUIRED');
-    const selectedWatermark=active?.active.watermark??archive?.watermark??null;
+    const selectedWatermark=active?.active.collectionWatermark??
+      active?.active.watermark??archive?.watermark??null;
     const requiredLimit=selectedWatermark?MAX_REQUESTS_PER_POLL:1;
     if(maxRequestsPerPoll!==undefined&&maxRequestsPerPoll!==requiredLimit)
       throw Error('NEWS_ARCHIVE_POLL_LIMIT_INVALID');
     maxRequestsPerPoll=requiredLimit;
     return {symbol,query,archiveId:archive?.archiveId??null,watermark:selectedWatermark,
+      collectionWatermark:selectedWatermark,
       archiveRevision:archive?.archiveRevision??0,
       segmentId:active?.active.segmentId??null,segmentRevision:active?.active.segmentRevision??null,
       display:DISPLAY,sort:'date',initialStart:1,startStep:DISPLAY,maxRequestsPerPoll,
@@ -341,9 +411,10 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
     const pollRunId=randomUUID(),archiveId=prior?.archiveId??randomUUID();
     const review=assessPoll(assessmentPrior,pages,{failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
+    const lastPoll=prior?.requestHistory.findLast(item=>item.pollRunId);
     const event={schemaVersion:'ROLLING_NEWS_POLL_V1',archiveId,pollRunId,approvalId,
       bootstrap:assessmentPrior?.watermark==null,symbol:plan.symbol,
-      query:plan.query,priorPollRunId:prior?.requestHistory.at(-1)?.pollRunId??null,
+      query:plan.query,priorPollRunId:lastPoll?.pollRunId??null,
       sequence:plan.archiveRevision+1,receivedAtKst,maxRequestsPerPoll:plan.maxRequestsPerPoll,
       requests,pages,failed,review,testData:testOnly,
       ...(active?{segment:{segmentId:plan.segmentId,sourcePollRunId:active.active.sourcePollRunId,
@@ -381,6 +452,69 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       file=path.join(pollDir,name);
       await fs.link(stage,file);await fs.unlink(stage);
     }
+    return {event,archive:await read(plan.symbol),recordPath:file};
+  }
+  async function appendObservedApply(plan,{appliedAtKst=nowKst(),testBeforePublish}={}){
+    if(!plan?.ready||plan.status!=='NOT_APPLIED'||!kstInstant(appliedAtKst))
+      throw Error('NEWS_OBSERVED_APPLY_PLAN_INVALID');
+    if(testBeforePublish!==undefined&&(!testOnly||typeof testBeforePublish!=='function'))
+      throw Error('NEWS_OBSERVED_APPLY_PLAN_INVALID');
+    const current=await read(plan.symbol),
+      {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery'),
+      active=await createRollingNewsGapRecovery({testOnly,
+        testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined})
+        .readActive(plan.symbol);
+    if(!current||current.archiveId!==plan.archiveId||
+      current.archiveRevision!==plan.expectedArchiveRevision||
+      active?.active.segmentId!==plan.segmentId||
+      active.active.segmentRevision!==plan.expectedSegmentRevision||
+      !isDeepStrictEqual(active.active.watermark,plan.expectedWatermark)||
+      current.requestHistory.some(item=>item.type==='OBSERVED_APPLY'&&
+        item.sourcePollRunId===plan.pollRunId))
+      throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+    const {createRollingNewsPageDrift}=require('./rollingNewsPageDrift');
+    const replay=await createRollingNewsPageDrift({testOnly,
+      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined})
+      .replay({symbol:plan.symbol,pollRunId:plan.pollRunId});
+    if(!isDeepStrictEqual(plan,replay.applyPlan))throw Error('NEWS_OBSERVED_APPLY_PLAN_INVALID');
+    const event={schemaVersion:'ROLLING_NEWS_OBSERVED_APPLY_V1',
+      applyId:randomUUID(),sourcePollRunId:plan.pollRunId,
+      sourceDigest:plan.sourceDigest,archiveId:plan.archiveId,
+      symbol:plan.symbol,query:current.query,segmentId:plan.segmentId,
+      sequence:plan.expectedArchiveRevision+1,
+      expectedArchiveRevision:plan.expectedArchiveRevision,
+      expectedSegmentRevision:plan.expectedSegmentRevision,
+      expectedWatermark:plan.expectedWatermark,
+      collectionWatermark:null,
+      observedArticleCount:plan.newObservedArticleCount,
+      appliedAtKst,testData:testOnly};
+    const source=await readPoll({symbol:plan.symbol,pollRunId:plan.pollRunId});
+    const first=source.pages[0]?.items[0],parsed=parsePubDate(first?.pubDateRaw);
+    if(!first||!parsed)throw Error('NEWS_OBSERVED_APPLY_SOURCE_INVALID');
+    event.collectionWatermark={identity:searchArticleIdentity(first),
+      signature:searchArticleSignature(first),pubDateRaw:first.pubDateRaw,instant:parsed.instant};
+    const dir=location(plan.symbol),pollDir=path.join(dir,'polls');
+    const [dirStat,pollStat,realDir,realPoll]=await Promise.all([
+      fs.lstat(dir),fs.lstat(pollDir),fs.realpath(dir),fs.realpath(pollDir)]);
+    if(!dirStat.isDirectory()||dirStat.isSymbolicLink()||!pollStat.isDirectory()||
+      pollStat.isSymbolicLink()||path.dirname(realDir)!==await fs.realpath(root)||
+      path.dirname(realPoll)!==realDir)throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+    const names=(await fs.readdir(pollDir)).sort(),events=[];
+    for(const name of names)events.push(await safeFile(path.join(pollDir,name),pollDir));
+    materialize({schemaVersion:'ROLLING_NEWS_MANIFEST_V1',archiveId:current.archiveId,
+      symbol:plan.symbol,query:current.query,testData:testOnly},[...events,event]);
+    const stage=path.join(root,`.${plan.symbol}-observed-${event.applyId}.json`),
+      file=path.join(pollDir,`${String(event.sequence).padStart(6,'0')}.json`);
+    try{
+      await writeExclusive(stage,event);
+      const latest=await read(plan.symbol);
+      if(latest.archiveRevision!==plan.expectedArchiveRevision)
+        throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+      if(testBeforePublish)await testBeforePublish();
+      await fs.link(stage,file);
+    }catch(error){
+      throw Error(error.code==='EEXIST'?'ARCHIVE_OR_SEGMENT_STATE_CHANGED':error.message);
+    }finally{await fs.unlink(stage).catch(()=>{});}
     return {event,archive:await read(plan.symbol),recordPath:file};
   }
   async function collectSyntheticPoll({symbol,maxRequestsPerPoll,readPage,
@@ -452,8 +586,16 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).readActive(symbol);
     if(segmentState){
       const selected=selectSegmentWindow({segments:segmentState.segments,archive,windowStartKst,windowEndKst});
+      const observedArticles=segmentState.active.articles.filter(article=>{
+        const at=Date.parse(article.pubDateParsed?.instant??'');
+        return article.observationStatus==='OBSERVED_UNVERIFIED'&&
+          Number.isFinite(at)&&at>=start&&at<=end;
+      });
       return {symbol,query:stockNameFor(symbol),archiveId:archive.archiveId,
         windowStartKst,windowEndKst,...selected,
+        observedArticles,observedArticleCount:observedArticles.length,
+        observedCoverageStatus:observedArticles.length?'UNVERIFIED':'NOT_APPLICABLE',
+        strictNewsStatus:selected.status==='ARCHIVE_WINDOW_READY'?'NOT_EVALUATED':'HELD',
         searchResultContinuityProven:selected.status==='ARCHIVE_WINDOW_READY',
         interpretation:selected.status==='ARCHIVE_WINDOW_READY'?
           '저장된 NAVER 검색 결과의 단일 segment 안에서 대상 구간 기사 수':
@@ -479,6 +621,7 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         ...(archive&&(!Number.isFinite(collectedThrough)||collectedThrough<end)?['WINDOW_END_NOT_COLLECTED']:[]),
         ...(archive?.warnings??[]),...(archive&&!archive.searchResultContinuityProven?['POLL_CONTINUITY_NOT_PROVEN']:[])]};
   }
-  return {read,readPoll,planPoll,reservePoll,appendPoll,collectSyntheticPoll,selectNewsForEodWindow};
+  return {read,readPoll,planPoll,reservePoll,appendPoll,appendObservedApply,
+    collectSyntheticPoll,selectNewsForEodWindow};
 }
 module.exports={createRollingNewsArchiveStore,assessPoll,reviewPageChronology,nowKst,MAX_REQUESTS_PER_POLL};

@@ -32,8 +32,9 @@ function createRollingNewsPageDrift({testOnly=false,testDirectory}={}){
       priorEvents.some(item=>item.segmentId!==seed.segmentId))throw Error('NEWS_DRIFT_SOURCE_INVALID');
     const prior=new Map(seed.articles.map(article=>[article.identity,article.signature]));
     for(const item of priorEvents){
-      if(item.status!=='VERIFIED')continue;
-      const earlier=await archive.readPoll({symbol,pollRunId:item.pollRunId});
+      if(item.status!=='VERIFIED'&&item.type!=='OBSERVED_APPLY')continue;
+      const earlier=await archive.readPoll({symbol,
+        pollRunId:item.type==='OBSERVED_APPLY'?item.sourcePollRunId:item.pollRunId});
       for(const page of earlier.pages)for(const article of page.items){
         const id=searchArticleIdentity(article);
         if(id&&!prior.has(id))prior.set(id,searchArticleSignature(article));
@@ -83,6 +84,8 @@ function createRollingNewsPageDrift({testOnly=false,testDirectory}={}){
       ...(conflicted.size?['ARTICLE_IDENTITY_CONFLICT']:[]),
       ...(!watermarkReached?['WATERMARK_NOT_REACHED']:[])];
     const observedArticles=[...newArticles.values()];
+    const alreadyApplied=state.requestHistory.some(item=>item.type==='OBSERVED_APPLY'&&
+      item.sourcePollRunId===event.pollRunId);
     return {schemaVersion:'ROLLING_NEWS_PAGE_DRIFT_REPLAY_V1',symbol,query:event.query,
       archiveId:event.archiveId,segmentId:seed.segmentId,pollRunId:event.pollRunId,
       sourceDigest:digest(event),sourceReceivedAtKst:event.receivedAtKst,
@@ -98,8 +101,9 @@ function createRollingNewsPageDrift({testOnly=false,testDirectory}={}){
       observedArticlesReady,observedArticles,
       coverageStatus:continuityProven?'SEGMENT_BOUNDED_VERIFIED':'UNVERIFIED',
       continuityProven,fullCoverageProven:false,gapBefore:seed.gapBefore,
-      reasonCodes,applyPlan:{ready:observedArticlesReady&&observedArticles.length>0,
-        status:'NOT_APPLIED',symbol,archiveId:event.archiveId,segmentId:seed.segmentId,
+      reasonCodes,applyPlan:{ready:!alreadyApplied&&observedArticlesReady&&observedArticles.length>0,
+        status:alreadyApplied?'ALREADY_APPLIED':'NOT_APPLIED',
+        symbol,archiveId:event.archiveId,segmentId:seed.segmentId,
         pollRunId:event.pollRunId,sourceDigest:digest(event),
         expectedArchiveRevision:state.archiveRevision,
         expectedSegmentRevision:segmentState.active.segmentRevision,
