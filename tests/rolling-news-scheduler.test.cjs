@@ -64,6 +64,7 @@ test('a supplied approval and exact archive plan reach the existing adapter boun
     return {archive:{archiveRevision:1},record:{pollRunId:randomUUID()}};
   }});
   assert.equal(result.status,'SUCCESS');assert.equal(result.pollExecuted,true);
+  assert.equal(result.executionStatus,'COMPLETED');assert.equal(result.continuityStatus,'UNKNOWN');
   assert.equal(calls.length,1);assert.equal(result.archiveRevisionAfter,1);
   const files=await fs.readdir(path.join(f.slotDirectory,symbol));
   assert.deepEqual(files.sort(),[
@@ -76,6 +77,14 @@ test('a supplied approval and exact archive plan reach the existing adapter boun
   // A new store instance after restart still sees the same durable slot.
   const restarted=createSchedulerSlotStore({testOnly:true,testDirectory:f.slotDirectory});
   assert.equal((await restarted.reserve(planned)),null);
+});
+test('execution completion and GAP continuity are separate fields',async t=>{
+  const f=await fixture(t),planned=await f.plan();
+  const result=await f.run(planned,{approvalId:randomUUID(),testRunner:async()=>({
+    archive:{archiveRevision:1,continuityStatus:'GAP_DETECTED'},record:{pollRunId:randomUUID()}})});
+  assert.equal(result.status,'SUCCESS');
+  assert.equal(result.executionStatus,'COMPLETED');
+  assert.equal(result.continuityStatus,'GAP_DETECTED');
 });
 
 test('synthetic approval travels through the real rolling adapter and EOD selector stays offline',async t=>{

@@ -173,6 +173,17 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       return materialize(manifest,events);
     }catch{throw Error('NEWS_ARCHIVE_RECORD_INVALID');}
   }
+  async function readPoll({symbol,pollRunId}={}){
+    queryFor(symbol);
+    if(!uuid(pollRunId))throw Error('NEWS_ARCHIVE_POLL_ID_INVALID');
+    const archive=await read(symbol),index=archive?.requestHistory.findIndex(item=>item.pollRunId===pollRunId)??-1;
+    if(index<0)throw Error('NEWS_ARCHIVE_POLL_NOT_FOUND');
+    const dir=path.join(location(symbol),'polls'),names=(await fs.readdir(dir)).sort();
+    const event=await safeFile(path.join(dir,names[index]),dir);
+    if(event.pollRunId!==pollRunId||event.sequence!==index+1||event.archiveId!==archive.archiveId)
+      throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    return event;
+  }
   async function planPoll({symbol,maxRequestsPerPoll}={}){
     const query=queryFor(symbol);
     const archive=await read(symbol);
@@ -319,6 +330,18 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
     if(!kstInstant(windowStartKst)||!kstInstant(windowEndKst)||Date.parse(windowStartKst)>=Date.parse(windowEndKst))
       throw Error('NEWS_ARCHIVE_WINDOW_INVALID');
     const archive=await read(symbol),start=Date.parse(windowStartKst),end=Date.parse(windowEndKst);
+    const {createRollingNewsGapRecovery,selectSegmentWindow}=require('./rollingNewsGapRecovery');
+    const segments=await createRollingNewsGapRecovery({testOnly,
+      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).read(symbol);
+    if(segments){
+      const selected=selectSegmentWindow({segments,archive,windowStartKst,windowEndKst});
+      return {symbol,query:stockNameFor(symbol),archiveId:archive.archiveId,
+        windowStartKst,windowEndKst,...selected,
+        searchResultContinuityProven:selected.status==='ARCHIVE_WINDOW_READY',
+        interpretation:selected.status==='ARCHIVE_WINDOW_READY'?
+          '저장된 NAVER 검색 결과의 단일 segment 안에서 대상 구간 기사 수':
+          'segment 경계 또는 연속성 근거가 부족함'};
+    }
     const articles=(archive?.articles??[]).filter(article=>{
       const time=Date.parse(article.pubDateParsed?.instant??'');return Number.isFinite(time)&&time>=start&&time<=end;
     });
@@ -339,6 +362,6 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         ...(archive&&(!Number.isFinite(collectedThrough)||collectedThrough<end)?['WINDOW_END_NOT_COLLECTED']:[]),
         ...(archive?.warnings??[]),...(archive&&!archive.searchResultContinuityProven?['POLL_CONTINUITY_NOT_PROVEN']:[])]};
   }
-  return {read,planPoll,reservePoll,appendPoll,collectSyntheticPoll,selectNewsForEodWindow};
+  return {read,readPoll,planPoll,reservePoll,appendPoll,collectSyntheticPoll,selectNewsForEodWindow};
 }
 module.exports={createRollingNewsArchiveStore,assessPoll,nowKst,MAX_REQUESTS_PER_POLL};

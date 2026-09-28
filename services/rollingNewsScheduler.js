@@ -100,6 +100,11 @@ async function planRollingNewsSchedule({symbol,currentTime,calendarEvidenceRef,c
   const verifiedCalendar=await loadCalendar({calendar,calendarEvidenceRef,testOnly,testDirectory});
   const slot=slotFor({symbol,currentTime:evaluatedAt,calendar:verifiedCalendar,policy:selected});
   if(slot.status!=='PLANNED')return {...base,status:slot.status,reason:slot.reason};
+  const archive=await createRollingNewsArchiveStore({testOnly,
+    testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined}).read(symbol);
+  if(archive?.continuityStatus==='GAP_DETECTED')
+    return {...base,status:'HELD_GAP_RECOVERY_REQUIRED',reason:'WATERMARK_NOT_REACHED',
+      archiveId:archive.archiveId,archiveRevision:archive.archiveRevision};
   const pollPlan=await planRollingNewsPoll({symbol,testOnly,
     testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
   return {...base,...slot,executable:true,status:'PLANNED',reason:null,query:pollPlan.query,
@@ -204,13 +209,15 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
     let prepared=null;
     try{prepared=prepareApproval?await prepareApproval({plan:plan.pollPlan,slotKey:plan.slotKey}):null;}
     catch{
-      const record={status:'FAILED',reason:'APPROVAL_PREPARATION_FAILED',startedAtKst:null,
+      const record={status:'FAILED',executionStatus:'NOT_STARTED',continuityStatus:'UNKNOWN',
+        reason:'APPROVAL_PREPARATION_FAILED',startedAtKst:null,
         completedAtKst:completedAt(),archiveRevisionAfter:plan.archiveRevision,pollRunId:null};
       await store.complete(lease,record);return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:false};
     }
     const selectedApprovalId=prepared?.approvalId??approvalId;
     if(!uuid(selectedApprovalId)){
       const record={status:prepared?.status??'SKIPPED_APPROVAL_REQUIRED',
+        executionStatus:'NOT_STARTED',continuityStatus:'UNKNOWN',
         reason:prepared?.reason??'SCHEDULED_BUT_APPROVAL_REQUIRED',
         startedAtKst:null,completedAtKst:completedAt(),archiveRevisionAfter:plan.archiveRevision,pollRunId:null};
       await store.complete(lease,record);return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:false};
@@ -221,7 +228,9 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
       // The existing runner consumes the supplied approval and enforces the HTTP budget.
       const result=testOnly?await testRunner({plan:plan.pollPlan,approvalId:selectedApprovalId}):
         await createRollingNewsPollRunner({plan:plan.pollPlan,approvalId:selectedApprovalId,environment}).observe();
-      const record={status:'SUCCESS',reason:null,startedAtKst,completedAtKst:completedAt(),
+      const record={status:'SUCCESS',executionStatus:'COMPLETED',
+        continuityStatus:result.archive.continuityStatus??'UNKNOWN',reason:null,
+        startedAtKst,completedAtKst:completedAt(),
         archiveRevisionAfter:result.archive.archiveRevision,pollRunId:result.record.pollRunId};
       await store.complete(lease,record);
       return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:true,result};
@@ -229,7 +238,9 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
       const status=error.message==='ARCHIVE_STATE_CHANGED'?'ARCHIVE_STATE_CHANGED':'FAILED';
       const archive=await createRollingNewsArchiveStore({testOnly,
         testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined}).read(plan.symbol).catch(()=>null);
-      const record={status,reason:status,startedAtKst,completedAtKst:completedAt(),
+      const record={status,executionStatus:'FAILED',
+        continuityStatus:archive?.continuityStatus??'UNKNOWN',
+        reason:status,startedAtKst,completedAtKst:completedAt(),
         archiveRevisionAfter:archive?.archiveRevision??null,
         pollRunId:archive?.archiveRevision>plan.archiveRevision?archive.requestHistory.at(-1)?.pollRunId??null:null};
       await store.complete(lease,record);
