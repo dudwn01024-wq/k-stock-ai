@@ -32,15 +32,47 @@ const initialState=(archiveId,symbol,query)=>({schemaVersion:'ROLLING_NEWS_ARCHI
   continuityStatus:'NOT_STARTED',searchResultContinuityProven:false,requestHistory:[],articleCount:0,
   articles:[],warnings:[],fullCoverageProven:false});
 
+function reviewPageChronology(pages){
+  const summaries=[];
+  let globalPrevious=Infinity,observedDescendingOrder=true,parseFailureCount=0;
+  for(const [index,page] of pages.entries()){
+    let previous=Infinity,reversed=false,invalid=0;
+    for(const item of page.items){
+      const parsed=parsePubDate(item.pubDateRaw),at=parsed?Date.parse(parsed.instant):NaN;
+      if(!Number.isFinite(at)){invalid++;parseFailureCount++;continue;}
+      if(at>previous)reversed=true;
+      if(at>globalPrevious)observedDescendingOrder=false;
+      previous=at;globalPrevious=at;
+    }
+    summaries.push({requestIndex:page.page??index+1,start:page.start,
+      lastBuildDate:page.lastBuildDate??null,
+      newestPubDate:page.items[0]?.pubDateRaw??null,
+      oldestPubDate:page.items.at(-1)?.pubDateRaw??null,
+      parseFailureCount:invalid,withinPageChronologyValid:reversed?false:invalid?null:true});
+  }
+  let crossReversed=false,crossUnknown=false;
+  for(let index=1;index<pages.length;index++){
+    const previous=parsePubDate(pages[index-1].items.at(-1)?.pubDateRaw),
+      current=parsePubDate(pages[index].items[0]?.pubDateRaw);
+    if(!previous||!current)crossUnknown=true;
+    else if(Date.parse(current.instant)>Date.parse(previous.instant))crossReversed=true;
+  }
+  const withinPageChronologyValid=summaries.some(page=>page.withinPageChronologyValid===false)?false:
+    summaries.some(page=>page.withinPageChronologyValid===null)?null:true;
+  const crossPageChronologyStable=crossReversed?false:crossUnknown?null:true;
+  return {pages:summaries,withinPageChronologyValid,crossPageChronologyStable,
+    pageBoundaryDrift:withinPageChronologyValid===true&&crossPageChronologyStable===false,
+    parseFailureCount,observedDescendingOrder};
+}
+
 function assessPoll(prior,pages,{failed=false,maxRequestsPerPoll}={}){
   const seen=new Map(),priorArticles=new Map((prior?.articles??[]).filter(a=>a.identity).map(a=>[a.identity,a]));
   const duplicateKeys=[],conflictKeys=[],items=[];
-  let previous=Infinity,ordered=true,parseFailureCount=0,identityMissingCount=0,watermarkReached=false;
+  const chronology=reviewPageChronology(pages);
+  let identityMissingCount=0,watermarkReached=false;
   for(const page of pages)for(const item of page.items){
     const parsed=parsePubDate(item.pubDateRaw),identity=searchArticleIdentity(item),signature=searchArticleSignature(item);
-    const instant=parsed?.instant??null,time=instant?Date.parse(instant):null;
-    if(time===null)parseFailureCount++;
-    else{if(time>previous)ordered=false;previous=time;}
+    const instant=parsed?.instant??null;
     if(!identity)identityMissingCount++;
     if(identity&&prior?.watermark?.identity===identity&&prior.watermark.signature===signature)
       watermarkReached=true;
@@ -54,7 +86,8 @@ function assessPoll(prior,pages,{failed=false,maxRequestsPerPoll}={}){
     items.push({identity,signature,instant,item});
   }
   const first=items[0];
-  const warnings=[...(parseFailureCount?['PUBDATE_UNPARSEABLE']:[]),...(!ordered?['PUBDATE_ORDER_REVERSED']:[]),
+  const warnings=[...(chronology.parseFailureCount?['PUBDATE_UNPARSEABLE']:[]),
+    ...(!chronology.observedDescendingOrder?['PUBDATE_ORDER_REVERSED']:[]),
     ...(identityMissingCount?['ARTICLE_IDENTITY_MISSING']:[]),...(conflictKeys.length?['ARTICLE_IDENTITY_CONFLICT']:[])];
   if((first&&(!first.identity||!first.instant))||(!first&&!prior?.watermark))
     warnings.push('FIRST_ARTICLE_NOT_USABLE');
@@ -65,7 +98,8 @@ function assessPoll(prior,pages,{failed=false,maxRequestsPerPoll}={}){
     {identity:first.identity,signature:first.signature,pubDateRaw:first.item.pubDateRaw,instant:first.instant}:
     prior?.watermark??null;
   return {status,watermarkReached,searchResultContinuityProven:status==='VERIFIED',
-    watermark,parseFailureCount,observedDescendingOrder:ordered,identityMissingCount,
+    watermark,parseFailureCount:chronology.parseFailureCount,
+    observedDescendingOrder:chronology.observedDescendingOrder,identityMissingCount,
     duplicateCount:duplicateKeys.length,duplicateConflictCount:conflictKeys.length,
     warnings,stopReason:failed?'REQUEST_FAILED':warnings.length?'EVIDENCE_UNVERIFIED':
       !prior?.watermark?'INITIAL_SNAPSHOT':watermarkReached?'WATERMARK_REACHED':
@@ -447,4 +481,4 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
   }
   return {read,readPoll,planPoll,reservePoll,appendPoll,collectSyntheticPoll,selectNewsForEodWindow};
 }
-module.exports={createRollingNewsArchiveStore,assessPoll,nowKst,MAX_REQUESTS_PER_POLL};
+module.exports={createRollingNewsArchiveStore,assessPoll,reviewPageChronology,nowKst,MAX_REQUESTS_PER_POLL};

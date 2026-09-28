@@ -1,0 +1,146 @@
+'use strict';
+require('./helpers/local-only.cjs');
+const test=require('node:test'),assert=require('node:assert/strict');
+const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+const {randomUUID}=require('node:crypto');
+const {createRollingNewsArchiveStore,assessPoll,reviewPageChronology}=
+  require('../services/rollingNewsArchive');
+const {createRollingNewsGapRecovery}=require('../services/rollingNewsGapRecovery');
+const {planRollingNewsPoll,createRollingNewsPollRunner}=require('../services/rollingNewsPollAdapter');
+const {createObservationApprovalStore}=require('../services/observationApproval');
+const {createRollingNewsPageDrift,selectObservedForEodWindow}=
+  require('../services/rollingNewsPageDrift');
+
+const symbol='005930',query='삼성전자',environment={NODE_ENV:'development',
+  KSTOCK_EXECUTION_MODE:'personal-local',NAVER_API_HUB_API_KEY_ID:'SYNTHETIC_ID',
+  NAVER_API_HUB_API_KEY:'SYNTHETIC_KEY'};
+const news=(minute,id)=>({title:`SYNTHETIC_TEST_${id}`,
+  originallink:`https://example.test/${id}`,link:`https://search.example.test/${id}`,
+  description:'SYNTHETIC_TEST_ONLY',pubDate:new Date(Date.parse('2026-09-28T03:00:00Z')+
+    minute*60000).toUTCString().replace('GMT','+0000')});
+const raw=item=>({...item,pubDateRaw:item.pubDate});
+const page=(start,items)=>({start,display:100,total:1000,items});
+const fileTree=async root=>{const result=[];async function walk(dir){
+  for(const entry of await fs.readdir(dir,{withFileTypes:true})){
+    const name=path.join(dir,entry.name);
+    if(entry.isDirectory())await walk(name);
+    else result.push([path.relative(root,name),await fs.readFile(name)]);
+  }}await walk(root);return result;};
+
+async function fixture(t){
+  const testDirectory=await fs.mkdtemp(path.join(os.tmpdir(),'rolling-drift-test-'));
+  t.after(()=>fs.rm(testDirectory,{recursive:true,force:true}));
+  const archive=createRollingNewsArchiveStore({testOnly:true,
+    testDirectory:path.join(testDirectory,'rolling-archive')});
+  const old=news(-1000,'old');
+  await archive.collectSyntheticPoll({symbol,receivedAtKst:'2026-09-27T09:30:00+09:00',
+    readPage:async()=>page(1,[old])});
+  await archive.collectSyntheticPoll({symbol,receivedAtKst:'2026-09-27T10:00:00+09:00',
+    readPage:async()=>page(1,[old])});
+  const gap=await archive.collectSyntheticPoll({symbol,receivedAtKst:'2026-09-28T12:30:00+09:00',
+    readPage:async({start})=>page(start,[news(0,`gap-${start}`)])});
+  assert.equal(gap.event.review.status,'GAP_DETECTED');
+  const segments=createRollingNewsGapRecovery({testOnly:true,testDirectory});
+  await segments.bootstrap({symbol,sourcePollRunId:gap.event.pollRunId});
+  return {testDirectory,archive,segments};
+}
+
+async function followUp(f,pages){
+  const plan=await planRollingNewsPoll({symbol,testOnly:true,
+    testDirectory:path.join(f.testDirectory,'rolling-archive')});
+  const approvalId=randomUUID(),approvals=createObservationApprovalStore({environment,testOnly:true,
+    testDirectory:path.join(f.testDirectory,'approvals')});
+  await approvals.issue({approvalId,execution:plan.execution,userApproved:true});
+  const calls=[];
+  const runner=createRollingNewsPollRunner({plan,approvalId,environment,testOnly:true,
+    directory:f.testDirectory,testApprovalDirectory:path.join(f.testDirectory,'approvals'),
+    testTransport:async url=>{const start=Number(url.searchParams.get('start'));
+      calls.push(start);return {status:200,data:page(start,pages[calls.length-1]??[])};}});
+  const result=await runner.observe();
+  return {result,calls};
+}
+
+test('page boundary drift is separate from within-page order and watermark',()=>{
+  const anchor=raw(news(0,'anchor'));
+  const pages=[{page:1,start:1,lastBuildDate:'SYNTHETIC_BUILD_1',
+    items:[raw(news(5,'a')),raw(news(3,'b'))]},
+  {page:2,start:101,lastBuildDate:'SYNTHETIC_BUILD_2',
+    items:[raw(news(4,'c')),anchor]}];
+  const chronology=reviewPageChronology(pages);
+  assert.equal(chronology.withinPageChronologyValid,true);
+  assert.equal(chronology.crossPageChronologyStable,false);
+  assert.equal(chronology.pageBoundaryDrift,true);
+  assert.deepEqual(chronology.pages.map(p=>p.lastBuildDate),
+    ['SYNTHETIC_BUILD_1','SYNTHETIC_BUILD_2']);
+  const review=assessPoll({watermark:{identity:anchor.originallink,
+    signature:JSON.stringify([anchor.title,anchor.originallink,anchor.link,
+      anchor.description,anchor.pubDateRaw])},articles:[]},pages,{maxRequestsPerPoll:5});
+  assert.equal(review.watermarkReached,true);
+  assert.equal(review.status,'UNVERIFIED');
+  assert.equal(review.searchResultContinuityProven,false);
+});
+
+test('within-page inversion and parse failure remain distinct; normal pages keep existing review',()=>{
+  const reversed=reviewPageChronology([{page:1,start:1,items:[raw(news(1,'a')),raw(news(2,'b'))]}]);
+  assert.equal(reversed.withinPageChronologyValid,false);
+  assert.equal(reversed.pageBoundaryDrift,false);
+  const bad=reviewPageChronology([{page:1,start:1,items:[{...raw(news(1,'a')),
+    pubDateRaw:'INVALID_SYNTHETIC_DATE'}]}]);
+  assert.equal(bad.parseFailureCount,1);
+  assert.equal(bad.withinPageChronologyValid,null);
+  const normalPages=[{page:1,start:1,items:[raw(news(5,'a')),raw(news(3,'b'))]},
+    {page:2,start:101,items:[raw(news(2,'c')),raw(news(0,'d'))]}];
+  assert.equal(reviewPageChronology(normalPages).crossPageChronologyStable,true);
+  const prior={watermark:{identity:'https://example.test/d',
+    signature:JSON.stringify([news(0,'d').title,news(0,'d').originallink,
+      news(0,'d').link,news(0,'d').description,news(0,'d').pubDate])},articles:[]};
+  assert.equal(assessPoll(prior,normalPages,{maxRequestsPerPoll:5}).status,'VERIFIED');
+  assert.equal(assessPoll({...prior,watermark:{...prior.watermark,identity:'missing'}},
+    normalPages,{maxRequestsPerPoll:5}).searchResultContinuityProven,false);
+});
+
+test('stored synthetic drift replay prepares observed article plan without modifying records',async t=>{
+  const f=await fixture(t),anchor=news(0,'gap-1');
+  const {result,calls}=await followUp(f,[[news(5,'a'),news(3,'b')],[news(4,'c'),anchor]]);
+  assert.deepEqual(calls,[1,101]);
+  assert.equal(result.record.review.status,'UNVERIFIED');
+  const before=await fileTree(f.testDirectory);
+  const service=createRollingNewsPageDrift({testOnly:true,testDirectory:f.testDirectory});
+  const input={symbol,pollRunId:result.record.pollRunId};
+  const first=await service.replay(input),second=await service.replay(input);
+  assert.deepEqual(first,second);
+  assert.equal(first.watermarkReached,true);
+  assert.equal(first.withinPageChronologyValid,true);
+  assert.equal(first.crossPageChronologyStable,false);
+  assert.equal(first.pageBoundaryDrift,true);
+  assert.equal(first.snapshotConsistency,'NOT_PROVEN');
+  assert.equal(first.newObservedArticleCount,3);
+  assert.equal(first.existingReappearanceCount,1);
+  assert.equal(first.observedArticlesReady,true);
+  assert.equal(first.continuityProven,false);
+  assert.equal(first.fullCoverageProven,false);
+  assert.equal(first.gapBefore,true);
+  assert.equal(first.applyPlan.ready,true);
+  assert.equal(first.applyPlan.status,'NOT_APPLIED');
+  const selected=selectObservedForEodWindow(first,{windowStartKst:'2026-09-28T12:02:00+09:00',
+    windowEndKst:'2026-09-28T12:04:00+09:00'});
+  assert.equal(selected.descriptiveCandidateCount,2);
+  assert.equal(selected.status,'ARCHIVE_WINDOW_INCOMPLETE');
+  assert.equal(selected.strictNewsStatus,'HELD');
+  const after=await fileTree(f.testDirectory);
+  assert.deepEqual(after,before);
+});
+
+test('inverted page and unparseable article never create complete observed coverage',async t=>{
+  const f=await fixture(t),anchor=news(0,'gap-1');
+  const {result}=await followUp(f,[[news(1,'a'),news(2,'b'),
+    {...news(3,'bad'),pubDate:'INVALID_SYNTHETIC_DATE'},anchor]]);
+  const replay=await createRollingNewsPageDrift({testOnly:true,
+    testDirectory:f.testDirectory}).replay({symbol,pollRunId:result.record.pollRunId});
+  assert.equal(replay.withinPageChronologyValid,false);
+  assert.equal(replay.parseFailureCount,1);
+  assert.equal(replay.observedArticlesReady,false);
+  assert.equal(replay.applyPlan.ready,false);
+  assert.equal(replay.continuityProven,false);
+  assert.equal(replay.newObservedArticleCount,2);
+});
