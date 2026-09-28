@@ -87,6 +87,23 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
     }
     return true;
   }
+  async function resolveArticles(bundleId){
+    const bundle=await read(bundleId),state=await archive.read(bundle.symbol);
+    if(!state||state.archiveId!==bundle.archiveId||state.query!==bundle.query)
+      throw Error('NEWS_BUNDLE_ARCHIVE_MISMATCH');
+    const byId=new Map(state.articles.map(item=>[item.articleId,item]));
+    const articles=bundle.articleRefs.map(ref=>{
+      const actual=byId.get(ref.articleId);
+      if(!actual||!isDeepStrictEqual(ref,refFor(state.archiveId,actual)))
+        throw Error('NEWS_BUNDLE_ARTICLE_NOT_FOUND');
+      return {articleId:actual.articleId,title:actual.title??null,
+        originallink:actual.originallink??null,link:actual.link??null,
+        description:actual.description??null,pubDate:actual.pubDateRaw,
+        parsedPubDate:actual.pubDateParsed,sourcePollRunId:sourcePollId(actual),
+        firstSeenAtKst:actual.firstSeenAtKst??null};
+    });
+    return {bundle,articles};
+  }
   async function create({symbol,query,targetDate,windowStartKst,windowEndKst}={}){
     if(!testOnly&&resolveExecutionMode(environment.KSTOCK_EXECUTION_MODE,
       environment.NODE_ENV).mode!=='personal-local')throw Error('NEWS_BUNDLE_REQUIRES_PERSONAL_LOCAL');
@@ -121,7 +138,7 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
       articleRefs:[...byId.values()],articleCount:byId.size,
       coverageStatus:selection.observedArticleCount>0?selection.observedCoverageStatus:selection.status,
       continuityStatus:selection.searchResultContinuityProven===true?'VERIFIED':
-        state.activeSegment?.continuityStatus??state.continuityStatus??'UNVERIFIED',
+        state.activeSegment?.continuityStatus==='GAP_DETECTED'?'GAP_DETECTED':'UNVERIFIED',
       continuityProven:selection.searchResultContinuityProven===true,
       fullCoverageProven:false,createdAtKst:toKst(at)};
     const record={...content,recordDigest:digest(content)};
@@ -169,7 +186,7 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
     return {references,legacySymbols:[...legacySymbols],legacyUnmappedAnalysisCount:unmapped.length,
       legacyUnmappedAnalysisRunIds:unmapped,mappedAnalysisCount:mapped.length};
   }
-  return {create,read,verifyReferences,auditAnalysisRecords};
+  return {create,read,verifyReferences,resolveArticles,auditAnalysisRecords};
 }
 
 function linkAnalysisDraftToNewsBundle({analysisRunId,symbol,targetDate,newsCollectionEvidenceRef,

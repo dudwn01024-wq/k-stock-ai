@@ -1,10 +1,12 @@
 'use strict';
 // Offline, read-only assembly of three independently saved observation records.
 const fs=require('node:fs/promises'),path=require('node:path');
-const {createEodInputs,evaluateEod,POLICY,isBusinessDate}=require('./observationEod');
+const {createEodInputs,evaluateEod,POLICY,isBusinessDate,sessionWindow}=require('./observationEod');
 const {calculateDailyInputs,validRow}=require('./observationDaily');
 const {sanitizeEvidence}=require('./observationEvidence');
 const {reviewSearchNewsRecord,parsePubDate}=require('./observationSearchNews');
+const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
+const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/live-once');
 const REPLAY_ROOT=path.resolve(__dirname,'../.local/strategy-observations/revalidations');
@@ -73,15 +75,23 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       return {holidayRecord,holidayReplay:replay};
     }catch{throw Error('EOD_CALENDAR_RECORD_INVALID');}
   }
-  async function build({runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,calendarEvidenceRef}={}){
-    const refs={daily:dailyEvidenceRef,investor:investorEvidenceRef,news:newsEvidenceRef};
+  async function build({runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,
+    newsCollectionEvidenceRef,newsEvidenceBundleId,calendarEvidenceRef}={}){
+    const bundleMode=newsEvidenceBundleId!==undefined&&newsEvidenceBundleId!==null;
+    const refs={daily:dailyEvidenceRef,investor:investorEvidenceRef,
+      ...(!bundleMode?{news:newsEvidenceRef}:{})};
     const base={runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,
-      calendarEvidenceRef:calendarEvidenceRef??null,
+      newsCollectionEvidenceRef:newsCollectionEvidenceRef??null,
+      newsEvidenceBundleId:newsEvidenceBundleId??null,calendarEvidenceRef:calendarEvidenceRef??null,
       dailyReady:false,investorReady:false,newsReady:false,inputReady:false,reasons:[],
       riskReady:false,ledgerInputReady:false,tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
     if(!uuid(runId)||typeof symbol!=='string'||!/^\d{6}$/.test(symbol)||!isBusinessDate(targetDate))
       return {...base,reasons:['EOD_RUN_CONTEXT_INVALID']};
-    if(Object.values(refs).some(ref=>!uuid(ref))||new Set(Object.values(refs)).size!==3)
+    if(Object.values(refs).some(ref=>!uuid(ref))||
+      new Set(Object.values(refs)).size!==(bundleMode?2:3)||
+      bundleMode&&(!uuid(newsEvidenceBundleId)||newsEvidenceRef!==undefined||
+        newsCollectionEvidenceRef!==undefined&&newsCollectionEvidenceRef!==null&&
+          !uuid(newsCollectionEvidenceRef)))
       return {...base,reasons:['EOD_EVIDENCE_REF_INVALID']};
     let calendarEvidence=null;
     if(calendarEvidenceRef!==undefined){
@@ -89,14 +99,32 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       catch{return {...base,reasons:['CALENDAR_EVIDENCE_INVALID']};}
     }
     const records={};
-    for(const type of ['daily','investor','news']){
+    for(const type of ['daily','investor',...(!bundleMode?['news']:[])]){
       try{records[type]=await load(refs[type],type);}
       catch{return {...base,reasons:[`${type.toUpperCase()}_EVIDENCE_INVALID`]};}
       const record=records[type],recordDate=type==='news'?record.targetDate:record.targetBusinessDate;
       if(record.symbol!==symbol||recordDate!==targetDate)
         return {...base,reasons:[`${type.toUpperCase()}_SYMBOL_OR_DATE_MISMATCH`]};
     }
-    const {daily,investor,news}=records,reasons=[];
+    const {daily,investor}=records;
+    let news=records.news??null,bundle=null,bundleArticles=[];
+    if(bundleMode){
+      if(!calendarEvidence)return {...base,reasons:['CALENDAR_EVIDENCE_INVALID']};
+      try{
+        const resolved=await createNewsEvidenceBundleStore({testOnly,testDirectory}).resolveArticles(newsEvidenceBundleId);
+        bundle=resolved.bundle;bundleArticles=resolved.articles;
+        const calendar=calendarFromStoredEvidence(calendarEvidence.holidayRecord,
+          {approvalId:calendarEvidence.holidayRecord.approvalId,testOnly});
+        const expected=sessionWindow({calendar,targetBusinessDate:targetDate});
+        if(bundle.symbol!==symbol||bundle.targetDate!==targetDate||!expected||
+          Date.parse(bundle.windowStartKst)!==Date.parse(expected.start)||
+          Date.parse(bundle.windowEndKst)!==Date.parse(expected.end)||
+          newsCollectionEvidenceRef&&
+            !bundle.articleRefs.some(ref=>ref.sourcePollRunId===newsCollectionEvidenceRef))
+          throw Error('NEWS_BUNDLE_CONTEXT_MISMATCH');
+      }catch{return {...base,reasons:['NEWS_BUNDLE_INVALID_OR_MISMATCH']};}
+    }
+    const reasons=[];
     const dailyEvidence=sanitizeEvidence(daily.evidence),investorEvidence=sanitizeEvidence(investor.evidence);
     const selection=daily.dailySelection,rows=selection?.calculationRows;
     const targetRow=Array.isArray(rows)?rows.find(row=>row.date===targetDate.replaceAll('-','')):null;
@@ -113,25 +141,31 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       values?.stck_bsop_date===targetDate.replaceAll('-','')&&supplyFields.every(key=>number(values[key])!==null)&&
       !!rawTarget(investorEvidence,'kisInvestor',symbol,targetDate,supplyFields.map(key=>[key,values[key]]));
     if(!investorReady)reasons.push('INVESTOR_REQUIRED_FIELDS_MISSING');
-    let newsReview=null;
-    try{if(Array.isArray(news.pages)&&news.pages.every(page=>Array.isArray(page.items)&&
-      page.items.every(item=>JSON.stringify(item.pubDateParsed??null)===JSON.stringify(parsePubDate(item.pubDateRaw)))))
-      newsReview=reviewSearchNewsRecord(news);
-    }catch{/* Invalid saved evidence remains HELD. */}
-    if(!Array.isArray(news.pages)||news.pages.some(page=>!Array.isArray(page.items)))
-      return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,
-        reasons:['NEWS_EVIDENCE_INVALID']};
-    const newsConsistent=!!newsReview&&news.review?.collectionStatus===newsReview.collectionStatus&&
-      news.review?.fullCoverageProven===newsReview.fullCoverageProven&&
-      news.review?.strategyNewsStatus===newsReview.strategyNewsStatus;
-    const newsReady=newsConsistent&&news.review.strategyNewsStatus==='USABLE'&&
-      news.review.collectionStatus==='COMPLETE'&&news.review.fullCoverageProven===true;
-    if(!newsReady)reasons.push(newsConsistent?'NEWS_COVERAGE_OR_MEANING_UNVERIFIED':'NEWS_RECORD_REVIEW_INVALID');
+    let newsReview=null,newsConsistent=false,newsReady=false;
+    if(!bundleMode){
+      try{if(Array.isArray(news.pages)&&news.pages.every(page=>Array.isArray(page.items)&&
+        page.items.every(item=>JSON.stringify(item.pubDateParsed??null)===JSON.stringify(parsePubDate(item.pubDateRaw)))))
+        newsReview=reviewSearchNewsRecord(news);
+      }catch{/* Invalid saved evidence remains HELD. */}
+      if(!Array.isArray(news.pages)||news.pages.some(page=>!Array.isArray(page.items)))
+        return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,
+          reasons:['NEWS_EVIDENCE_INVALID']};
+      newsConsistent=!!newsReview&&news.review?.collectionStatus===newsReview.collectionStatus&&
+        news.review?.fullCoverageProven===newsReview.fullCoverageProven&&
+        news.review?.strategyNewsStatus===newsReview.strategyNewsStatus;
+      newsReady=newsConsistent&&news.review.strategyNewsStatus==='USABLE'&&
+        news.review.collectionStatus==='COMPLETE'&&news.review.fullCoverageProven===true;
+      if(!newsReady)reasons.push(newsConsistent?'NEWS_COVERAGE_OR_MEANING_UNVERIFIED':'NEWS_RECORD_REVIEW_INVALID');
+    }else reasons.push('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');
     if(supply?.strategyUse?.status!=='USABLE')reasons.push('SUPPLY_FINALITY_UNVERIFIED');
     const raw={daily:{targetOHLCV:daily.targetOHLCV??null,evidence:dailyEvidence},
       investor:{target:target?{rawPath:target.rawPath,values:target.values}:null,
         evidence:investorEvidence},
-      news:{query:news.query??null,targetDate:news.targetDate,probeDateCutoff:news.probeDateCutoff,
+      news:bundleMode?{source:'ROLLING_NEWS_BUNDLE',bundleId:bundle.bundleId,
+        query:bundle.query,targetDate:bundle.targetDate,pages:[],
+        coverageStatus:bundle.coverageStatus,continuityStatus:bundle.continuityStatus,
+        fullCoverageProven:bundle.fullCoverageProven}:
+      {query:news.query??null,targetDate:news.targetDate,probeDateCutoff:news.probeDateCutoff,
         review:news.review??null,pages:news.pages.map(page=>({page:page.page,
         requestedQuery:page.requestedQuery??null,items:page.items.map(item=>({
         title:item.title??null,originallink:item.originallink??null,link:item.link??null,
@@ -145,7 +179,14 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       foreignerBuy:investorReady?values.frgn_shnu_vol:null,foreignerSell:investorReady?values.frgn_seln_vol:null,
       institutionBuy:investorReady?values.orgn_shnu_vol:null,institutionSell:investorReady?values.orgn_seln_vol:null,
       finality:supply?.strategyUse?.finality??'UNKNOWN'},
-    news:{articles:news.pages.flatMap(page=>page.items.map(item=>({pubDateRaw:item.pubDateRaw??null,
+    news:bundleMode?{articles:bundleArticles.map(item=>({articleId:item.articleId,
+      title:item.title,originallink:item.originallink,link:item.link,
+      description:item.description,pubDateRaw:item.pubDate,pubDateParsed:item.parsedPubDate,
+      sourcePollRunId:item.sourcePollRunId,receivedAt:item.firstSeenAtKst})),
+      collectionStatus:bundle.coverageStatus,coverageStatus:bundle.coverageStatus,
+      continuityStatus:bundle.continuityStatus,continuityProven:bundle.continuityProven,
+      fullCoverageProven:bundle.fullCoverageProven}:
+      {articles:news.pages.flatMap(page=>page.items.map(item=>({pubDateRaw:item.pubDateRaw??null,
       pubDateParsed:item.pubDateParsed??null,meaning:item.pubDateMeaning??null,
       receivedAt:item.receivedAt??null}))),
       collectionStatus:news.review?.collectionStatus??null,fullCoverageProven:news.review?.fullCoverageProven===true}};
@@ -157,13 +198,14 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     eodInputs.supply={...eodInputs.supply,date:normalized.investor.date,
       foreignerNet:normalized.investor.foreignerNet,institutionNet:normalized.investor.institutionNet,
       finality:'UNKNOWN',finalityEvidence:null,unitVerified:false,receivedAt:instant(investor.receivedAt)};
-    eodInputs.news={coverage:null,articles:normalized.news.articles.map((item,index)=>({id:String(index),
+    eodInputs.news={coverage:null,articles:normalized.news.articles.map((item,index)=>({id:item.articleId??String(index),
       originalTime:item.pubDateRaw,publishedAt:null,meaning:'UNKNOWN',hasCautionSignal:null,receivedAt:null}))};
     if(!eodInputs.calendar)reasons.push('OFFICIAL_SESSION_WINDOW_UNVERIFIED');
     if(!eodInputs.daily.complete)reasons.push('DAILY_COMPLETION_UNVERIFIED');
     return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,newsReady:!!newsReady,
       inputReady:reasons.length===0,reasons:[...new Set(reasons)],raw,normalized,derived:{daily:derived},
-      preparedRecord:prepared,eodInputs,calendarEvidence};
+      preparedRecord:prepared,eodInputs,calendarEvidence,
+      newsBundle:bundle,newsBundleArticles:bundleArticles};
   }
   return {build,loadCalendar};
 }

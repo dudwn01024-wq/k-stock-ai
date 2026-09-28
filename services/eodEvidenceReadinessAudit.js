@@ -10,7 +10,8 @@ const asNumber=value=>typeof value==='number'&&Number.isFinite(value)?value:null
 const asInstant=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
 function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=null,testOnly=false}={}){
   const refs={daily:input?.dailyEvidenceRef??null,investor:input?.investorEvidenceRef??null,
-    news:input?.newsEvidenceRef??null,calendar:holidayRecord?.id??null,replay:holidayReplay?.id??null};
+    news:input?.newsEvidenceBundleId??input?.newsEvidenceRef??null,
+    calendar:holidayRecord?.id??null,replay:holidayReplay?.id??null};
   const sections={daily:[],investor:[],news:[],calendar:[],integration:[]};
   const fact=(group,item,ok,fields,policy,reason,
     evidenceRef=group==='integration'?Object.values(refs).filter(Boolean):refs[group])=>{
@@ -125,7 +126,8 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
     'docs/observation-investor.md#strategyUse',
     'KIS 일별 수급이 언제 확정치가 되는지 인정할 공식 필드·기준이 없습니다.');
   const n=input?.normalized?.news,nr=input?.raw?.news,articles=n?.articles??[];
-  fact('news','articlesPresent',valid&&articles.length>0,['pages[].items[]'],
+  fact('news','articlesPresent',valid&&articles.length>0,
+    nr?.source==='ROLLING_NEWS_BUNDLE'?['bundle.articleRefs[]']:['pages[].items[]'],
     'services/observationSearchNews.js#reviewSearchNewsRecord','저장된 기사 수가 0보다 큰지만 증명합니다.');
   fact('news','pubDateParse',valid&&articles.length>0&&articles.every(a=>a.pubDateParsed?.instant),
     ['pages[].items[].pubDateRaw','pubDateParsed.instant'],
@@ -134,8 +136,11 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
     ['pages[].items[].receivedAt'],'services/observationEod.js#evaluateEod',
     '기사 수신시각은 저장됐지만 발행시각으로 대체하지 않습니다.');
   fact('news','symbolAndQuery',valid&&nr?.targetDate===input.targetDate&&nr?.query===stockNameFor(input.symbol)&&
-    nr.pages.every(page=>page.requestedQuery===nr.query),
-    ['symbol','targetDate','query','pages[].requestedQuery'],
+    (nr.source==='ROLLING_NEWS_BUNDLE'?nr.bundleId===input.newsEvidenceBundleId&&
+      input.newsBundle?.symbol===input.symbol:
+      nr.pages.every(page=>page.requestedQuery===nr.query)),
+    nr?.source==='ROLLING_NEWS_BUNDLE'?['bundle.symbol','bundle.query','bundle.targetDate']:
+      ['symbol','targetDate','query','pages[].requestedQuery'],
     'services/observationSearchNewsContract.js#executionFor','검색어와 요청 기록이 종목 매핑에 일치해야 합니다.');
   const oldest=articles.map(a=>a.pubDateParsed?.instant).filter(Boolean).sort()[0]??null;
   fact('news','strategyWindowBoundaries',!!calendarWindow,['calendar.days[]','previousBusinessDate','start','end'],

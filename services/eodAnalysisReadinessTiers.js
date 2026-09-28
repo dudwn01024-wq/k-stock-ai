@@ -8,6 +8,7 @@ const fact=(audit,group,item)=>audit.sections[group].find(entry=>entry.item===it
 const unique=values=>[...new Set(values)];
 
 function tierResult(input,audit,strictReview=null){
+  const bundleMode=Boolean(input.newsEvidenceBundleId);
   const calendarReady=fact(audit,'calendar','latestCompletedBusinessDate');
   const technicalReady=calendarReady&&input.dailyReady===true&&
     ['targetDateRow','OHLCV','historyForExistingCalculators'].every(item=>fact(audit,'daily',item))&&
@@ -16,19 +17,22 @@ function tierResult(input,audit,strictReview=null){
     ['targetDateRow','foreignBuySellNet','institutionBuySellNet','arithmeticConsistency'].every(item=>fact(audit,'investor',item));
   const window=audit.strategyNewsWindow;
   const articles=input.normalized?.news?.articles??[];
+  const articleTimes=bundleMode?articles.map(article=>article.pubDateParsed?.instant).sort():[];
   // NAVER's pubDate denotes time provided to NAVER (or the original provider's time),
   // not a proven publisher-first-publication timestamp. These are exploration candidates only.
-  const candidateCount=window?articles.filter(article=>{
+  const candidateCount=bundleMode?articles.length:window?articles.filter(article=>{
     const instant=article.pubDateParsed?.instant;
     return typeof instant==='string'&&Number.isFinite(Date.parse(instant))&&
       Date.parse(instant)>Date.parse(window.start)&&Date.parse(instant)<=Date.parse(window.end);
   }).length:0;
   const newsEvidenceValid=fact(audit,'news','symbolAndQuery')&&fact(audit,'news','pubDateParse')&&
     !input.reasons?.includes('NEWS_RECORD_REVIEW_INVALID');
-  const newsReady=calendarReady&&newsEvidenceValid&&candidateCount>0;
-  const coverageStatus=input.normalized?.news?.collectionStatus==='INCOMPLETE'?'INCOMPLETE':
+  const newsReady=!bundleMode&&calendarReady&&newsEvidenceValid&&candidateCount>0;
+  const coverageStatus=bundleMode?input.newsBundle?.coverageStatus??'UNVERIFIED':
+    input.normalized?.news?.collectionStatus==='INCOMPLETE'?'INCOMPLETE':
     newsReady?'BOUNDED':'UNVERIFIED';
-  const strictStrategyBlockers=unique(audit.blockers.map(blocker=>blocker.replace('.', '_').replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase()));
+  const strictStrategyBlockers=unique([...audit.blockers.map(blocker=>blocker.replace('.', '_').replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase()),
+    ...(bundleMode?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE']:[])]);
   const descriptiveWarnings=unique([
     ...(!calendarReady?['CALENDAR_DATE_UNVERIFIED']:[]),
     ...(!technicalReady?['DAILY_TECHNICAL_INPUT_UNAVAILABLE']:[]),
@@ -37,12 +41,16 @@ function tierResult(input,audit,strictReview=null){
     ...(!investorReady?['INVESTOR_FACTS_UNAVAILABLE']:[]),
     ...(investorReady&&!fact(audit,'investor','finality')?['INVESTOR_FINALITY_UNKNOWN']:[]),
     ...(investorReady&&!fact(audit,'investor','sessionScope')?['INVESTOR_SESSION_SCOPE_UNKNOWN']:[]),
-    ...(!newsReady?['NEWS_NOT_USED']:[]),
+    ...(bundleMode?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE',
+      ...(coverageStatus!=='ARCHIVE_WINDOW_READY'?['NEWS_BUNDLE_COVERAGE_UNVERIFIED']:[])]:
+      !newsReady?['NEWS_NOT_USED']:[]),
     ...(newsReady&&!fact(audit,'news','publicationTimeMeaning')?['NEWS_TIME_MEANING_UNVERIFIED']:[]),
     ...(newsReady&&!fact(audit,'news','fullCoverageProven')?['NEWS_FULL_COVERAGE_NOT_PROVEN']:[])
   ]);
   return {
     runId:input.runId??null,symbol:input.symbol??null,targetDate:input.targetDate??null,
+    newsCollectionEvidenceRef:input.newsCollectionEvidenceRef??null,
+    newsEvidenceBundleId:input.newsEvidenceBundleId??null,
     evidenceRefs:{calendar:input.calendarEvidenceRef??null,daily:input.dailyEvidenceRef??null,
       investor:input.investorEvidenceRef??null,news:input.newsEvidenceRef??null},
     evidenceValidationReasons:input.reasons??[],
@@ -62,11 +70,18 @@ function tierResult(input,audit,strictReview=null){
         institutionSell:input.normalized.investor.institutionSell,institutionNet:input.normalized.investor.institutionNet
       }:null,finality:'UNKNOWN',sessionScope:'UNKNOWN',unitScale:'UNKNOWN'},
     news:{status:newsReady?'READY_WITH_WARNINGS':'NOT_READY',newsAnalysisReady:newsReady,
-      candidateCount,coverageStatus,fullCoverageProven:false,
+      candidateCount,coverageStatus,
+      continuityStatus:bundleMode?input.newsBundle?.continuityStatus??'UNVERIFIED':null,
+      continuityProven:bundleMode?input.newsBundle?.continuityProven===true:false,
+      usedArticleIds:bundleMode?articles.map(article=>article.articleId):[],
+      articleTimeRange:bundleMode&&articleTimes.length?{
+        oldestPubDate:articleTimes[0],newestPubDate:articleTimes.at(-1)}:null,
+      reason:bundleMode?'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE':null,
+      fullCoverageProven:false,
       timeMeaning:'TIME_PROVIDED_TO_NAVER_NOT_PUBLICATION_PROOF'},
     descriptiveAnalysisReady:calendarReady&&technicalReady,
-    strictStrategyVerdict:strictReview?.status??'HELD',
-    strictStrategyReady:input.inputReady===true&&audit.overallReady===true&&strictReview?.status==='PASS',
+    strictStrategyVerdict:bundleMode?'HELD':strictReview?.status??'HELD',
+    strictStrategyReady:!bundleMode&&input.inputReady===true&&audit.overallReady===true&&strictReview?.status==='PASS',
     analysisAdapterReady:false,tradeEvidenceReady:false,riskReady:false,ledgerInputReady:false,
     strictStrategyBlockers,descriptiveWarnings,
     tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'
