@@ -73,6 +73,23 @@ function createRollingNewsGapRecovery({testOnly=false,testDirectory}={}){
       return segments;
     }catch(e){if(e.code==='ENOENT')return null;throw Error('NEWS_SEGMENT_RECORD_INVALID');}
   }
+  async function readActive(symbol){
+    let segments;
+    try{segments=await read(symbol);}catch{throw Error('SEGMENT_STATE_INVALID');}
+    if(!segments)return null;
+    const archiveState=await archive.read(symbol),seed=segments[1],overlay=archiveState.activeSegment;
+    const later=archiveState.requestHistory.slice(seed.sourceSequence);
+    if(archiveState.archiveId!==seed.archiveId||archiveState.archiveRevision<seed.sourceSequence||
+      later.some(record=>record.segmentId!==seed.segmentId)||
+      Boolean(overlay)!==(later.length>0)||
+      overlay&&overlay.segmentRevision!==later.length+1||
+      overlay&&(overlay.segmentId!==seed.segmentId||overlay.sourcePollRunId!==seed.sourcePollRunId||
+        overlay.gapBefore!==true||overlay.fullCoverageProven!==false))
+      throw Error('SEGMENT_STATE_INVALID');
+    const active=overlay??{...seed,segmentRevision:1,continuityStatus:'INITIAL_UNVERIFIED'};
+    return {archive:archiveState,segments:[segments[0],active],active:{...active,
+      archiveId:seed.archiveId,archiveRevision:archiveState.archiveRevision}};
+  }
   async function plan({symbol,sourcePollRunId}={}){
     safeSymbol(symbol);
     if(!uuid(sourcePollRunId))throw Error('NEWS_SEGMENT_POLL_ID_INVALID');
@@ -149,7 +166,7 @@ function createRollingNewsGapRecovery({testOnly=false,testDirectory}={}){
     }catch(e){throw Error(e.code==='EEXIST'?'NEWS_SEGMENT_ALREADY_EXISTS':'NEWS_SEGMENT_SAVE_FAILED');}
     return {first,second,location:dir};
   }
-  return {read,plan,bootstrap};
+  return {read,readActive,plan,bootstrap};
 }
 function assessSegmentFollowUp(segment,pages){
   if(segment?.bootstrap!==true||segment.gapBefore!==true||!segment.watermark)
@@ -168,7 +185,11 @@ function selectSegmentWindow({segments,archive,windowStartKst,windowEndKst}){
   const crossed=!selected&&segments.some((segment,index)=>index>0&&segment.gapBefore&&
     start<=Date.parse(segment.collectedThroughKst)&&end>=time(segments[index-1].oldestPubDate));
   const ready=!crossed&&Boolean(selected);
-  const source=selected?.sequence===1?archive.articles:selected?.articles??[];
+  const originalPollIds=new Set((archive?.requestHistory??[])
+    .slice(0,(segments[1]?.sourceSequence??1)-1).map(record=>record.pollRunId));
+  const source=selected?.sequence===1?
+    (archive?.articles??[]).filter(article=>originalPollIds.has(article.pollRunId)):
+    selected?.articles??[];
   const articles=ready?source.filter(article=>{
     const at=Date.parse(article.pubDateParsed?.instant??'');return at>=start&&at<=end;
   }):[];

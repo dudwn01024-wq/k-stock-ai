@@ -80,6 +80,20 @@ test('BOOTSTRAP approval refuses start 101 before transport and cannot approve f
     assert.equal(sent,0);assert.equal(budget.report().counts.searchNews,0);
   }finally{await budget.close();await f.approval.finish(lease);}
 });
+test('old consumed rolling approval remains inspectable but cannot be newly issued',async t=>{
+  const f=await fixture(t),plan=await f.plan(),approvalId=randomUUID(),legacy={...plan.execution};
+  delete legacy.expectedSegmentId;delete legacy.expectedSegmentRevision;
+  await assert.rejects(f.approval.issue({approvalId,execution:legacy,userApproved:true}),
+    /APPROVAL_CONDITIONS_INVALID/);
+  const dir=path.join(f.directory,'approvals',approvalId);
+  await fs.mkdir(dir,{recursive:true});
+  const createdAt='2026-09-28T00:00:00.000Z';
+  await fs.writeFile(path.join(dir,'ready.json'),JSON.stringify({approvalId,createdAt,...legacy,
+    status:'READY',consumedAt:null,resultId:null}));
+  await fs.writeFile(path.join(dir,'consumed.json'),JSON.stringify({approvalId,createdAt,...legacy,
+    status:'CONSUMED',consumedAt:createdAt,resultId:null}));
+  assert.equal((await f.approval.inspect(approvalId)).status,'CONSUMED');
+});
 
 test('follow-up finds the exact old watermark on page one or two and deduplicates it',async t=>{
   const f=await fixture(t);await (await f.run({pages:[[item(0)]]})).runner.observe();
@@ -135,7 +149,7 @@ test('stale revision, wrong scope/mode/query, public mode and bad starts stop be
   const f=await fixture(t),stale=await f.plan();
   const first=await f.run({pages:[[item(0)]]});await first.runner.observe();
   const staleRun=await f.run({planOverride:stale,pages:[[item(1)]]});
-  await assert.rejects(staleRun.runner.observe(),/ARCHIVE_STATE_CHANGED/);
+  await assert.rejects(staleRun.runner.observe(),/ARCHIVE_OR_SEGMENT_STATE_CHANGED/);
   assert.equal(staleRun.calls.length,0);assert.equal((await f.approval.inspect(staleRun.approvalId)).status,'READY');
   const good=await f.plan();
   let unauthorizedSends=0;

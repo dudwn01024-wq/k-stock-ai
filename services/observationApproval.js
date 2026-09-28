@@ -20,11 +20,14 @@ const {SCOPE:searchScope,executionFor:searchExecution,ORIGIN:searchOrigin,API_PA
 const searchKeys=['scope','symbol','query','targetDate','probeDateCutoff','sort','display','start','searchNewsMaxRequests'];
 const searchWindowKeys=['scope','mode','symbol','query','targetDate','calendarEvidenceRef',
   'windowStartKst','windowEndKst','sort','display','initialStart','startStep','maxRequests'];
-const searchRollingKeys=['scope','mode','symbol','query','sort','display','initialStart','startStep',
+const searchRollingLegacyKeys=['scope','mode','symbol','query','sort','display','initialStart','startStep',
   'maxRequestsPerPoll','expectedArchiveId','expectedWatermark','expectedArchiveRevision'];
+const searchRollingKeys=[...searchRollingLegacyKeys,'expectedSegmentId','expectedSegmentRevision'];
 const {PAGE_SIZE,PAGE_SIZES,MAX_PAGES}=require('./observationNewsContract');
 const conditionKeys=value=>value?.scope===holidayScope?holidayKeys:value?.scope===searchScope?
-  value.mode==='target-window'?searchWindowKeys:value.mode==='rolling-poll'?searchRollingKeys:searchKeys:
+  value.mode==='target-window'?searchWindowKeys:value.mode==='rolling-poll'?
+    !Object.hasOwn(value,'expectedSegmentId')&&!Object.hasOwn(value,'expectedSegmentRevision')?
+      searchRollingLegacyKeys:searchRollingKeys:searchKeys:
   value?.scope===investorScope?investorKeys:value?.scope===newsScope?
   Object.hasOwn(value,'maxPages')?Object.hasOwn(value,'probeDateCutoff')?newsProbeKeys:newsPagedKeys:newsKeys:keys;
 function conditions(value) {
@@ -34,8 +37,13 @@ function conditions(value) {
     return Object.fromEntries(holidayKeys.map(k=>[k,value[k]]));
   }
   if(value?.scope===searchScope){
-    if(Object.keys(value).sort().join(',')!==[...conditionKeys(value)].sort().join(','))throw Error('APPROVAL_CONDITIONS_INVALID');
-    try{const {scope,symbol,targetDate,...options}=value;return searchExecution(symbol,targetDate,options);}
+    const selected=conditionKeys(value);
+    if(Object.keys(value).sort().join(',')!==[...selected].sort().join(','))throw Error('APPROVAL_CONDITIONS_INVALID');
+    try{const {scope,symbol,targetDate,...options}=value;
+      const execution=searchExecution(symbol,targetDate,selected===searchRollingLegacyKeys?
+        {...options,expectedSegmentId:null,expectedSegmentRevision:null}:options);
+      return selected===searchRollingLegacyKeys?
+        Object.fromEntries(selected.map(key=>[key,execution[key]])):execution;}
     catch{throw Error('APPROVAL_CONDITIONS_INVALID');}
   }
   if(value?.scope===newsScope){
@@ -93,6 +101,7 @@ function createObservationApprovalStore({environment=process.env,testOnly=false,
     inspect,
     async issue({approvalId,execution,userApproved=false}={}) {
       if(userApproved!==true)throw Error('EXPLICIT_USER_APPROVAL_REQUIRED');
+      if(conditionKeys(execution)===searchRollingLegacyKeys)throw Error('APPROVAL_CONDITIONS_INVALID');
       const dir=folder(approvalId),c=conditions(execution),createdAt=clock();
       if(!timestamp(createdAt))throw Error('APPROVAL_TIMESTAMP_INVALID');
       await fs.mkdir(root,{recursive:true});
@@ -103,6 +112,7 @@ function createObservationApprovalStore({environment=process.env,testOnly=false,
       return inspect(approvalId);
     },
     async consume(approvalId,execution) {
+      if(conditionKeys(execution)===searchRollingLegacyKeys)throw Error('APPROVAL_RANGE_MISMATCH');
       const dir=folder(approvalId),expected=conditions(execution),record=await inspect(approvalId);
       if(record.status!=='READY')throw Error('APPROVAL_NOT_READY');
       if(!same(record,expected))throw Error('APPROVAL_RANGE_MISMATCH');

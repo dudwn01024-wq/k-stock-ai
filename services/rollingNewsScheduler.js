@@ -100,15 +100,14 @@ async function planRollingNewsSchedule({symbol,currentTime,calendarEvidenceRef,c
   const verifiedCalendar=await loadCalendar({calendar,calendarEvidenceRef,testOnly,testDirectory});
   const slot=slotFor({symbol,currentTime:evaluatedAt,calendar:verifiedCalendar,policy:selected});
   if(slot.status!=='PLANNED')return {...base,status:slot.status,reason:slot.reason};
-  const archive=await createRollingNewsArchiveStore({testOnly,
-    testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined}).read(symbol);
-  if(archive?.continuityStatus==='GAP_DETECTED')
-    return {...base,status:'HELD_GAP_RECOVERY_REQUIRED',reason:'WATERMARK_NOT_REACHED',
-      archiveId:archive.archiveId,archiveRevision:archive.archiveRevision};
-  const pollPlan=await planRollingNewsPoll({symbol,testOnly,
-    testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
+  let pollPlan;
+  try{pollPlan=await planRollingNewsPoll({symbol,testOnly,
+    testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});}
+  catch(error){if(!['HELD_GAP_RECOVERY_REQUIRED','SEGMENT_STATE_INVALID'].includes(error.message))throw error;
+    return {...base,status:'HELD_GAP_RECOVERY_REQUIRED',reason:'WATERMARK_NOT_REACHED'};}
   return {...base,...slot,executable:true,status:'PLANNED',reason:null,query:pollPlan.query,
     pollPlan,archiveId:pollPlan.archiveId,archiveRevision:pollPlan.archiveRevision,
+    segmentId:pollPlan.segmentId,segmentRevision:pollPlan.segmentRevision,
     expectedWatermark:pollPlan.expectedWatermark};
 }
 
@@ -191,7 +190,9 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
     fresh.plannedAtKst!==plan.plannedAtKst||fresh.sessionBasis!==plan.sessionBasis||
     fresh.sessionSourceUrl!==plan.sessionSourceUrl||fresh.calendarOpen!==plan.calendarOpen||
     fresh.calendarClose!==plan.calendarClose||fresh.archiveId!==plan.archiveId||
-    fresh.archiveRevision!==plan.archiveRevision||!isDeepStrictEqual(fresh.expectedWatermark,plan.expectedWatermark)||
+    fresh.archiveRevision!==plan.archiveRevision||fresh.segmentId!==plan.segmentId||
+    fresh.segmentRevision!==plan.segmentRevision||
+    !isDeepStrictEqual(fresh.expectedWatermark,plan.expectedWatermark)||
     !isDeepStrictEqual(fresh.pollPlan.execution,plan.pollPlan?.execution))
     return {status:'ARCHIVE_STATE_CHANGED',reason:'PLAN_STALE',pollExecuted:false};
   const store=createSchedulerSlotStore({testOnly,testDirectory:testOnly?slotDirectory:undefined});
@@ -229,17 +230,19 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
       const result=testOnly?await testRunner({plan:plan.pollPlan,approvalId:selectedApprovalId}):
         await createRollingNewsPollRunner({plan:plan.pollPlan,approvalId:selectedApprovalId,environment}).observe();
       const record={status:'SUCCESS',executionStatus:'COMPLETED',
-        continuityStatus:result.archive.continuityStatus??'UNKNOWN',reason:null,
+        continuityStatus:result.archive.activeSegment?.continuityStatus??
+          result.archive.continuityStatus??'UNKNOWN',reason:null,
         startedAtKst,completedAtKst:completedAt(),
         archiveRevisionAfter:result.archive.archiveRevision,pollRunId:result.record.pollRunId};
       await store.complete(lease,record);
       return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:true,result};
     }catch(error){
-      const status=error.message==='ARCHIVE_STATE_CHANGED'?'ARCHIVE_STATE_CHANGED':'FAILED';
+      const status=['ARCHIVE_STATE_CHANGED','ARCHIVE_OR_SEGMENT_STATE_CHANGED'].includes(error.message)?
+        'ARCHIVE_STATE_CHANGED':'FAILED';
       const archive=await createRollingNewsArchiveStore({testOnly,
         testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined}).read(plan.symbol).catch(()=>null);
       const record={status,executionStatus:'FAILED',
-        continuityStatus:archive?.continuityStatus??'UNKNOWN',
+        continuityStatus:archive?.activeSegment?.continuityStatus??archive?.continuityStatus??'UNKNOWN',
         reason:status,startedAtKst,completedAtKst:completedAt(),
         archiveRevisionAfter:archive?.archiveRevision??null,
         pollRunId:archive?.archiveRevision>plan.archiveRevision?archive.requestHistory.at(-1)?.pollRunId??null:null};

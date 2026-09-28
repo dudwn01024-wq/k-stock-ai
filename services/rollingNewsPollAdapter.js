@@ -11,9 +11,11 @@ async function planRollingNewsPoll({symbol,testOnly=false,testDirectory}={}){
   const execution=executionFor(symbol,undefined,{mode:'rolling-poll',query:plan.query,display:plan.display,
     sort:plan.sort,initialStart:plan.initialStart,startStep:plan.startStep,
     maxRequestsPerPoll:plan.maxRequestsPerPoll,expectedArchiveId:plan.archiveId,
-    expectedWatermark:plan.watermark,expectedArchiveRevision:plan.archiveRevision});
+    expectedWatermark:plan.watermark,expectedArchiveRevision:plan.archiveRevision,
+    expectedSegmentId:plan.segmentId,expectedSegmentRevision:plan.segmentRevision});
   return {executable:true,scope:SCOPE,mode:'rolling-poll',symbol,query:plan.query,
     archiveId:plan.archiveId,archiveRevision:plan.archiveRevision,
+    segmentId:plan.segmentId,segmentRevision:plan.segmentRevision,
     expectedWatermark:plan.watermark,bootstrap:plan.watermark===null,
     display:plan.display,sort:plan.sort,initialStart:plan.initialStart,startStep:plan.startStep,
     starts:plan.allowedStarts,maxRequestsPerPoll:plan.maxRequestsPerPoll,
@@ -28,6 +30,8 @@ function createRollingNewsPollRunner({plan,approvalId,environment=process.env,te
     plan.maxRequestsPerPoll!==plan.execution?.maxRequestsPerPoll||
     plan.archiveId!==plan.execution?.expectedArchiveId||
     plan.archiveRevision!==plan.execution?.expectedArchiveRevision||
+    plan.segmentId!==plan.execution?.expectedSegmentId||
+    plan.segmentRevision!==plan.execution?.expectedSegmentRevision||
     !isDeepStrictEqual(plan.expectedWatermark,plan.execution?.expectedWatermark)||
     plan.bootstrap!==(plan.expectedWatermark===null)||
     !isDeepStrictEqual(plan.starts,Array.from({length:plan.bootstrap?1:MAX_REQUESTS_PER_POLL},(_,i)=>1+i*100)))

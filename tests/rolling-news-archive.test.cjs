@@ -67,9 +67,11 @@ test('five-request bound stops with a persistent gap and never calls start 501',
   assert.equal(gap.event.review.stopReason,'REQUEST_LIMIT_REACHED');
   assert.equal(gap.archive.searchResultContinuityProven,false);
   assert.ok(gap.archive.warnings.includes('POLL_GAP_DETECTED'));
-  const later=await poll(store,async ({start})=>page(start,[article(1001),article(0)]));
-  assert.equal(later.archive.searchResultContinuityProven,false);
-  assert.ok(later.archive.warnings.includes('POLL_GAP_DETECTED'));
+  let laterRequests=0;
+  await assert.rejects(poll(store,async ({start})=>{
+    laterRequests++;return page(start,[article(1001),article(0)]);
+  }),/SEGMENT_STATE_INVALID/);
+  assert.equal(laterRequests,0);
 }));
 
 test('parse failure, chronology reversal, duplicate conflict and failed request cannot verify',()=>withStore(async store=>{

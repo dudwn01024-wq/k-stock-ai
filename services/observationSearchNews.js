@@ -108,14 +108,20 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
     }
     const rollingStore=execution.mode==='rolling-poll'?createRollingNewsArchiveStore({testOnly,
       testDirectory:testOnly?path.join(directory,'rolling-archive'):undefined}):null;
-    let rollingPlan=null;
+    let rollingPlan=null,rollingPrior=null;
     if(rollingStore){
       rollingPlan=await rollingStore.planPoll({symbol});
       if(rollingPlan.query!==execution.query||rollingPlan.archiveId!==execution.expectedArchiveId||
         rollingPlan.maxRequestsPerPoll!==execution.maxRequestsPerPoll||
         rollingPlan.archiveRevision!==execution.expectedArchiveRevision||
+        rollingPlan.segmentId!==execution.expectedSegmentId||
+        rollingPlan.segmentRevision!==execution.expectedSegmentRevision||
         !isDeepStrictEqual(rollingPlan.watermark,execution.expectedWatermark))
-        throw Error('ARCHIVE_STATE_CHANGED');
+        throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+      const {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery');
+      const active=await createRollingNewsGapRecovery({testOnly,
+        testDirectory:testOnly?directory:undefined}).readActive(symbol);
+      rollingPrior=active?.active??await rollingStore.read(symbol);
     }
     const keyId=environment.NAVER_API_HUB_API_KEY_ID,key=environment.NAVER_API_HUB_API_KEY;
     if(typeof keyId!=='string'||!keyId.trim()||typeof key!=='string'||!key.trim())throw Error('SEARCH_NEWS_CREDENTIALS_MISSING');
@@ -158,7 +164,7 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
           if(attempt){attempt.outcome='RESPONSE';attempt.returnedCount=items.length;}
           // Both modes remain collection evidence, never a strategy news verdict.
           if(execution.mode==='rolling-poll'){
-            const review=assessPoll(rollingPlan.archiveId?await rollingStore.read(symbol):null,pages,
+            const review=assessPoll(rollingPrior,pages,
               {maxRequestsPerPoll:execution.maxRequestsPerPoll});
             if(!rollingPlan.watermark||review.watermarkReached||review.warnings.length||items.length===0)break;
           }else if(execution.mode==='target-window'){

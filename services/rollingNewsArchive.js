@@ -22,6 +22,10 @@ async function writeExclusive(file,value){
 const safeText=value=>typeof value==='string'?value.slice(0,1000):null;
 const queryFor=symbol=>{const query=stockNameFor(symbol);if(!/^\d{6}$/.test(symbol??'')||!query)throw Error('NEWS_ARCHIVE_SYMBOL_INVALID');return query;};
 const validLimit=value=>Number.isInteger(value)&&value>=1&&value<=MAX_REQUESTS_PER_POLL;
+const segmentArticle=(item,event)=>({identity:searchArticleIdentity(item),signature:searchArticleSignature(item),
+  title:item.title??null,originallink:item.originallink??null,link:item.link??null,
+  description:item.description??null,pubDateRaw:item.pubDateRaw,pubDateParsed:parsePubDate(item.pubDateRaw),
+  sourcePollRunId:event.pollRunId,firstSeenAtKst:event.receivedAtKst});
 const initialState=(archiveId,symbol,query)=>({schemaVersion:'ROLLING_NEWS_ARCHIVE_V1',archiveId,symbol,query,
   archiveRevision:0,
   newestSeenPubDate:null,oldestSeenPubDate:null,lastSuccessfulPollAtKst:null,watermark:null,
@@ -71,13 +75,13 @@ function assessPoll(prior,pages,{failed=false,maxRequestsPerPoll}={}){
 
 function materialize(manifest,events){
   const state=initialState(manifest.archiveId,manifest.symbol,manifest.query),seen=new Map(),conflicted=new Set();
-  let priorPollRunId=null;
+  let priorPollRunId=null,gapSeed=null,segmentState=null;
   for(const [index,event] of events.entries()){
     state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
     if(event.schemaVersion!=='ROLLING_NEWS_POLL_V1'||event.testData!==manifest.testData||
       !['SYNTHETIC_TEST_RESPONSE','SYNTHETIC_TEST_TRANSPORT','NAVER_API_HUB_SEARCH_NEWS'].includes(event.source)||
       (event.source!=='SYNTHETIC_TEST_RESPONSE'&&!uuid(event.approvalId))||
-      (event.source!=='SYNTHETIC_TEST_RESPONSE'&&event.bootstrap!==(state.watermark===null))||
+      (event.source!=='SYNTHETIC_TEST_RESPONSE'&&event.bootstrap!==(event.segment?false:state.watermark===null))||
       event.archiveId!==manifest.archiveId||
       event.symbol!==manifest.symbol||event.query!==manifest.query||!uuid(event.pollRunId)||
       event.sequence!==index+1||event.priorPollRunId!==priorPollRunId||!kstInstant(event.receivedAtKst)||
@@ -91,8 +95,66 @@ function materialize(manifest,events){
       event.pages.some((p,i)=>p.start!==1+i*DISPLAY||!Array.isArray(p.items)||p.items.length>DISPLAY||
         event.requests[i]?.outcome!=='RESPONSE'||event.requests[i]?.returnedCount!==p.items.length))
       throw Error('NEWS_ARCHIVE_RECORD_INVALID');
-    const review=assessPoll(state,event.pages,{failed:event.failed===true,maxRequestsPerPoll:event.maxRequestsPerPoll});
+    let assessmentPrior=state;
+    if(event.segment){
+      const binding=event.segment;
+      if(Object.keys(binding).sort().join(',')!==
+        'revisionBefore,segmentId,sourcePollRunId,watermarkBefore'||
+        !uuid(binding.segmentId)||!uuid(binding.sourcePollRunId)||!gapSeed||
+        binding.sourcePollRunId!==gapSeed.sourcePollRunId||
+        segmentState?.continuityStatus==='GAP_DETECTED')throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      if(!segmentState)segmentState={segmentId:binding.segmentId,sourcePollRunId:binding.sourcePollRunId,
+        segmentRevision:1,watermark:gapSeed.watermark,articles:gapSeed.articles,
+        newestPubDate:gapSeed.newestPubDate,oldestPubDate:gapSeed.oldestPubDate,
+        collectedThroughKst:gapSeed.collectedThroughKst,bootstrap:true,gapBefore:true,
+        continuityProven:false,continuityStatus:'INITIAL_UNVERIFIED',hasUnverifiedPoll:false,
+        fullCoverageProven:false};
+      if(binding.segmentId!==segmentState.segmentId||
+        binding.revisionBefore!==segmentState.segmentRevision||
+        !isDeepStrictEqual(binding.watermarkBefore,segmentState.watermark))
+        throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      assessmentPrior=segmentState;
+    }
+    const review=assessPoll(assessmentPrior,event.pages,{failed:event.failed===true,
+      maxRequestsPerPoll:event.maxRequestsPerPoll});
     if(JSON.stringify(review)!==JSON.stringify(event.review))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    if(event.segment){
+      const byIdentity=new Map(segmentState.articles.map(article=>[article.identity,article]));
+      if(review.status==='VERIFIED')for(const page of event.pages)for(const item of page.items){
+        const article=segmentArticle(item,event);
+        if(article.identity&&!byIdentity.has(article.identity))byIdentity.set(article.identity,article);
+        const at=Date.parse(article.pubDateParsed?.instant??'');
+        if(Number.isFinite(at)){
+          if(at>Date.parse(parsePubDate(segmentState.newestPubDate)?.instant??''))
+            segmentState.newestPubDate=item.pubDateRaw;
+          if(at<Date.parse(parsePubDate(segmentState.oldestPubDate)?.instant??''))
+            segmentState.oldestPubDate=item.pubDateRaw;
+        }
+      }
+      segmentState={...segmentState,segmentRevision:segmentState.segmentRevision+1,
+        articles:[...byIdentity.values()],articleCount:byIdentity.size,
+        watermark:review.status==='VERIFIED'?review.watermark:segmentState.watermark,
+        collectedThroughKst:review.status==='VERIFIED'?event.receivedAtKst:segmentState.collectedThroughKst,
+        bootstrap:review.status==='VERIFIED'?false:segmentState.bootstrap,
+        hasUnverifiedPoll:segmentState.hasUnverifiedPoll||review.status==='UNVERIFIED',
+        continuityProven:review.status==='VERIFIED'&&!segmentState.hasUnverifiedPoll,
+        continuityStatus:review.status==='FAILED'?segmentState.continuityStatus:review.status};
+      state.activeSegment=segmentState;
+    }
+    if(review.status==='GAP_DETECTED'&&!event.segment&&event.pages[0]?.items[0]){
+      const first=event.pages[0].items[0],byIdentity=new Map();
+      for(const page of event.pages)for(const item of page.items){
+        const article=segmentArticle(item,event);
+        if(article.identity&&!byIdentity.has(article.identity))byIdentity.set(article.identity,article);
+      }
+      gapSeed={sourcePollRunId:event.pollRunId,
+        watermark:{identity:searchArticleIdentity(first),signature:searchArticleSignature(first),
+          pubDateRaw:first.pubDateRaw,instant:parsePubDate(first.pubDateRaw)?.instant},
+        articles:[...byIdentity.values()],newestPubDate:first.pubDateRaw,
+        oldestPubDate:event.pages.flatMap(page=>page.items).reduce((old,item)=>
+          !old||Date.parse(item.pubDateParsed?.instant??'')<Date.parse(parsePubDate(old)?.instant??'')?
+            item.pubDateRaw:old,null),collectedThroughKst:event.receivedAtKst};
+    }
     if(['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status))for(const page of event.pages)for(const item of page.items){
       const identity=searchArticleIdentity(item),signature=searchArticleSignature(item),parsed=parsePubDate(item.pubDateRaw);
       if(JSON.stringify(parsed)!==JSON.stringify(item.pubDateParsed))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
@@ -110,10 +172,10 @@ function materialize(manifest,events){
         title:item.title??null,originallink:item.originallink??null,link:item.link??null,
         description:item.description??null,pubDateRaw:item.pubDateRaw??null,pubDateParsed:parsed});
     }
-    if(['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status)){
+    if(!event.segment&&['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status)){
       state.watermark=review.watermark;state.lastSuccessfulPollAtKst=event.receivedAtKst;
     }
-    if(review.status!=='FAILED'){
+    if(review.status!=='FAILED'&&!event.segment){
       state.continuityStatus=review.status;
       state.searchResultContinuityProven=review.searchResultContinuityProven&&state.warnings.length===0;
     }
@@ -121,7 +183,9 @@ function materialize(manifest,events){
       receivedAtKst:event.receivedAtKst,
       requests:event.requests,starts:event.requests.map(r=>r.start),requestCount:event.requests.length,
       rawArticleCount:event.pages.reduce((count,page)=>count+page.items.length,0),status:review.status,
-      stopReason:review.stopReason,warnings:review.warnings});
+      stopReason:review.stopReason,warnings:review.warnings,
+      ...(event.segment?{segmentId:event.segment.segmentId,
+        segmentRevisionBefore:event.segment.revisionBefore}:{} )});
     if(review.status!=='FAILED')state.warnings.push(...review.warnings);
     if(review.status==='GAP_DETECTED')state.warnings.push('POLL_GAP_DETECTED');
     if(review.status!=='FAILED'&&state.warnings.length)state.searchResultContinuityProven=false;
@@ -187,12 +251,19 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
   async function planPoll({symbol,maxRequestsPerPoll}={}){
     const query=queryFor(symbol);
     const archive=await read(symbol);
-    const requiredLimit=archive?.watermark?MAX_REQUESTS_PER_POLL:1;
+    const {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery');
+    const active=await createRollingNewsGapRecovery({testOnly,
+      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).readActive(symbol);
+    if(archive?.continuityStatus==='GAP_DETECTED'&&!active)throw Error('SEGMENT_STATE_INVALID');
+    if(active?.active.continuityStatus==='GAP_DETECTED')throw Error('HELD_GAP_RECOVERY_REQUIRED');
+    const selectedWatermark=active?.active.watermark??archive?.watermark??null;
+    const requiredLimit=selectedWatermark?MAX_REQUESTS_PER_POLL:1;
     if(maxRequestsPerPoll!==undefined&&maxRequestsPerPoll!==requiredLimit)
       throw Error('NEWS_ARCHIVE_POLL_LIMIT_INVALID');
     maxRequestsPerPoll=requiredLimit;
-    return {symbol,query,archiveId:archive?.archiveId??null,watermark:archive?.watermark??null,
+    return {symbol,query,archiveId:archive?.archiveId??null,watermark:selectedWatermark,
       archiveRevision:archive?.archiveRevision??0,
+      segmentId:active?.active.segmentId??null,segmentRevision:active?.active.segmentRevision??null,
       display:DISPLAY,sort:'date',initialStart:1,startStep:DISPLAY,maxRequestsPerPoll,
       allowedStarts:Array.from({length:maxRequestsPerPoll},(_,i)=>1+i*DISPLAY),
       collectionIntervalMinutes:null,trigger:'EXPLICIT_INTERNAL_ONLY',fullCoverageProven:false};
@@ -205,14 +276,16 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
     const current=await planPoll({symbol:plan.symbol});
     if(current.query!==plan.query||current.archiveId!==plan.archiveId||
       current.maxRequestsPerPoll!==plan.maxRequestsPerPoll||
-      current.archiveRevision!==plan.archiveRevision||!isDeepStrictEqual(current.watermark,plan.watermark))
-      throw Error('ARCHIVE_STATE_CHANGED');
+      current.archiveRevision!==plan.archiveRevision||!isDeepStrictEqual(current.watermark,plan.watermark)||
+      current.segmentId!==plan.segmentId||current.segmentRevision!==plan.segmentRevision)
+      throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
     await ensureRoot();
     // An exclusive, revision-specific reservation survives a crash. A stale run cannot be retried silently.
     const file=path.join(root,`.${plan.symbol}-${plan.archiveRevision}.reservation`);
     try{await writeExclusive(file,{symbol:plan.symbol,archiveRevision:plan.archiveRevision,
-      archiveId:plan.archiveId,watermark:plan.watermark});}
-    catch(error){throw Error(error.code==='EEXIST'?'ARCHIVE_STATE_CHANGED':'NEWS_ARCHIVE_RESERVATION_FAILED');}
+      archiveId:plan.archiveId,watermark:plan.watermark,segmentId:plan.segmentId,
+      segmentRevision:plan.segmentRevision});}
+    catch(error){throw Error(error.code==='EEXIST'?'ARCHIVE_OR_SEGMENT_STATE_CHANGED':'NEWS_ARCHIVE_RESERVATION_FAILED');}
     const lease=Object.freeze({});reservations.set(lease,{plan,used:false});
     return lease;
   }
@@ -223,15 +296,24 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       throw Error('NEWS_ARCHIVE_POLL_INVALID');
     info.used=true;
     const {plan}=info,prior=await read(plan.symbol);
+    const {createRollingNewsGapRecovery}=require('./rollingNewsGapRecovery');
+    const active=await createRollingNewsGapRecovery({testOnly,
+      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).readActive(plan.symbol);
+    const assessmentPrior=active?.active??prior;
     if((prior?.archiveId??null)!==plan.archiveId||(prior?.archiveRevision??0)!==plan.archiveRevision||
-      !isDeepStrictEqual(prior?.watermark??null,plan.watermark))throw Error('ARCHIVE_STATE_CHANGED');
+      !isDeepStrictEqual(assessmentPrior?.watermark??null,plan.watermark)||
+      (active?.active.segmentId??null)!==plan.segmentId||
+      (active?.active.segmentRevision??null)!==plan.segmentRevision)
+      throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
     const pollRunId=randomUUID(),archiveId=prior?.archiveId??randomUUID();
-    const review=assessPoll(prior,pages,{failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
+    const review=assessPoll(assessmentPrior,pages,{failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
     const event={schemaVersion:'ROLLING_NEWS_POLL_V1',archiveId,pollRunId,approvalId,
-      bootstrap:prior?.watermark==null,symbol:plan.symbol,
+      bootstrap:assessmentPrior?.watermark==null,symbol:plan.symbol,
       query:plan.query,priorPollRunId:prior?.requestHistory.at(-1)?.pollRunId??null,
       sequence:plan.archiveRevision+1,receivedAtKst,maxRequestsPerPoll:plan.maxRequestsPerPoll,
       requests,pages,failed,review,testData:testOnly,
+      ...(active?{segment:{segmentId:plan.segmentId,sourcePollRunId:active.active.sourcePollRunId,
+        revisionBefore:plan.segmentRevision,watermarkBefore:plan.watermark}}:{}),
       source:testOnly?'SYNTHETIC_TEST_TRANSPORT':'NAVER_API_HUB_SEARCH_NEWS'};
     if(requests.length>plan.maxRequestsPerPoll||pages.length>requests.length||
       !failed&&requests.some(request=>request.outcome==='FAILED')||
@@ -272,6 +354,7 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
     if(!testOnly||typeof readPage!=='function')throw Error('NEWS_ARCHIVE_LIVE_POLL_NOT_CONNECTED');
     if(!kstInstant(receivedAtKst))throw Error('NEWS_ARCHIVE_TIME_INVALID');
     const plan=await planPoll({symbol,maxRequestsPerPoll}),prior=await read(symbol),pages=[],requests=[];
+    if(plan.segmentId)throw Error('NEWS_ARCHIVE_SEGMENT_RUNNER_REQUIRED');
     maxRequestsPerPoll=plan.maxRequestsPerPoll;
     let failed=false;
     for(const start of plan.allowedStarts){
@@ -331,10 +414,10 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       throw Error('NEWS_ARCHIVE_WINDOW_INVALID');
     const archive=await read(symbol),start=Date.parse(windowStartKst),end=Date.parse(windowEndKst);
     const {createRollingNewsGapRecovery,selectSegmentWindow}=require('./rollingNewsGapRecovery');
-    const segments=await createRollingNewsGapRecovery({testOnly,
-      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).read(symbol);
-    if(segments){
-      const selected=selectSegmentWindow({segments,archive,windowStartKst,windowEndKst});
+    const segmentState=await createRollingNewsGapRecovery({testOnly,
+      testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined}).readActive(symbol);
+    if(segmentState){
+      const selected=selectSegmentWindow({segments:segmentState.segments,archive,windowStartKst,windowEndKst});
       return {symbol,query:stockNameFor(symbol),archiveId:archive.archiveId,
         windowStartKst,windowEndKst,...selected,
         searchResultContinuityProven:selected.status==='ARCHIVE_WINDOW_READY',

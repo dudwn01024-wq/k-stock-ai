@@ -18,10 +18,12 @@ const watermark=value=>value===null||value&&typeof value==='object'&&
 function executionFor(symbol,targetDate,options={}){
   const {mode,query=stockNameFor(symbol),probeDateCutoff,sort='date',display,start=1,searchNewsMaxRequests,
     calendarEvidenceRef,windowStartKst,windowEndKst,initialStart,startStep,maxRequests,
-    maxRequestsPerPoll,expectedArchiveId,expectedWatermark,expectedArchiveRevision}=options;
+    maxRequestsPerPoll,expectedArchiveId,expectedWatermark,expectedArchiveRevision,
+    expectedSegmentId,expectedSegmentRevision}=options;
   if(mode==='rolling-poll'){
     if(Object.keys(options).some(key=>!['mode','query','sort','display','initialStart','startStep',
-      'maxRequestsPerPoll','expectedArchiveId','expectedWatermark','expectedArchiveRevision'].includes(key))||
+      'maxRequestsPerPoll','expectedArchiveId','expectedWatermark','expectedArchiveRevision',
+      'expectedSegmentId','expectedSegmentRevision'].includes(key))||
       targetDate!==undefined||!stockNameFor(symbol)||query!==stockNameFor(symbol)||sort!=='date'||
       display!==100||initialStart!==1||startStep!==100||
       maxRequestsPerPoll!==(expectedWatermark===null?1:ROLLING_MAX_REQUESTS)||
@@ -29,10 +31,16 @@ function executionFor(symbol,targetDate,options={}){
         /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(expectedArchiveId))||
       !watermark(expectedWatermark)||!Number.isInteger(expectedArchiveRevision)||expectedArchiveRevision<0||
       (expectedArchiveRevision===0)!==(expectedArchiveId===null&&expectedWatermark===null)||
-      expectedArchiveRevision>0&&expectedArchiveId===null)
+      expectedArchiveRevision>0&&expectedArchiveId===null||
+      !(expectedSegmentId===null&&expectedSegmentRevision===null||
+        typeof expectedSegmentId==='string'&&
+        /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(expectedSegmentId)&&
+        Number.isInteger(expectedSegmentRevision)&&expectedSegmentRevision>=1)||
+      expectedSegmentId!==null&&expectedArchiveId===null)
       throw Error('SEARCH_NEWS_OPTIONS_INVALID');
     return Object.freeze({scope:SCOPE,mode,symbol,query,sort,display,initialStart,startStep,
-      maxRequestsPerPoll,expectedArchiveId,expectedWatermark,expectedArchiveRevision});
+      maxRequestsPerPoll,expectedArchiveId,expectedWatermark,expectedArchiveRevision,
+      expectedSegmentId,expectedSegmentRevision});
   }
   if(mode==='target-window'){
     if(Object.keys(options).some(key=>!['mode','query','calendarEvidenceRef','windowStartKst','windowEndKst',
