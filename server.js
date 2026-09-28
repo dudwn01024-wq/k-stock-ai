@@ -5406,6 +5406,12 @@ app.listen(
   PORT,
   executionMode.host,
   () => {
+    if (executionMode.mode === 'personal-local') {
+      // An existing, unexpired local activation is required; public servers never start this timer.
+      require('./services/rollingNewsAutomationActivation').startPilotWorker({
+        environment: process.env
+      }).catch(() => console.error('[K-Stock AI] Local news pilot worker unavailable'));
+    }
     console.log(
       `[K-Stock AI] Backend running on port ${PORT}`
     );

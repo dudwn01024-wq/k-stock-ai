@@ -86,13 +86,13 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
     try{await write(path.join(dir,'revoked.json'),{grantId,revokedAtKst});}
     catch(e){throw Error(e.code==='EEXIST'?'NEWS_AUTOMATION_ALREADY_REVOKED':'NEWS_AUTOMATION_STORAGE_FAILED');}
   }
-  async function usage(grantId,kstDate){
+  async function usageRecords(grantId,kstDate){
     const dir=await folder(grantId);
     if(!/^\d{4}-\d{2}-\d{2}$/.test(kstDate))throw Error('NEWS_AUTOMATION_DATE_INVALID');
     const usageRoot=path.join(dir,'usage'),dayDir=path.join(usageRoot,kstDate);
-    let names;try{names=await fs.readdir(dayDir);}catch(e){if(e.code==='ENOENT')return {polls:0,requests:0};throw e;}
+    let names;try{names=await fs.readdir(dayDir);}catch(e){if(e.code==='ENOENT')return [];throw e;}
     await safeDir(usageRoot,dir);await safeDir(dayDir,usageRoot);
-    let polls=0,requests=0;
+    const records=[];
     for(const name of names){if(name==='lock.json')continue;
       if(!/^[a-f0-9-]{36}\.json$/.test(name))throw Error('NEWS_AUTOMATION_USAGE_INVALID');
       const record=await readFile(path.join(dayDir,name),dayDir);
@@ -100,9 +100,13 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
         !uuid(record.plannedApprovalId)||
         name!==record.reservationId+'.json'||!Number.isInteger(record.maxRequests)||
         record.maxRequests<1||record.maxRequests>5)throw Error('NEWS_AUTOMATION_USAGE_INVALID');
-      polls++;requests+=record.maxRequests;
+      records.push(record);
     }
-    return {polls,requests};
+    return records;
+  }
+  async function usage(grantId,kstDate){
+    const records=await usageRecords(grantId,kstDate);
+    return {polls:records.length,requests:records.reduce((sum,record)=>sum+record.maxRequests,0)};
   }
   async function reserve({grantId,plan,currentTime}={}){
     if(!kst(currentTime)||!plan?.pollPlan||!uuid(grantId))throw Error('NEWS_AUTOMATION_RESERVATION_INVALID');
@@ -131,7 +135,7 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
       await fs.unlink(lock);
     }
   }
-  return {issue,read,revoke,usage,reserve};
+  return {issue,read,revoke,usage,usageRecords,reserve};
 }
 async function planAutomationGrant({grantId,schedulerPlan,policy={},automationPolicy=DEFAULT_AUTOMATION_POLICY,
   currentTime,environment=process.env,grantStore}={}){

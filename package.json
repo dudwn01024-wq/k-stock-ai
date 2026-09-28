@@ -16,7 +16,8 @@
 "scripts": {
 
 
-"start": "node server.js"
+"start": "node server.js",
+"start:rolling-news-pilot": "node scripts/rollingNewsPilotWorker.js"
 
 
 },
