@@ -6,6 +6,7 @@ const {isDeepStrictEqual}=require('node:util');
 const {resolveExecutionMode}=require('./executionMode');
 const {articleIdFor}=require('./rollingNewsArticleId');
 const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
+const {createNewsCollectionEvidenceStore}=require('./newsCollectionEvidence');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/news-evidence-bundles');
 const ANALYSIS_ROOT=path.resolve(__dirname,'../.local/strategy-observations/eod-analysis');
@@ -42,6 +43,8 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
   const analysisRoot=testOnly?path.resolve(testDirectory,'analysis'):ANALYSIS_ROOT;
   const archive=archiveStore??createRollingNewsArchiveStore({testOnly,
     testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
+  const collections=createNewsCollectionEvidenceStore({testOnly,testDirectory,archiveStore,
+    environment,clock});
   async function read(bundleId){
     if(!uuid(bundleId))throw Error('NEWS_BUNDLE_ID_INVALID');
     try{
@@ -59,6 +62,7 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
         Date.parse(record.windowStartKst)>=Date.parse(record.windowEndKst)||
         !uuid(record.archiveId)||!Number.isInteger(record.archiveRevision)||
         record.archiveRevision<1||!kst(record.createdAtKst)||
+        (record.collectionEvidenceRef!==undefined&&!uuid(record.collectionEvidenceRef))||
         !Array.isArray(record.articleRefs)||record.articleCount!==record.articleRefs.length||
         !['ARCHIVE_WINDOW_READY','ARCHIVE_WINDOW_INCOMPLETE','UNVERIFIED'].includes(record.coverageStatus)||
         typeof record.continuityStatus!=='string'||typeof record.continuityProven!=='boolean'||
@@ -85,12 +89,32 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
       if(!actual||!isDeepStrictEqual(ref,refFor(state.archiveId,actual)))
         throw Error('NEWS_BUNDLE_ARTICLE_NOT_FOUND');
     }
+    if(record.collectionEvidenceRef)await verifyCollection(record);
     return true;
+  }
+  async function verifyCollection(bundle){
+    const collection=await collections.read(bundle.collectionEvidenceRef);
+    if(collection.symbol!==bundle.symbol||collection.query!==bundle.query||
+      collection.targetDate!==bundle.targetDate||
+      collection.windowStartKst!==bundle.windowStartKst||
+      collection.windowEndKst!==bundle.windowEndKst||
+      collection.archiveId!==bundle.archiveId||
+      collection.archiveRevision!==bundle.archiveRevision||
+      collection.coverageStatus!==bundle.coverageStatus||
+      collection.continuityStatus!==bundle.continuityStatus||
+      collection.fullCoverageProven!==bundle.fullCoverageProven||
+      !isDeepStrictEqual(collection.observedArticleIds,
+        bundle.articleRefs.map(ref=>ref.articleId))||
+      !isDeepStrictEqual(collection.sourcePollRunIds,
+        [...new Set(bundle.articleRefs.map(ref=>ref.sourcePollRunId))].sort()))
+      throw Error('NEWS_BUNDLE_COLLECTION_MISMATCH');
+    return collection;
   }
   async function resolveArticles(bundleId){
     const bundle=await read(bundleId),state=await archive.read(bundle.symbol);
     if(!state||state.archiveId!==bundle.archiveId||state.query!==bundle.query)
       throw Error('NEWS_BUNDLE_ARCHIVE_MISMATCH');
+    if(bundle.collectionEvidenceRef)await verifyCollection(bundle);
     const byId=new Map(state.articles.map(item=>[item.articleId,item]));
     const articles=bundle.articleRefs.map(ref=>{
       const actual=byId.get(ref.articleId);
@@ -104,7 +128,8 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
     });
     return {bundle,articles};
   }
-  async function create({symbol,query,targetDate,windowStartKst,windowEndKst}={}){
+  async function create({symbol,query,targetDate,windowStartKst,windowEndKst,
+    collectionEvidenceRef}={}){
     if(!testOnly&&resolveExecutionMode(environment.KSTOCK_EXECUTION_MODE,
       environment.NODE_ENV).mode!=='personal-local')throw Error('NEWS_BUNDLE_REQUIRES_PERSONAL_LOCAL');
     if(!/^\d{6}$/.test(symbol??'')||typeof query!=='string'||
@@ -130,16 +155,30 @@ function createNewsEvidenceBundleStore({testOnly=false,testDirectory,archiveStor
         throw Error('NEWS_BUNDLE_ARTICLE_INVALID');
       byId.set(ref.articleId,ref);
     }
+    let collection=null;
+    if(collectionEvidenceRef!==undefined){
+      collection=await collections.read(collectionEvidenceRef);
+      if(collection.symbol!==symbol||collection.query!==query||
+        collection.targetDate!==targetDate||collection.windowStartKst!==windowStartKst||
+        collection.windowEndKst!==windowEndKst||collection.archiveId!==state.archiveId||
+        collection.archiveRevision!==state.archiveRevision||
+        !isDeepStrictEqual(collection.observedArticleIds,[...byId.keys()])||
+        !isDeepStrictEqual(collection.sourcePollRunIds,
+          [...new Set([...byId.values()].map(ref=>ref.sourcePollRunId))].sort()))
+        throw Error('NEWS_BUNDLE_COLLECTION_MISMATCH');
+    }
     const at=clock();
     if(!Number.isFinite(Date.parse(at)))throw Error('NEWS_BUNDLE_TIME_INVALID');
     const content={schemaVersion:'NEWS_EVIDENCE_BUNDLE_V1',recordType:'NEWS_EVIDENCE_BUNDLE',
       testData:testOnly,bundleId:randomUUID(),symbol,query,targetDate,windowStartKst,windowEndKst,
       archiveId:state.archiveId,archiveRevision:state.archiveRevision,
+      ...(collection?{collectionEvidenceRef:collection.collectionEvidenceId}:{}),
       articleRefs:[...byId.values()],articleCount:byId.size,
-      coverageStatus:selection.observedArticleCount>0?selection.observedCoverageStatus:selection.status,
-      continuityStatus:selection.searchResultContinuityProven===true?'VERIFIED':
-        state.activeSegment?.continuityStatus==='GAP_DETECTED'?'GAP_DETECTED':'UNVERIFIED',
-      continuityProven:selection.searchResultContinuityProven===true,
+      coverageStatus:collection?.coverageStatus??(selection.observedArticleCount>0?
+        selection.observedCoverageStatus:selection.status),
+      continuityStatus:collection?.continuityStatus??(selection.searchResultContinuityProven===true?'VERIFIED':
+        state.activeSegment?.continuityStatus==='GAP_DETECTED'?'GAP_DETECTED':'UNVERIFIED'),
+      continuityProven:collection?.continuityProven??(selection.searchResultContinuityProven===true),
       fullCoverageProven:false,createdAtKst:toKst(at)};
     const record={...content,recordDigest:digest(content)};
     const fresh=await archive.read(symbol);

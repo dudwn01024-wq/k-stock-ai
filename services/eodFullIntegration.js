@@ -9,6 +9,7 @@ const {windowFromCalendar}=require('./eodNewsTargetWindow');
 const {createEodEvidenceAnalysisInput}=require('./eodEvidenceAnalysisInput');
 const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
 const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
+const {createNewsCollectionEvidenceStore}=require('./newsCollectionEvidence');
 const {createEodAnalysisAdapter}=require('./eodAnalysisAdapter');
 
 const uuid=value=>typeof value==='string'&&
@@ -30,6 +31,8 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
   const archive=archiveStore??createRollingNewsArchiveStore({testOnly,
     testDirectory:testOnly?path.join(testDirectory,'rolling-archive'):undefined});
   const bundles=createNewsEvidenceBundleStore({testOnly,testDirectory,archiveStore,
+    environment,clock});
+  const collections=createNewsCollectionEvidenceStore({testOnly,testDirectory,archiveStore,
     environment,clock});
   const analysis=createEodAnalysisAdapter({environment,testOnly,testDirectory,clock});
   async function plan({runId,symbol,targetDate:expectedTargetDate,calendarEvidenceRef,
@@ -121,10 +124,28 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
       if(!newsEvidenceBundleId&&candidates.length>0&&!newsCollectionEvidenceRef)
         blockers.push('NEWS_COLLECTION_EVIDENCE_REF_REQUIRED');
       if(!newsEvidenceBundleId&&newsCollectionEvidenceRef!==undefined&&
-        newsCollectionEvidenceRef!==null&&
-        (!uuid(newsCollectionEvidenceRef)||!candidates.some(article=>
-          (article.sourcePollRunId??article.pollRunId)===newsCollectionEvidenceRef)))
-        blockers.push('NEWS_COLLECTION_EVIDENCE_REF_MISMATCH');
+        newsCollectionEvidenceRef!==null){
+        if(!uuid(newsCollectionEvidenceRef))blockers.push('NEWS_COLLECTION_EVIDENCE_REF_MISMATCH');
+        else{
+          let collection=null,missing=false;
+          try{collection=await collections.read(newsCollectionEvidenceRef);}
+          catch(error){missing=error.message==='NEWS_COLLECTION_NOT_FOUND';
+            if(!missing)blockers.push('NEWS_COLLECTION_EVIDENCE_INVALID');}
+          if(collection){
+            const ids=[...new Set(candidates.map(article=>article.articleId))];
+            if(collection.symbol!==symbol||collection.query!==state.query||
+              collection.targetDate!==output.targetDate||
+              collection.windowStartKst!==output.windowStartKst||
+              collection.windowEndKst!==output.windowEndKst||
+              collection.archiveId!==state.archiveId||
+              collection.archiveRevision!==state.archiveRevision||
+              JSON.stringify(collection.observedArticleIds)!==JSON.stringify(ids))
+              blockers.push('NEWS_COLLECTION_EVIDENCE_REF_MISMATCH');
+          }else if(missing&&!candidates.some(article=>
+            (article.sourcePollRunId??article.pollRunId)===newsCollectionEvidenceRef))
+            blockers.push('NEWS_COLLECTION_EVIDENCE_REF_MISMATCH');
+        }
+      }
       output.newsArchiveWindowStatus=selected.status;
       output.newsBundleReady=true;
       output.newsArticleCandidateCount=new Set(candidates.map(article=>article.articleId)).size;
@@ -169,7 +190,10 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
       await bundles.read(input.newsEvidenceBundleId):
       await bundles.create({symbol:input.symbol,query:stockNameFor(input.symbol),
         targetDate:proposal.targetDate,windowStartKst:proposal.windowStartKst,
-        windowEndKst:proposal.windowEndKst});
+        windowEndKst:proposal.windowEndKst,
+        ...(input.newsCollectionEvidenceRef?await collections.read(input.newsCollectionEvidenceRef)
+          .then(()=>({collectionEvidenceRef:input.newsCollectionEvidenceRef}))
+          .catch(error=>{if(error.message!=='NEWS_COLLECTION_NOT_FOUND')throw error;return {}}):{})});
     const refs={runId:input.runId,symbol:input.symbol,targetDate:proposal.targetDate,
       calendarEvidenceRef:input.calendarEvidenceRef,dailyEvidenceRef:input.dailyEvidenceRef,
       investorEvidenceRef:input.investorEvidenceRef,

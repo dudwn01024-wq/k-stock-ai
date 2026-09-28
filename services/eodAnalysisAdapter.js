@@ -54,6 +54,8 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
           newsCollectionEvidenceRef:tier.newsCollectionEvidenceRef,
           newsEvidenceBundleId:tier.newsEvidenceBundleId,
           newsArticleCount:tier.news.usedArticleIds.length,
+          usedNewsArticleCount:tier.news.usedArticleIds.length,
+          usedNewsArticleIds:[...tier.news.usedArticleIds],
           newsUsedArticleIds:[...tier.news.usedArticleIds],
           newsArticleTimeRange:tier.news.articleTimeRange,
           newsCoverageStatus:tier.news.coverageStatus,

@@ -5,6 +5,8 @@ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:pa
 const {randomUUID,createHash}=require('node:crypto');
 const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {createEodFullIntegration}=require('../services/eodFullIntegration');
+const {createNewsCollectionEvidenceStore}=require('../services/newsCollectionEvidence');
+const {createNewsEvidenceBundleStore}=require('../services/newsEvidenceBundle');
 
 const symbol='005930',targetDate='2026-09-23',query='삼성전자';
 const start='2026-09-22T15:30:00+09:00',end='2026-09-23T15:30:00+09:00';
@@ -238,4 +240,91 @@ test('unknown calendar and empty incomplete window never assert that news does n
   assert.equal(held.newsBundleReady,false);
   assert.throws(()=>createEodFullIntegration({environment:{KSTOCK_EXECUTION_MODE:'public'}}),
     /REQUIRES_PERSONAL_LOCAL/);
+});
+
+test('immutable collection evidence links only selected observed articles to one offline analysis',async t=>{
+  const f=await setup(t),before=await f.archive.read(symbol);
+  const selected=await f.archive.selectNewsForEodWindow({symbol,windowStartKst:start,windowEndKst:end});
+  const observed=selected.articles.slice(1);
+  const selector={read:f.archive.read,selectNewsForEodWindow:async()=>({...selected,
+    status:'ARCHIVE_WINDOW_INCOMPLETE',articles:[],observedArticles:observed,
+    observedArticleCount:observed.length,observedCoverageStatus:'UNVERIFIED',
+    searchResultContinuityProven:false,fullCoverageProven:false})};
+  const collections=createNewsCollectionEvidenceStore({testOnly:true,testDirectory:f.dir,
+    archiveStore:selector,environment,clock});
+  const bundles=createNewsEvidenceBundleStore({testOnly:true,testDirectory:f.dir,
+    archiveStore:selector,environment,clock});
+  const context={symbol,query,targetDate,windowStartKst:start,windowEndKst:end};
+  const inputFiles=Object.values(f.source).map(item=>path.join(f.dir,`${item.id}.json`));
+  const originals=await Promise.all(inputFiles.map(file=>fs.readFile(file)));
+  const originalFetch=global.fetch;let http=0;
+  global.fetch=()=>{http++;throw Error('HTTP_FORBIDDEN');};
+  try{
+    const preview=await collections.plan(context);
+    assert.equal(preview.ready,true);
+    assert.equal(preview.observedArticleCount,5);
+    assert.equal(preview.coverageStatus,'ARCHIVE_WINDOW_INCOMPLETE');
+    await assert.rejects(fs.access(path.join(f.dir,'news-collections')));
+    const collection=await collections.create(context);
+    assert.equal(collection.collectionEvidenceId.length,36);
+    assert.deepEqual(collection.observedArticleIds,observed.map(article=>article.articleId));
+    assert.equal(collection.fullCoverageProven,false);
+    const bundle=await bundles.create({...context,collectionEvidenceRef:collection.collectionEvidenceId});
+    assert.equal(bundle.collectionEvidenceRef,collection.collectionEvidenceId);
+    assert.deepEqual(bundle.articleRefs.map(ref=>ref.articleId),collection.observedArticleIds);
+    assert.equal(bundle.coverageStatus,'ARCHIVE_WINDOW_INCOMPLETE');
+    const linked={...f.input,newsCollectionEvidenceRef:collection.collectionEvidenceId,
+      newsEvidenceBundleId:bundle.bundleId};
+    const plan=await f.integration.plan(linked);
+    assert.equal(plan.executable,true);
+    assert.equal(plan.dailyReady,true);assert.equal(plan.investorReady,true);
+    assert.equal(plan.newsArchiveWindowStatus,'ARCHIVE_WINDOW_INCOMPLETE');
+    const result=await f.integration.runFromStoredEvidence(linked);
+    assert.equal(result.status,'PARTIAL_DESCRIPTIVE');
+    assert.equal(result.analysis.newsCollectionEvidenceRef,collection.collectionEvidenceId);
+    assert.equal(result.analysis.newsEvidenceBundleId,bundle.bundleId);
+    assert.deepEqual(result.analysis.newsUsedArticleIds,collection.observedArticleIds);
+    assert.equal(result.analysis.newsArticleCount,5);
+    assert.equal(result.analysis.news.reason,'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');
+    assert.equal(result.analysis.news.status,'NOT_READY');
+    assert.equal(result.analysis.newsCoverageStatus,'ARCHIVE_WINDOW_INCOMPLETE');
+    assert.equal(result.analysis.calendar.status,'VERIFIED');
+    assert.equal(result.analysis.technical.status,'READY_WITH_WARNINGS');
+    assert.equal(result.analysis.investorFlow.status,'READY_WITH_WARNINGS');
+    assert.ok(result.analysis.descriptiveWarnings.includes('DAILY_PROVIDER_FINALITY_UNKNOWN'));
+    assert.ok(result.analysis.descriptiveWarnings.includes('INVESTOR_FINALITY_UNKNOWN'));
+    assert.equal(result.analysis.strictStrategyReady,false);
+    assert.equal(result.analysis.strictStrategyVerdict,'HELD');
+    assert.equal(result.analysis.tradeEvidenceReady,false);
+    assert.equal(result.analysis.riskReady,false);
+    assert.equal(result.analysis.ledgerInputReady,false);
+    assert.ok(!result.analysis.newsUsedArticleIds.includes(selected.articles[0].articleId));
+    assert.deepEqual(await f.archive.read(symbol),before);
+    assert.deepEqual(await Promise.all(inputFiles.map(file=>fs.readFile(file))),originals);
+    assert.equal(http,0);
+  }finally{global.fetch=originalFetch;}
+});
+
+test('collection and bundle context mismatches hold before analysis',async t=>{
+  const f=await setup(t),selected=await f.archive.selectNewsForEodWindow({symbol,
+    windowStartKst:start,windowEndKst:end});
+  const observed=selected.articles.slice(1),selector={read:f.archive.read,
+    selectNewsForEodWindow:async()=>({...selected,status:'ARCHIVE_WINDOW_INCOMPLETE',
+      articles:[],observedArticles:observed,observedArticleCount:5,
+      observedCoverageStatus:'UNVERIFIED',searchResultContinuityProven:false})};
+  const collections=createNewsCollectionEvidenceStore({testOnly:true,testDirectory:f.dir,
+    archiveStore:selector,environment,clock});
+  const bundles=createNewsEvidenceBundleStore({testOnly:true,testDirectory:f.dir,
+    archiveStore:selector,environment,clock});
+  const context={symbol,query,targetDate,windowStartKst:start,windowEndKst:end};
+  const collection=await collections.create(context);
+  await assert.rejects(bundles.create({...context,targetDate:'2026-09-22',
+    collectionEvidenceRef:collection.collectionEvidenceId}));
+  const bundle=await bundles.create({...context,collectionEvidenceRef:collection.collectionEvidenceId});
+  const wrong=await f.integration.plan({...f.input,runId:randomUUID(),
+    newsCollectionEvidenceRef:randomUUID(),newsEvidenceBundleId:bundle.bundleId});
+  assert.equal(wrong.executable,false);
+  assert.equal(wrong.newsBundleReady,false);
+  assert.equal(wrong.tradeEvidenceReady,false);
+  await assert.rejects(fs.access(path.join(f.dir,'analysis')));
 });

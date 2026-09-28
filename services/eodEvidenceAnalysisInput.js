@@ -119,8 +119,10 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
         if(bundle.symbol!==symbol||bundle.targetDate!==targetDate||!expected||
           Date.parse(bundle.windowStartKst)!==Date.parse(expected.start)||
           Date.parse(bundle.windowEndKst)!==Date.parse(expected.end)||
-          newsCollectionEvidenceRef&&
-            !bundle.articleRefs.some(ref=>ref.sourcePollRunId===newsCollectionEvidenceRef))
+          (bundle.collectionEvidenceRef?
+            newsCollectionEvidenceRef!==bundle.collectionEvidenceRef:
+            newsCollectionEvidenceRef&&
+              !bundle.articleRefs.some(ref=>ref.sourcePollRunId===newsCollectionEvidenceRef)))
           throw Error('NEWS_BUNDLE_CONTEXT_MISMATCH');
       }catch{return {...base,reasons:['NEWS_BUNDLE_INVALID_OR_MISMATCH']};}
     }
