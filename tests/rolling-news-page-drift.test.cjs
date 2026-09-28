@@ -10,6 +10,9 @@ const {planRollingNewsPoll,createRollingNewsPollRunner}=require('../services/rol
 const {createObservationApprovalStore}=require('../services/observationApproval');
 const {createRollingNewsPageDrift,selectObservedForEodWindow}=
   require('../services/rollingNewsPageDrift');
+const {planAutomaticObservedApply,applyAutomaticObservedArticles}=
+  require('../services/rollingNewsObservedAutoApply');
+const {planRollingNewsSchedule,runScheduledRollingPoll}=require('../services/rollingNewsScheduler');
 
 const symbol='005930',query='삼성전자',environment={NODE_ENV:'development',
   KSTOCK_EXECUTION_MODE:'personal-local',NAVER_API_HUB_API_KEY_ID:'SYNTHETIC_ID',
@@ -131,6 +134,116 @@ test('stored synthetic drift replay prepares observed article plan without modif
   assert.equal(selected.strictNewsStatus,'HELD');
   const after=await fileTree(f.testDirectory);
   assert.deepEqual(after,before);
+});
+
+test('automatic boundary-drift apply advances collection only, preserving unverified coverage',async t=>{
+  const f=await fixture(t),anchor=news(0,'gap-1-0');
+  const {result}=await followUp(f,[[news(5,'a'),news(3,'b')],[news(4,'c'),anchor]]);
+  const input={symbol,pollRunId:result.record.pollRunId,testOnly:true,testDirectory:f.testDirectory};
+  const sourceFile=path.join(f.testDirectory,'rolling-archive',symbol,'polls','000004.json');
+  const original=await fs.readFile(sourceFile),before=await f.archive.read(symbol);
+  const plan=await planAutomaticObservedApply(input);
+  assert.equal(plan.ready,true);assert.equal(plan.articleCount,3);
+  assert.equal(plan.expectedArchiveRevision,4);assert.equal(plan.expectedSegmentRevision,2);
+  assert.equal(plan.newCollectionWatermark.pubDateRaw,news(5,'a').pubDate);
+  assert.equal((await f.archive.read(symbol)).archiveRevision,4);
+  await assert.rejects(f.archive.appendObservedApply({...plan.archiveApplyPlan,
+    expectedArchiveRevision:plan.expectedArchiveRevision-1}),/ARCHIVE_OR_SEGMENT_STATE_CHANGED/);
+  assert.equal((await f.archive.read(symbol)).archiveRevision,4);
+  const applied=await applyAutomaticObservedArticles(input);
+  assert.equal(applied.applied,true);
+  assert.equal(applied.archive.archiveRevision,5);
+  assert.equal(applied.archive.articleCount,before.articleCount+3);
+  assert.equal(applied.archive.activeSegment.segmentRevision,3);
+  assert.equal(applied.archive.activeSegment.collectionWatermark.pubDateRaw,news(5,'a').pubDate);
+  assert.equal((await f.archive.planPoll({symbol})).watermark.pubDateRaw,news(5,'a').pubDate);
+  assert.equal(applied.archive.activeSegment.continuityProven,false);
+  assert.equal(applied.archive.activeSegment.coverageStatus,'UNVERIFIED');
+  assert.equal(applied.archive.activeSegment.gapBefore,true);
+  assert.equal(applied.archive.fullCoverageProven,false);
+  assert.ok(applied.archive.activeSegment.warnings.includes('PAGE_BOUNDARY_DRIFT'));
+  const selected=await f.archive.selectNewsForEodWindow({symbol,
+    windowStartKst:'2026-09-28T12:02:00+09:00',
+    windowEndKst:'2026-09-28T12:06:00+09:00'});
+  assert.equal(selected.status,'ARCHIVE_WINDOW_INCOMPLETE');
+  assert.equal(selected.strictNewsStatus,'HELD');
+  assert.equal((await planAutomaticObservedApply(input)).ready,false);
+  assert.equal((await applyAutomaticObservedArticles(input)).applied,false);
+  assert.deepEqual(await fs.readFile(sourceFile),original);
+});
+
+test('automatic scheduler slot uses the approved runner then applies only observed drift articles',async t=>{
+  const f=await fixture(t),anchor=news(0,'gap-1-0'),
+    at='2026-09-28T13:00:00+09:00';
+  const calendar={kind:'SYNTHETIC_TEST',market:'KRX',session:'REGULAR',
+    sourceUrl:'SYNTHETIC_TEST_CALENDAR',checkedAt:at,collectionComplete:true,
+    from:'2026-09-27',through:'2026-09-28',days:{}};
+  for(const date of ['2026-09-27','2026-09-28'])calendar.days[date]={status:'OPEN',
+    raw:{bass_dt:date.replaceAll('-',''),opnd_yn:'Y'},verified:false,
+    sourceUrl:'SYNTHETIC_TEST_CALENDAR',sessionBasis:'KRX_STANDARD',
+    sessionSourceUrl:'SYNTHETIC_TEST_SESSION',open:date+'T09:00:00+09:00',
+    close:date+'T15:30:00+09:00'};
+  const policy={enabled:true,trackedSymbols:[{symbol,query,enabled:true}]};
+  const planned=await planRollingNewsSchedule({symbol,currentTime:at,calendar,policy,
+    testOnly:true,testDirectory:f.testDirectory});
+  assert.equal(planned.executable,true);
+  const approvals=createObservationApprovalStore({environment,testOnly:true,
+    testDirectory:path.join(f.testDirectory,'approvals')}),calls=[];
+  const result=await runScheduledRollingPoll({plan:planned,policy,currentTime:at,calendar,
+    environment,testOnly:true,testDirectory:f.testDirectory,
+    slotDirectory:path.join(f.testDirectory,'slots'),testClock:()=>at,
+    prepareApproval:async()=>{const approvalId=randomUUID();
+      await approvals.issue({approvalId,execution:planned.pollPlan.execution,userApproved:true});
+      return {approvalId};},
+    testRunner:({plan,approvalId})=>createRollingNewsPollRunner({plan,approvalId,
+      environment,testOnly:true,directory:f.testDirectory,
+      testApprovalDirectory:path.join(f.testDirectory,'approvals'),
+      testTransport:async url=>{const start=Number(url.searchParams.get('start'));
+        calls.push(start);return {status:200,data:page(start,calls.length===1?
+          [news(5,'a'),news(3,'b')]:[news(4,'c'),anchor])};}}).observe()});
+  assert.deepEqual(calls,[1,101]);
+  assert.equal(result.status,'SUCCESS');
+  assert.equal(result.executionStatus,'COMPLETED');
+  assert.equal(result.continuityStatus,'UNVERIFIED');
+  assert.equal(result.observedArticlesReady,true);
+  assert.equal(result.observedApplyStatus,'APPLIED');
+  assert.equal(result.observedArticleCount,3);
+  assert.equal(result.archiveRevisionAfter,5);
+  const archive=await f.archive.read(symbol);
+  assert.equal(archive.activeSegment.segmentRevision,3);
+  assert.equal(archive.activeSegment.collectionWatermark.pubDateRaw,news(5,'a').pubDate);
+  assert.equal(archive.activeSegment.continuityProven,false);
+  assert.equal(archive.activeSegment.gapBefore,true);
+  assert.equal(archive.fullCoverageProven,false);
+});
+
+test('automatic apply rejects missing watermark, invalid page order and unparseable pubDate',async t=>{
+  const gap=await fixture(t);
+  const withoutAnchor=await followUp(gap,[[news(5,'a')],[]]);
+  assert.equal(withoutAnchor.result.record.review.watermarkReached,false);
+  assert.equal(withoutAnchor.result.record.review.status,'GAP_DETECTED');
+  assert.equal((await planAutomaticObservedApply({symbol,
+    pollRunId:withoutAnchor.result.record.pollRunId,testOnly:true,
+    testDirectory:gap.testDirectory})).ready,false);
+  const reversed=await fixture(t),anchor=news(0,'gap-1-0');
+  const badOrder=await followUp(reversed,[[news(1,'a'),news(2,'b'),anchor]]);
+  assert.equal((await planAutomaticObservedApply({symbol,
+    pollRunId:badOrder.result.record.pollRunId,testOnly:true,
+    testDirectory:reversed.testDirectory})).ready,false);
+  const malformed=await fixture(t);
+  const badDate=await followUp(malformed,[[news(2,'a'),
+    {...news(1,'bad'),pubDate:'INVALID_SYNTHETIC_DATE'},anchor]]);
+  assert.equal((await planAutomaticObservedApply({symbol,
+    pollRunId:badDate.result.record.pollRunId,testOnly:true,
+    testDirectory:malformed.testDirectory})).ready,false);
+  const movingSnapshot=await fixture(t);
+  const newerLater=await followUp(movingSnapshot,[[news(5,'a'),news(3,'b')],
+    [news(6,'newer-on-next-page'),anchor]]);
+  const movingPlan=await planAutomaticObservedApply({symbol,
+    pollRunId:newerLater.result.record.pollRunId,testOnly:true,
+    testDirectory:movingSnapshot.testDirectory});
+  assert.equal(movingPlan.ready,false);
+  assert.equal(movingPlan.reason,'FIRST_PAGE_NOT_NEWEST');
 });
 
 test('inverted page and unparseable article never create complete observed coverage',async t=>{

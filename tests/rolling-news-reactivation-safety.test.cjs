@@ -7,7 +7,7 @@ const {createAutomationGrantStore,fingerprint}=require('../services/rollingNewsA
 const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {createRollingNewsGapRecovery}=require('../services/rollingNewsGapRecovery');
 const {planRollingNewsReactivation,reactivateRollingNews}=require('../services/rollingNewsReactivation');
-const {readPilotActivation}=require('../services/rollingNewsAutomationActivation');
+const {readPilotActivation,disableCurrentReactivation}=require('../services/rollingNewsAutomationActivation');
 const {PILOT_POLICY}=require('../services/rollingNewsAutomationPilot');
 const now='2026-09-28T12:03:00+09:00',symbol='005930',query='삼성전자';
 const environment={KSTOCK_EXECUTION_MODE:'personal-local',NODE_ENV:'test',
@@ -109,6 +109,11 @@ test('reactivation uses a new grant and append-only activation with original exp
   assert.deepEqual(await fs.readFile(path.join(f.activationDir,'active.json')),previous);
   assert.deepEqual(await fs.readFile(path.join(f.testDirectory,'grants',f.priorId,'grant.json')),priorGrant);
   assert.equal((await readPilotActivation({testOnly:true,testDirectory:f.activationDir})).grantId,result.grantId);
+  const disabled=await disableCurrentReactivation({environment,userApproved:true,testOnly:true,
+    testDirectory:f.activationDir,activationId:result.record.activationId,grantId:result.grantId});
+  assert.equal(disabled.enabled,false);
+  assert.equal(JSON.parse(await fs.readFile(path.join(f.activationDir,'generations',
+    result.record.activationId+'.json'),'utf8')).enabled,true);
 });
 test('the shared domain blocks the next grant at the 20-poll and 100-request ceiling',async t=>{
   const f=await fixture(t);

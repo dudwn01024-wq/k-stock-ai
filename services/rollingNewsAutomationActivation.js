@@ -29,6 +29,14 @@ function store({testOnly=false,testDirectory}={}){
           !uuid(value.predecessorGrantId)||value.grantId===value.predecessorGrantId||
           !uuid(value.calendarEvidenceRef)||typeof value.enabled!=='boolean')
           throw Error('PILOT_ACTIVATION_RECORD_INVALID');
+        const disabled=await readLocalJson(path.join(generations,current.activationId+'.disabled.json'),generations);
+        if(disabled){
+          if(disabled.schemaVersion!=='ROLLING_NEWS_REACTIVATION_DISABLED_V1'||
+            disabled.activationId!==value.activationId||disabled.grantId!==value.grantId||
+            !Number.isFinite(Date.parse(disabled.disabledAtKst)))
+            throw Error('PILOT_ACTIVATION_RECORD_INVALID');
+          return {...value,enabled:false,disabledAtKst:disabled.disabledAtKst};
+        }
         return value;
       }
       const [dir,actual,stat]=await Promise.all([fs.realpath(root),fs.realpath(file),fs.lstat(file)]);
@@ -83,7 +91,22 @@ function store({testOnly=false,testDirectory}={}){
       await fs.unlink(lock);
     }
   }
-  return {read,create,createGeneration};
+  async function disableGeneration({activationId,grantId}={}){
+    const current=await read();
+    if(!uuid(activationId)||!uuid(grantId)||!current||
+      current.activationId!==activationId||current.grantId!==grantId||!current.enabled)
+      throw Error('PILOT_ACTIVATION_NOT_ACTIVE');
+    const generations=path.join(root,'generations');
+    if(path.dirname(await fs.realpath(generations))!==await fs.realpath(root)||
+      (await fs.lstat(generations)).isSymbolicLink())throw Error('PILOT_ACTIVATION_DIRECTORY_INVALID');
+    const file=path.join(generations,activationId+'.disabled.json');
+    const handle=await fs.open(file,'wx',0o600);
+    try{await handle.writeFile(JSON.stringify({schemaVersion:'ROLLING_NEWS_REACTIVATION_DISABLED_V1',
+      activationId,grantId,disabledAtKst:kstNow(),reason:'UNVERIFIED_COLLECTION_WATERMARK_STALE'}));
+      await handle.sync();}finally{await handle.close();}
+    return read();
+  }
+  return {read,create,createGeneration,disableGeneration};
 }
 async function activatePilot({calendarEvidenceRef,environment=process.env,userApproved=false,
   testOnly=false,testDirectory,testCalendar,currentTime,expectedArchiveId}={}){
@@ -215,4 +238,10 @@ async function startPilotWorker({environment=process.env,onResult=()=>{}}={}){
 module.exports={activatePilot,tickPilot,startPilotWorker,pilotStatus,
   readPilotActivation:options=>store(options).read(),
   createReactivationGeneration:({testOnly=false,testDirectory,value}={})=>
-    store({testOnly,testDirectory}).createGeneration(value)};
+    store({testOnly,testDirectory}).createGeneration(value),
+  disableCurrentReactivation:({environment=process.env,userApproved=false,testOnly=false,
+    testDirectory,activationId,grantId}={})=>{
+    if(userApproved!==true)throw Error('EXPLICIT_USER_APPROVAL_REQUIRED');
+    if(!local(environment))throw Error('PILOT_PERSONAL_LOCAL_REQUIRED');
+    return store({testOnly,testDirectory}).disableGeneration({activationId,grantId});
+  }};

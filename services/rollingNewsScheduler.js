@@ -10,6 +10,7 @@ const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
 const {createEodEvidenceAnalysisInput}=require('./eodEvidenceAnalysisInput');
 const {planRollingNewsPoll,createRollingNewsPollRunner}=require('./rollingNewsPollAdapter');
 const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
+const {applyAutomaticObservedArticles}=require('./rollingNewsObservedAutoApply');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler');
 const DEFAULT_POLICY=Object.freeze({enabled:false,revision:'1',timezone:'Asia/Seoul',
@@ -229,13 +230,24 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
       // The existing runner consumes the supplied approval and enforces the HTTP budget.
       const result=testOnly?await testRunner({plan:plan.pollPlan,approvalId:selectedApprovalId}):
         await createRollingNewsPollRunner({plan:plan.pollPlan,approvalId:selectedApprovalId,environment}).observe();
+      // Only an automatically approved slot may publish observed articles from
+      // a boundary-drift poll. The offline apply revalidates the stored poll and
+      // never promotes search-result continuity or full coverage.
+      const observedApply=prepareApproval&&result.record?.review?.status==='UNVERIFIED'?
+        await applyAutomaticObservedArticles({symbol:plan.symbol,pollRunId:result.record.pollRunId,
+          testOnly,testDirectory}):null;
+      const finalArchive=observedApply?.applied?observedApply.archive:result.archive;
       const record={status:'SUCCESS',executionStatus:'COMPLETED',
-        continuityStatus:result.archive.activeSegment?.continuityStatus??
-          result.archive.continuityStatus??'UNKNOWN',reason:null,
+        continuityStatus:finalArchive.activeSegment?.continuityStatus??
+          finalArchive.continuityStatus??'UNKNOWN',reason:null,
         startedAtKst,completedAtKst:completedAt(),
-        archiveRevisionAfter:result.archive.archiveRevision,pollRunId:result.record.pollRunId};
+        archiveRevisionAfter:finalArchive.archiveRevision,pollRunId:result.record.pollRunId,
+        observedArticlesReady:observedApply?.plan?.ready===true,
+        observedApplyStatus:observedApply?.applied?'APPLIED':observedApply?'NOT_APPLIED':null,
+        observedArticleCount:observedApply?.applied?observedApply.plan.articleCount:0};
       await store.complete(lease,record);
-      return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:true,result};
+      return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:true,
+        result:{...result,archive:finalArchive}};
     }catch(error){
       const status=['ARCHIVE_STATE_CHANGED','ARCHIVE_OR_SEGMENT_STATE_CHANGED'].includes(error.message)?
         'ARCHIVE_STATE_CHANGED':'FAILED';
