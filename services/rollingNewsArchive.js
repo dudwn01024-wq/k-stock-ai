@@ -339,6 +339,24 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       return materialize(manifest,events);
     }catch{throw Error('NEWS_ARCHIVE_RECORD_INVALID');}
   }
+  async function listSymbols(){
+    let names;
+    try{
+      const stat=await fs.lstat(root);
+      if(!stat.isDirectory()||stat.isSymbolicLink()||!samePath(await fs.realpath(root),root))
+        throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+      names=await fs.readdir(root,{withFileTypes:true});
+    }catch(error){if(error.code==='ENOENT')return [];throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');}
+    const symbols=[];
+    for(const entry of names){
+      if(entry.name.startsWith('.'))continue;
+      if(!entry.isDirectory()||entry.isSymbolicLink()||!/^\d{6}$/.test(entry.name))
+        throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+      queryFor(entry.name);
+      symbols.push(entry.name);
+    }
+    return symbols.sort();
+  }
   async function readPoll({symbol,pollRunId}={}){
     queryFor(symbol);
     if(!uuid(pollRunId))throw Error('NEWS_ARCHIVE_POLL_ID_INVALID');
@@ -621,7 +639,7 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         ...(archive&&(!Number.isFinite(collectedThrough)||collectedThrough<end)?['WINDOW_END_NOT_COLLECTED']:[]),
         ...(archive?.warnings??[]),...(archive&&!archive.searchResultContinuityProven?['POLL_CONTINUITY_NOT_PROVEN']:[])]};
   }
-  return {read,readPoll,planPoll,reservePoll,appendPoll,appendObservedApply,
+  return {read,listSymbols,readPoll,planPoll,reservePoll,appendPoll,appendObservedApply,
     collectSyntheticPoll,selectNewsForEodWindow};
 }
 module.exports={createRollingNewsArchiveStore,assessPoll,reviewPageChronology,nowKst,MAX_REQUESTS_PER_POLL};
