@@ -2,8 +2,8 @@
 // Re-activation is explicit and never starts a worker or sends an HTTP request.
 const path=require('node:path');
 const {randomUUID}=require('node:crypto');
-const {createAutomationGrantStore}=require('./rollingNewsAutomationGrant');
-const {planRollingNewsPilot}=require('./rollingNewsAutomationPilot');
+const {createAutomationGrantStore,fingerprint}=require('./rollingNewsAutomationGrant');
+const {PILOT_POLICY,planRollingNewsPilot}=require('./rollingNewsAutomationPilot');
 const {readPilotActivation,createReactivationGeneration}=require('./rollingNewsAutomationActivation');
 const {resolveExecutionMode}=require('./executionMode');
 const kstNow=()=>new Date(Date.now()+9*3600000).toISOString().replace('Z','+09:00');
@@ -48,8 +48,15 @@ async function planRollingNewsReactivation({environment=process.env,testOnly=fal
       blockers.push('SEGMENT_STATE_INVALID');
       pilot.rollingCollectionReady=false;
     }
-    if(pilot.schedulePolicyRevision!==prior.schedulePolicyRevision||
-      pilot.schedulePolicyFingerprint!==prior.schedulePolicyFingerprint)
+    // Only the exact prior 30-minute pilot may migrate to fixed KST slots.
+    // The new grant always binds the new policy fingerprint; old records stay immutable.
+    const fixedSlotUpgrade=PILOT_POLICY.revision==='2-fixed-slots'&&
+      prior.schedulePolicyRevision==='1'&&
+      prior.schedulePolicyFingerprint===fingerprint({...PILOT_POLICY,revision:'1'})&&
+      pilot.schedulePolicyRevision===PILOT_POLICY.revision&&
+      pilot.schedulePolicyFingerprint===fingerprint(PILOT_POLICY);
+    if((pilot.schedulePolicyRevision!==prior.schedulePolicyRevision||
+      pilot.schedulePolicyFingerprint!==prior.schedulePolicyFingerprint)&&!fixedSlotUpgrade)
       blockers.push('SCHEDULE_POLICY_CHANGED');
     if(pilot.maxPollsPerKstDay!==maxPollsPerKstDay||
       pilot.maxRequestsPerKstDay!==maxRequestsPerKstDay)

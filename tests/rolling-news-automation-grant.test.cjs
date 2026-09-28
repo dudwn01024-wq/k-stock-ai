@@ -9,7 +9,7 @@ const {createObservationApprovalStore}=require('../services/observationApproval'
 const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {DEFAULT_AUTOMATION_POLICY,fingerprint,createAutomationGrantStore,planAutomationGrant,
   runGrantedRollingPoll}=require('../services/rollingNewsAutomationGrant');
-const symbol='005930',query='삼성전자',now='2026-09-23T10:05:00+09:00';
+const symbol='005930',query='삼성전자',now='2026-09-23T10:00:05+09:00';
 const policy={enabled:true,revision:'v1',trackedSymbols:[{symbol,query,enabled:true}]};
 const environment={KSTOCK_EXECUTION_MODE:'personal-local',NODE_ENV:'test',
   NAVER_API_HUB_API_KEY_ID:'SYNTHETIC_ID',NAVER_API_HUB_API_KEY:'SYNTHETIC_KEY'};

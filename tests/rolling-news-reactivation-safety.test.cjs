@@ -43,8 +43,8 @@ async function fixture(t){
     testDirectory:path.join(testDirectory,'grants'),clock:()=>now});
   const priorId=await grants.issue({userApproved:true,grant:{scope:'naver-search-news-only',
     mode:'rolling-poll',enabled:true,allowedSymbols:[{symbol,query}],
-    schedulePolicyRevision:PILOT_POLICY.revision,
-    schedulePolicyFingerprint:fingerprint(PILOT_POLICY),validFromKst:now,
+    schedulePolicyRevision:'1',
+    schedulePolicyFingerprint:fingerprint({...PILOT_POLICY,revision:'1'}),validFromKst:now,
     expiresAtKst:'2026-09-29T12:02:54+09:00',maxPollsPerKstDay:20,
     maxRequestsPerKstDay:100}});
   const activationDir=path.join(testDirectory,'activation');await fs.mkdir(activationDir);
@@ -52,8 +52,8 @@ async function fixture(t){
   await fs.writeFile(path.join(activationDir,'active.json'),JSON.stringify({
     schemaVersion:'ROLLING_NEWS_PILOT_ACTIVATION_V1',enabled:true,grantId:priorId,
     calendarEvidenceRef,archiveId:state.archiveId,archiveRevisionAtActivation:state.archiveRevision,
-    schedulePolicyRevision:PILOT_POLICY.revision,
-    schedulePolicyFingerprint:fingerprint(PILOT_POLICY),activatedAtKst:now}));
+    schedulePolicyRevision:'1',
+    schedulePolicyFingerprint:fingerprint({...PILOT_POLICY,revision:'1'}),activatedAtKst:now}));
   await fs.writeFile(path.join(activationDir,'disabled.json'),JSON.stringify({
     schemaVersion:'ROLLING_NEWS_PILOT_DEACTIVATION_V1',grantId:priorId,
     disabledAtKst:now,reason:'SYNTHETIC_TEST_GAP'}));
@@ -81,6 +81,10 @@ test('revoked grant usage remains in the shared KST budget and survives restart'
   const f=await fixture(t);await recordAttempt(f);
   const first=await planRollingNewsReactivation(f.options);
   assert.equal(first.executable,true,JSON.stringify(first.blockers));assert.equal(first.dailyUsage.pollAttemptCount,1);
+  assert.equal(first.schedulePolicyRevision,'2-fixed-slots');
+  assert.equal(first.schedulePolicyFingerprint,fingerprint(PILOT_POLICY));
+  assert.notEqual(first.schedulePolicyFingerprint,
+    (await f.grants.read(f.priorId)).schedulePolicyFingerprint);
   assert.equal(first.dailyUsage.pollSuccessCount,1);assert.equal(first.dailyUsage.httpRequestCount,5);
   assert.deepEqual(first.dailyRemaining,{polls:19,httpRequests:95});
   const reopened=createAutomationGrantStore({environment,testOnly:true,
@@ -98,7 +102,10 @@ test('reactivation uses a new grant and append-only activation with original exp
   assert.equal(result.record.predecessorGrantId,f.priorId);
   assert.equal(result.record.predecessorActivationId,null);
   assert.equal((await f.grants.read(f.priorId)).revokedAtKst,now);
-  assert.equal((await f.grants.read(result.grantId)).expiresAtKst,'2026-09-29T12:02:54+09:00');
+  const newGrant=await f.grants.read(result.grantId);
+  assert.equal(newGrant.expiresAtKst,'2026-09-29T12:02:54+09:00');
+  assert.equal(newGrant.schedulePolicyRevision,'2-fixed-slots');
+  assert.equal(newGrant.schedulePolicyFingerprint,fingerprint(PILOT_POLICY));
   assert.equal((await f.grants.dailyUsage('2026-09-28')).pollAttemptCount,1);
   const reserved=await f.grants.reserve({grantId:result.grantId,currentTime:now,
     plan:{slotKey:'2026-09-28_REGULAR_1030',archiveId:result.record.archiveId,
@@ -114,6 +121,16 @@ test('reactivation uses a new grant and append-only activation with original exp
   assert.equal(disabled.enabled,false);
   assert.equal(JSON.parse(await fs.readFile(path.join(f.activationDir,'generations',
     result.record.activationId+'.json'),'utf8')).enabled,true);
+});
+test('an unrecognized predecessor policy cannot migrate to fixed slots',async t=>{
+  const f=await fixture(t),file=path.join(f.testDirectory,'grants',f.priorId,'grant.json');
+  const saved=JSON.parse(await fs.readFile(file,'utf8'));
+  await fs.writeFile(file,JSON.stringify({...saved,schedulePolicyFingerprint:'f'.repeat(64)}));
+  const plan=await planRollingNewsReactivation(f.options);
+  assert.equal(plan.executable,false);
+  assert.ok(plan.blockers.includes('SCHEDULE_POLICY_CHANGED'));
+  await assert.rejects(reactivateRollingNews({...f.options,userApproved:true}),
+    /REACTIVATION_NOT_READY/);
 });
 test('the shared domain blocks the next grant at the 20-poll and 100-request ceiling',async t=>{
   const f=await fixture(t);

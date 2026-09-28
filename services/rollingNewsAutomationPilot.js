@@ -12,6 +12,7 @@ const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
 const EXPECTED_ARCHIVE_ID='c5b05a70-3830-457f-8804-79c6f882dda3';
 const MAX_REQUESTS_PER_POLL=5,VALIDITY_HOURS=24,MAX_POLLS_PER_DAY=20,MAX_REQUESTS_PER_DAY=100;
 const PILOT_POLICY=Object.freeze(policyFor({...DEFAULT_POLICY,enabled:false,
+  revision:'2-fixed-slots',
   trackedSymbols:[{symbol:'005930',query:stockNameFor('005930'),enabled:true}],
   regularSession:{start:'09:00',end:'15:30',intervalMinutes:30},
   afterClose:{enabled:true,until:'18:00',intervalMinutes:30},

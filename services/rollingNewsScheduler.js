@@ -67,10 +67,9 @@ function slotFor({symbol,currentTime,calendar,policy}){
   let phase,slotMinute,interval;
   if(now>=regularStart&&now<regularEnd){phase='REGULAR';interval=policy.regularSession.intervalMinutes;
     slotMinute=regularStart+Math.floor((now-regularStart)/interval)*interval;}
-  else if(policy.afterClose.enabled===true&&now>close&&now<=minutes(policy.afterClose.until)){
+  else if(policy.afterClose.enabled===true&&now>=close&&now<=minutes(policy.afterClose.until)){
     phase='AFTER_CLOSE';interval=policy.afterClose.intervalMinutes;
     slotMinute=close+Math.floor((now-close)/interval)*interval;
-    if(slotMinute<=close)return {status:'SKIPPED_OUTSIDE_WINDOW',reason:'NEXT_AFTER_CLOSE_SLOT_NOT_DUE'};
   }else return {status:'SKIPPED_OUTSIDE_WINDOW',reason:'OUTSIDE_CONFIGURED_WINDOW'};
   const hhmm=time(slotMinute),slotKey=`${date}_${phase}_${hhmm.replace(':','')}`;
   return {status:'PLANNED',symbol,slotKey,phase,plannedAtKst:`${date}T${hhmm}:00+09:00`,
@@ -183,8 +182,11 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
   if(prepareApproval!==undefined&&(typeof prepareApproval!=='function'||approvalId!==undefined))
     throw Error('NEWS_SCHEDULER_APPROVAL_SOURCE_INVALID');
   const evaluatedAt=testOnly?currentTime:new Date().toISOString();
-  if(!plan?.executable||plan.status!=='PLANNED'||!instant(evaluatedAt))
+  if(!plan?.executable||plan.status!=='PLANNED'||!instant(evaluatedAt)||
+    !instant(plan.plannedAtKst))
     return {status:'SKIPPED_DISABLED',reason:'PLAN_NOT_EXECUTABLE'};
+  if(kst(evaluatedAt).slice(0,16)!==plan.plannedAtKst.slice(0,16))
+    return {status:'SKIPPED_MISSED_SLOT',reason:'SLOT_MINUTE_PASSED',pollExecuted:false};
   const fresh=await planRollingNewsSchedule({symbol:plan.symbol,currentTime:testOnly?evaluatedAt:undefined,calendarEvidenceRef,calendar,
     policy,testOnly,testDirectory});
   if(!fresh.executable||fresh.slotKey!==plan.slotKey||fresh.phase!==plan.phase||
@@ -200,13 +202,18 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
   const previous=await store.latestCompleted(plan.symbol);
   if(previous?.slotKey===plan.slotKey)
     return {status:'SKIPPED_DUPLICATE_SLOT',reason:'SLOT_ALREADY_RESERVED',pollExecuted:false};
-  if(previous&&Date.parse(evaluatedAt)<Date.parse(previous.completedAtKst)+plan.intervalMinutes*60000)
-    return {status:'SKIPPED_INTERVAL',reason:'MINIMUM_INTERVAL_NOT_ELAPSED',pollExecuted:false};
+  const lease=await store.reserve(plan);
+  if(!lease)return {status:'SKIPPED_DUPLICATE_SLOT',reason:'SLOT_ALREADY_RESERVED',pollExecuted:false};
   const active=await store.acquire(plan.symbol);
-  if(!active)return {status:'SKIPPED_SYMBOL_BUSY',reason:'SYMBOL_POLL_ALREADY_RUNNING',pollExecuted:false};
+  if(!active){
+    const record={status:'SKIPPED_OVERLAP',executionStatus:'NOT_STARTED',
+      continuityStatus:'UNKNOWN',reason:'SYMBOL_POLL_ALREADY_RUNNING',startedAtKst:null,
+      completedAtKst:kst(testClock?.()??new Date().toISOString()),
+      archiveRevisionAfter:plan.archiveRevision,pollRunId:null};
+    await store.complete(lease,record);
+    return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:false};
+  }
   try{
-    const lease=await store.reserve(plan);
-    if(!lease)return {status:'SKIPPED_DUPLICATE_SLOT',reason:'SLOT_ALREADY_RESERVED',pollExecuted:false};
     const completedAt=()=>kst(testClock?.()??new Date().toISOString());
     let prepared=null;
     try{prepared=prepareApproval?await prepareApproval({plan:plan.pollPlan,slotKey:plan.slotKey}):null;}

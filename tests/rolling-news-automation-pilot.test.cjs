@@ -43,20 +43,22 @@ async function fixture(t,{archive=true}={}){
     testCalendar:calendar(),environment,expectedArchiveId,...changes});
   return {testDirectory,store,actual,plan};
 }
-test('30-minute pilot computes 18 daily slots and 90 worst-case requests without activation',async t=>{
+test('fixed 30-minute pilot computes 19 daily slots and 95 worst-case requests without activation',async t=>{
   const f=await fixture(t),plan=await f.plan();
   assert.equal(PILOT_POLICY.enabled,false);
   assert.equal(plan.executable,true);assert.equal(plan.automationGrantReady,true);
   assert.equal(plan.automationEnabled,false);assert.equal(plan.calendarCoverageReady,true);
-  assert.equal(plan.plannedPollsPerKstDay,18);
-  assert.equal(plan.worstCaseRequestsPerKstDay,90);
+  assert.equal(plan.plannedPollsPerKstDay,19);
+  assert.equal(plan.worstCaseRequestsPerKstDay,95);
   assert.equal(plan.maxPollsPerKstDay,20);assert.equal(plan.maxRequestsPerKstDay,100);
   assert.equal(plan.bootstrapMaxRequests,1);assert.equal(plan.followUpMaxRequests,5);
-  assert.deepEqual(plan.calendarCoverage.map(v=>v.plannedSlots),[18,18]);
+  assert.deepEqual(plan.calendarCoverage.map(v=>v.plannedSlots),[19,19]);
   assert.equal(plan.archiveId,f.actual.archiveId);assert.equal(plan.archiveRevision,2);
   assert.deepEqual(await f.store.read(symbol),f.actual);
   assert.equal(plan.schedulePolicyFingerprint,fingerprint(PILOT_POLICY));
   assert.equal(plan.schedulePolicyRevision,PILOT_POLICY.revision);
+  assert.equal(PILOT_POLICY.revision,'2-fixed-slots');
+  assert.notEqual(plan.schedulePolicyFingerprint,fingerprint({...PILOT_POLICY,revision:'1'}));
   assert.equal(plan.fullCoverageProven,false);assert.equal(plan.tradeEvidenceReady,false);
   assert.equal(plan.riskReady,false);assert.equal(plan.ledgerInputReady,false);
   assert.deepEqual(await fs.readdir(f.testDirectory),['rolling-archive']);
@@ -65,7 +67,7 @@ test('closed date has zero slots and missing calendar date blocks activation',as
   const f=await fixture(t);
   const holiday=await f.plan({testCalendar:calendar({closed:['2026-09-29']})});
   assert.equal(holiday.executable,true);
-  assert.deepEqual(holiday.calendarCoverage.map(v=>v.plannedSlots),[18,0]);
+  assert.deepEqual(holiday.calendarCoverage.map(v=>v.plannedSlots),[19,0]);
   const missing=await f.plan({testCalendar:calendar({omit:['2026-09-29']})});
   assert.equal(missing.executable,false);assert.equal(missing.calendarCoverageReady,false);
   assert.ok(missing.blockers.includes('CALENDAR_COVERAGE_UNKNOWN'));
@@ -73,7 +75,7 @@ test('closed date has zero slots and missing calendar date blocks activation',as
   assert.equal(unknown.executable,false);
   const overridden=await f.plan({testCalendar:calendar({special:true})});
   assert.equal(overridden.executable,true);
-  assert.deepEqual(overridden.calendarCoverage.map(v=>v.plannedSlots),[16,16]);
+  assert.deepEqual(overridden.calendarCoverage.map(v=>v.plannedSlots),[17,17]);
 });
 test('policy revision, fingerprint, archive, symbol, public mode and budgets fail closed',async t=>{
   const f=await fixture(t),valid=await f.plan();

@@ -9,7 +9,7 @@ const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {createRollingNewsPollRunner}=require('../services/rollingNewsPollAdapter');
 const {createObservationApprovalStore}=require('../services/observationApproval');
 
-const symbol='005930',query='삼성전자',time='2026-09-23T10:05:00+09:00';
+const symbol='005930',query='삼성전자',time='2026-09-23T10:00:05+09:00';
 const environment={KSTOCK_EXECUTION_MODE:'personal-local',NODE_ENV:'test'};
 const policy={enabled:true,trackedSymbols:[{symbol,query,enabled:true}]};
 const iso=(date,hm)=>`${date}T${hm}:00+09:00`;
@@ -116,7 +116,7 @@ test('synthetic approval travels through the real rolling adapter and EOD select
   assert.deepEqual(calls,[1]);
 });
 
-test('stale archive plan, missed slots and failures do not retry',async t=>{
+test('stale archive plan, fixed slots and failures do not retry',async t=>{
   const f=await fixture(t),stale=await f.plan();
   await f.archive.collectSyntheticPoll({symbol,receivedAtKst:time,
     readPage:async ({start})=>({start,display:100,items:[article(0,'old')]})});
@@ -134,12 +134,63 @@ test('stale archive plan, missed slots and failures do not retry',async t=>{
   assert.equal(called,1);
   const later=await f.plan('2026-09-23T10:10:00+09:00');
   assert.equal(later.slotKey,'2026-09-23_REGULAR_1010');
-  const tooSoon=await f.run(later,{currentTime:'2026-09-23T10:10:00+09:00'});
-  assert.equal(tooSoon.status,'SKIPPED_INTERVAL');
+  const nextSlot=await f.run(later,{currentTime:'2026-09-23T10:10:00+09:00'});
+  assert.equal(nextSlot.status,'SKIPPED_APPROVAL_REQUIRED');
   const resumed=await f.plan('2026-09-23T10:41:00+09:00');
   assert.equal(resumed.slotKey,'2026-09-23_REGULAR_1040');
   assert.equal((await f.run(resumed,{currentTime:'2026-09-23T10:41:00+09:00'})).status,
+    'SKIPPED_MISSED_SLOT');
+  assert.equal((await f.run(resumed,{currentTime:'2026-09-23T10:40:09+09:00'})).status,
     'SKIPPED_APPROVAL_REQUIRED');
+});
+
+test('17:30 completion at 17:30:38 does not block the fixed 18:00 slot',async t=>{
+  const f=await fixture(t),fixedPolicy={...policy,
+    regularSession:{start:'09:00',end:'15:30',intervalMinutes:30},
+    afterClose:{enabled:true,until:'18:00',intervalMinutes:30}};
+  assert.equal((await f.plan('2026-09-23T09:07:00+09:00',
+    {policy:fixedPolicy})).plannedAtKst,'2026-09-23T09:00:00+09:00');
+  assert.equal((await f.plan('2026-09-23T09:30:09+09:00',
+    {policy:fixedPolicy})).plannedAtKst,'2026-09-23T09:30:00+09:00');
+  assert.equal((await f.plan('2026-09-23T10:00:09+09:00',
+    {policy:fixedPolicy})).plannedAtKst,'2026-09-23T10:00:00+09:00');
+  assert.equal((await f.plan('2026-09-23T15:30:09+09:00',
+    {policy:fixedPolicy})).plannedAtKst,'2026-09-23T15:30:00+09:00');
+  const first=await f.plan('2026-09-23T17:30:00+09:00',{policy:fixedPolicy});
+  assert.equal(first.plannedAtKst,'2026-09-23T17:30:00+09:00');
+  let firstClockCalls=0;
+  const done=await f.run(first,{policy:fixedPolicy,currentTime:'2026-09-23T17:30:09+09:00',
+    testClock:()=>++firstClockCalls===1?'2026-09-23T17:30:09+09:00':
+      '2026-09-23T17:30:38+09:00',approvalId:randomUUID(),
+    testRunner:async()=>({archive:{archiveRevision:1},record:{pollRunId:randomUUID()}})});
+  assert.equal(done.status,'SUCCESS');
+  assert.equal(done.completedAtKst,'2026-09-23T17:30:38.000+09:00');
+  const second=await f.plan('2026-09-23T18:00:09+09:00',{policy:fixedPolicy});
+  assert.equal(second.plannedAtKst,'2026-09-23T18:00:00+09:00');
+  let calls=0;
+  const result=await f.run(second,{policy:fixedPolicy,currentTime:'2026-09-23T18:00:09+09:00',
+    testClock:()=> '2026-09-23T18:00:09+09:00',approvalId:randomUUID(),
+    testRunner:async()=>{calls++;return {archive:{archiveRevision:2},
+      record:{pollRunId:randomUUID()}};}});
+  assert.equal(result.status,'SUCCESS');
+  assert.equal(result.executionStatus,'COMPLETED');
+  assert.equal(calls,1);
+  assert.equal((await f.run(second,{policy:fixedPolicy,
+    currentTime:'2026-09-23T18:00:10+09:00'})).status,'SKIPPED_DUPLICATE_SLOT');
+  assert.equal((await f.plan('2026-09-23T18:30:00+09:00',
+    {policy:fixedPolicy})).status,'SKIPPED_OUTSIDE_WINDOW');
+});
+
+test('an unprocessed fixed slot cannot be caught up after its minute',async t=>{
+  const f=await fixture(t),planned=await f.plan('2026-09-23T18:00:00+09:00');
+  let approvals=0,requests=0;
+  const late=await f.run(planned,{currentTime:'2026-09-23T18:01:00+09:00',
+    prepareApproval:async()=>{approvals++;return {approvalId:randomUUID()};},
+    testRunner:async()=>{requests++;}});
+  assert.equal(late.status,'SKIPPED_MISSED_SLOT');
+  assert.equal(late.pollExecuted,false);
+  assert.equal(approvals,0);assert.equal(requests,0);
+  assert.equal((await fs.readdir(f.root)).includes('slots'),false);
 });
 
 test('different slots for the same symbol cannot run concurrently, including after restart',async t=>{
@@ -151,15 +202,21 @@ test('different slots for the same symbol cannot run concurrently, including aft
     enter();await pending;return {archive:{archiveRevision:1},record:{pollRunId:randomUUID()}};
   }});
   await entered;
-  const second=await f.plan('2026-09-23T10:15:00+09:00');
+  const second=await f.plan('2026-09-23T10:10:09+09:00');
   let secondCalls=0;
-  const blocked=await f.run(second,{currentTime:'2026-09-23T10:15:00+09:00',
+  const blocked=await f.run(second,{currentTime:'2026-09-23T10:10:09+09:00',
     approvalId:randomUUID(),testRunner:async()=>{secondCalls++;}});
-  assert.equal(blocked.status,'SKIPPED_SYMBOL_BUSY');assert.equal(secondCalls,0);
+  assert.equal(blocked.status,'SKIPPED_OVERLAP');assert.equal(secondCalls,0);
+  assert.equal(blocked.executionStatus,'NOT_STARTED');
+  const overlapRecord=JSON.parse(await fs.readFile(path.join(f.slotDirectory,symbol,
+    second.slotKey+'.result.json'),'utf8'));
+  assert.equal(overlapRecord.status,'SKIPPED_OVERLAP');
   const restarted=createSchedulerSlotStore({testOnly:true,testDirectory:f.slotDirectory});
   assert.equal(await restarted.acquire(symbol),null);
   finish();assert.equal((await running).status,'SUCCESS');
   const unlocked=await restarted.acquire(symbol);assert.ok(unlocked);await restarted.release(unlocked);
+  assert.equal((await f.run(second,{currentTime:'2026-09-23T10:10:20+09:00'})).status,
+    'SKIPPED_DUPLICATE_SLOT');
 });
 
 test('official session override wins, and a UI-like read cannot run the scheduler',async t=>{
