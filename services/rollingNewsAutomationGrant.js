@@ -13,7 +13,11 @@ const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}
 const kst=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?\+09:00$/.test(v)&&Number.isFinite(Date.parse(v));
 const nowKst=()=>new Date(Date.now()+9*3600000).toISOString().replace('Z','+09:00');
 const personal=env=>resolveExecutionMode(env?.KSTOCK_EXECUTION_MODE,env?.NODE_ENV).mode==='personal-local';
-const fingerprint=policy=>createHash('sha256').update(JSON.stringify(policyFor(policy))).digest('hex');
+// The runtime enable switch is separate from the approved schedule shape.
+const fingerprint=policy=>{
+  const {enabled,...schedule}=policyFor(policy);
+  return createHash('sha256').update(JSON.stringify(schedule)).digest('hex');
+};
 function conditions(value){
   const keys=['scope','mode','enabled','allowedSymbols','schedulePolicyRevision','schedulePolicyFingerprint',
     'validFromKst','expiresAtKst','maxPollsPerKstDay','maxRequestsPerKstDay'];
