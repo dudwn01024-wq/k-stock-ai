@@ -12,7 +12,7 @@ const {planRollingNewsPoll,createRollingNewsPollRunner}=require('./rollingNewsPo
 const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler');
-const DEFAULT_POLICY=Object.freeze({enabled:false,timezone:'Asia/Seoul',
+const DEFAULT_POLICY=Object.freeze({enabled:false,revision:'1',timezone:'Asia/Seoul',
   regularSession:Object.freeze({start:'09:00',end:'15:30',intervalMinutes:10}),
   afterClose:Object.freeze({enabled:true,until:'18:00',intervalMinutes:30}),
   outsideWindow:Object.freeze({enabled:false}),trackedSymbols:Object.freeze([])});
@@ -34,6 +34,7 @@ function policyFor(value={}){
   const outsideWindow={...DEFAULT_POLICY.outsideWindow,...value.outsideWindow};
   const trackedSymbols=value.trackedSymbols??DEFAULT_POLICY.trackedSymbols;
   if(value.timezone!==undefined&&value.timezone!=='Asia/Seoul'||
+    value.revision!==undefined&&(typeof value.revision!=='string'||!/^[A-Za-z0-9._-]{1,64}$/.test(value.revision))||
     !clock(regularSession.start)||!clock(regularSession.end)||minutes(regularSession.start)>=minutes(regularSession.end)||
     !Number.isInteger(regularSession.intervalMinutes)||regularSession.intervalMinutes<1||regularSession.intervalMinutes>60||
     !clock(afterClose.until)||!Number.isInteger(afterClose.intervalMinutes)||afterClose.intervalMinutes<1||afterClose.intervalMinutes>120||
@@ -41,7 +42,8 @@ function policyFor(value={}){
     trackedSymbols.some(item=>!stockNameFor(item?.symbol)||item.query!==stockNameFor(item.symbol)||typeof item.enabled!=='boolean')||
     new Set(trackedSymbols.map(item=>item.symbol)).size!==trackedSymbols.length)
     throw Error('NEWS_SCHEDULER_POLICY_INVALID');
-  return Object.freeze({enabled:value.enabled===true,timezone:'Asia/Seoul',
+  return Object.freeze({enabled:value.enabled===true,revision:value.revision??DEFAULT_POLICY.revision,
+    timezone:'Asia/Seoul',
     regularSession:Object.freeze(regularSession),afterClose:Object.freeze(afterClose),
     outsideWindow:Object.freeze(outsideWindow),trackedSymbols:Object.freeze(trackedSymbols.map(item=>Object.freeze({...item})))});
 }
@@ -166,18 +168,24 @@ function createSchedulerSlotStore({testOnly=false,testDirectory}={}){
 }
 
 async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,calendarEvidenceRef,calendar,
-  environment=process.env,testOnly=false,testDirectory,slotDirectory,testRunner,testClock}={}){
+  environment=process.env,testOnly=false,testDirectory,slotDirectory,testRunner,testClock,
+  prepareApproval}={}){
   if(!approvedMode(environment))throw Error('NEWS_SCHEDULER_PERSONAL_LOCAL_REQUIRED');
   if(!testOnly&&(currentTime!==undefined||calendar!==undefined||testDirectory!==undefined||slotDirectory!==undefined))
     throw Error('NEWS_SCHEDULER_TEST_INPUT_FORBIDDEN');
   if(testRunner!==undefined&&(!testOnly||typeof testRunner!=='function'))throw Error('NEWS_SCHEDULER_TEST_RUNNER_INVALID');
   if(testClock!==undefined&&(!testOnly||typeof testClock!=='function'))throw Error('NEWS_SCHEDULER_TEST_CLOCK_INVALID');
+  if(prepareApproval!==undefined&&(typeof prepareApproval!=='function'||approvalId!==undefined))
+    throw Error('NEWS_SCHEDULER_APPROVAL_SOURCE_INVALID');
   const evaluatedAt=testOnly?currentTime:new Date().toISOString();
   if(!plan?.executable||plan.status!=='PLANNED'||!instant(evaluatedAt))
     return {status:'SKIPPED_DISABLED',reason:'PLAN_NOT_EXECUTABLE'};
   const fresh=await planRollingNewsSchedule({symbol:plan.symbol,currentTime:testOnly?evaluatedAt:undefined,calendarEvidenceRef,calendar,
     policy,testOnly,testDirectory});
-  if(!fresh.executable||fresh.slotKey!==plan.slotKey||fresh.archiveId!==plan.archiveId||
+  if(!fresh.executable||fresh.slotKey!==plan.slotKey||fresh.phase!==plan.phase||
+    fresh.plannedAtKst!==plan.plannedAtKst||fresh.sessionBasis!==plan.sessionBasis||
+    fresh.sessionSourceUrl!==plan.sessionSourceUrl||fresh.calendarOpen!==plan.calendarOpen||
+    fresh.calendarClose!==plan.calendarClose||fresh.archiveId!==plan.archiveId||
     fresh.archiveRevision!==plan.archiveRevision||!isDeepStrictEqual(fresh.expectedWatermark,plan.expectedWatermark)||
     !isDeepStrictEqual(fresh.pollPlan.execution,plan.pollPlan?.execution))
     return {status:'ARCHIVE_STATE_CHANGED',reason:'PLAN_STALE',pollExecuted:false};
@@ -193,8 +201,17 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
     const lease=await store.reserve(plan);
     if(!lease)return {status:'SKIPPED_DUPLICATE_SLOT',reason:'SLOT_ALREADY_RESERVED',pollExecuted:false};
     const completedAt=()=>kst(testClock?.()??new Date().toISOString());
-    if(!uuid(approvalId)){
-      const record={status:'SKIPPED_APPROVAL_REQUIRED',reason:'SCHEDULED_BUT_APPROVAL_REQUIRED',
+    let prepared=null;
+    try{prepared=prepareApproval?await prepareApproval({plan:plan.pollPlan,slotKey:plan.slotKey}):null;}
+    catch{
+      const record={status:'FAILED',reason:'APPROVAL_PREPARATION_FAILED',startedAtKst:null,
+        completedAtKst:completedAt(),archiveRevisionAfter:plan.archiveRevision,pollRunId:null};
+      await store.complete(lease,record);return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:false};
+    }
+    const selectedApprovalId=prepared?.approvalId??approvalId;
+    if(!uuid(selectedApprovalId)){
+      const record={status:prepared?.status??'SKIPPED_APPROVAL_REQUIRED',
+        reason:prepared?.reason??'SCHEDULED_BUT_APPROVAL_REQUIRED',
         startedAtKst:null,completedAtKst:completedAt(),archiveRevisionAfter:plan.archiveRevision,pollRunId:null};
       await store.complete(lease,record);return {...record,schedulerRunId:lease.schedulerRunId,pollExecuted:false};
     }
@@ -202,8 +219,8 @@ async function runScheduledRollingPoll({plan,approvalId,policy={},currentTime,ca
     await store.markRunning(lease,startedAtKst);
     try{
       // The existing runner consumes the supplied approval and enforces the HTTP budget.
-      const result=testOnly?await testRunner({plan:plan.pollPlan,approvalId}):
-        await createRollingNewsPollRunner({plan:plan.pollPlan,approvalId,environment}).observe();
+      const result=testOnly?await testRunner({plan:plan.pollPlan,approvalId:selectedApprovalId}):
+        await createRollingNewsPollRunner({plan:plan.pollPlan,approvalId:selectedApprovalId,environment}).observe();
       const record={status:'SUCCESS',reason:null,startedAtKst,completedAtKst:completedAt(),
         archiveRevisionAfter:result.archive.archiveRevision,pollRunId:result.record.pollRunId};
       await store.complete(lease,record);
