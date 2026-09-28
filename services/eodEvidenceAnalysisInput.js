@@ -207,7 +207,10 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       preparedRecord:prepared,eodInputs,calendarEvidence,
       newsBundle:bundle,newsBundleArticles:bundleArticles};
   }
-  return {build,loadCalendar};
+  return {build,loadCalendar,loadEvidence:(ref,type)=>{
+    if(!['daily','investor'].includes(type))throw Error('EOD_EVIDENCE_TYPE_INVALID');
+    return load(ref,type);
+  }};
 }
 
 // Pure reuse of the existing EOD evaluator. No provider, credential or network dependency.
