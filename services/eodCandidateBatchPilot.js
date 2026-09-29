@@ -4,6 +4,7 @@
 const {randomUUID}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {extractEodCandidateFacts}=require('./eodCandidateFacts');
+const {extractDailyCandidateFacts}=require('./eodDailyCandidateFacts');
 const {selectEodCandidates,POLICY_VERSION}=require('./eodCandidateSelectionV1');
 const {TRACKING_REASONS}=require('./newsArchiveLifecycle');
 
@@ -15,16 +16,31 @@ const validRef=value=>typeof value==='string'&&value.length>0;
 const kstNow=()=>new Date(Date.now()+9*3600000).toISOString().replace('Z','+09:00');
 const uniqueSymbols=items=>new Set(items.map(item=>item?.symbol)).size===items.length;
 
-function buildCandidateBatch({targetDate,candidates,analysisResults,createdAtKst=kstNow()}={}){
+function buildCandidateBatch({targetDate,candidates,analysisResults=[],dailyRecords=[],
+  createdAtKst=kstNow()}={}){
   if(!validDate(targetDate)||!Array.isArray(candidates)||!Array.isArray(analysisResults)||
-    candidates.length!==analysisResults.length||!uniqueSymbols(candidates)||
-    new Set(analysisResults.map(item=>item?.analysisRunId)).size!==analysisResults.length)
+    !Array.isArray(dailyRecords)||candidates.length!==analysisResults.length+dailyRecords.length||
+    !uniqueSymbols(candidates)||
+    new Set(analysisResults.map(item=>item?.analysisRunId)).size!==analysisResults.length||
+    new Set(dailyRecords.map(item=>item?.id)).size!==dailyRecords.length)
     throw Error('EOD_CANDIDATE_BATCH_INPUT_INVALID');
   const records=new Map(analysisResults.map(result=>[result?.analysisRunId,result]));
+  const dailyByRef=new Map(dailyRecords.map(record=>[record?.id,record]));
   for(const facts of candidates){
-    if(!validSymbol(facts?.symbol)||facts.targetDate!==targetDate||
-      !validRef(facts.analysisRunId)||!facts.evidenceRefs||
-      !validRef(facts.evidenceRefs.calendar)||!validRef(facts.evidenceRefs.daily)||
+    if(!validSymbol(facts?.symbol)||facts.targetDate!==targetDate||!facts.evidenceRefs||
+      !validRef(facts.evidenceRefs.daily))
+      throw Error('EOD_CANDIDATE_PROVENANCE_INVALID');
+    if(facts.sourceType==='DAILY_EVIDENCE_TECHNICAL'){
+      const source=dailyByRef.get(facts.dailyEvidenceRef);
+      if(!source||facts.evidenceRefs.daily!==facts.dailyEvidenceRef)
+        throw Error('EOD_CANDIDATE_PROVENANCE_INVALID');
+      let extracted;
+      try{extracted=extractDailyCandidateFacts(source);}
+      catch{throw Error('EOD_CANDIDATE_ANALYSIS_MISMATCH');}
+      if(!isDeepStrictEqual(extracted,facts))throw Error('EOD_CANDIDATE_ANALYSIS_MISMATCH');
+      continue;
+    }
+    if(!validRef(facts.analysisRunId)||!validRef(facts.evidenceRefs.calendar)||
       !validRef(facts.evidenceRefs.investor))
       throw Error('EOD_CANDIDATE_PROVENANCE_INVALID');
     const source=records.get(facts.analysisRunId);
@@ -144,14 +160,29 @@ function buildCandidatePilotExecutionPlan({targetDate,symbols,inventory=[]}={}){
     const missingAnalysis=!extracted||extracted.symbol!==symbol||
       extracted.targetDate!==targetDate||
       (item.analysisRunId!==undefined&&item.analysisRunId!==extracted.analysisRunId);
-    const existingFactsReady=!missingAnalysis&&
-      isDeepStrictEqual(extracted,item.candidateFacts);
+    let dailyFacts=null;
+    try{dailyFacts=extractDailyCandidateFacts(item.dailyRecord);}
+    catch{/* A missing or invalid stored daily record cannot establish candidate facts. */}
+    const existingFactsReady=(!missingAnalysis&&
+      isDeepStrictEqual(extracted,item.candidateFacts))||
+      !!dailyFacts&&dailyFacts.symbol===symbol&&dailyFacts.targetDate===targetDate&&
+      dailyFacts.dailyEvidenceRef===item.dailyEvidenceRef&&
+      dailyFacts.candidateFactsReady===true&&
+      isDeepStrictEqual(dailyFacts,item.candidateFacts);
+    let candidateFactsReady=false;
+    if(existingFactsReady){
+      try{candidateFactsReady=selectEodCandidates([item.candidateFacts]).eligibleSymbols===1;}
+      catch{/* Source provenance alone cannot make incomplete technical facts eligible. */}
+    }
     return {symbol,targetDate,existingFactsReady,missingDaily,missingInvestor,
-      missingAnalysis,missingCandidateFacts:!existingFactsReady,
-      externalApprovalsRequired:[...(missingDaily?['kis-daily-only']:[]),
-        ...(missingInvestor?['kis-investor-daily-only']:[])]};
+      missingAnalysis,missingCandidateFacts:!candidateFactsReady,
+      candidateFactsReady,
+      requiredApprovalsForCandidateRanking:candidateFactsReady?[]:['kis-daily-only'],
+      optionalContextApprovals:missingInvestor?['kis-investor-daily-only']:[],
+      externalApprovalsRequired:candidateFactsReady?[]:['kis-daily-only']};
   });
-  return {status:'DRY_RUN',targetDate,symbolCount:entries.length,symbols:entries,
+  return {status:'DRY_RUN',purpose:'CANDIDATE_V1_RANKING',targetDate,
+    symbolCount:entries.length,symbols:entries,
     evidenceInventoryVerification:'CALLER_SUPPLIED_REFS_NOT_LOADED',
     approvalCreatedCount:0,externalCallCount:0,analysisRunCount:0,
     executable:false};

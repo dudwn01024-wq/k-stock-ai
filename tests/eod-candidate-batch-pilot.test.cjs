@@ -162,7 +162,8 @@ test('small-symbol execution plan lists missing evidence and scopes without appr
   assert.equal(plan.evidenceInventoryVerification,'CALLER_SUPPLIED_REFS_NOT_LOADED');
   assert.equal(plan.executable,false);
   assert.deepEqual(plan.symbols[1].externalApprovalsRequired,['kis-daily-only']);
-  assert.deepEqual(plan.symbols[2].externalApprovalsRequired,['kis-investor-daily-only']);
+  assert.deepEqual(plan.symbols[2].externalApprovalsRequired,['kis-daily-only']);
+  assert.deepEqual(plan.symbols[2].optionalContextApprovals,['kis-investor-daily-only']);
   assert.ok(plan.symbols[1].missingAnalysis);
   assert.deepEqual([plan.approvalCreatedCount,plan.externalCallCount,plan.analysisRunCount],[0,0,0]);
   const unverified=buildCandidatePilotExecutionPlan({targetDate,symbols:['000001'],

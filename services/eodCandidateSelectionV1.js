@@ -2,6 +2,7 @@
 
 // This ranks additional review work. It does not evaluate an entry, exit, or order.
 const {ANALYSIS_MODE}=require('./eodDescriptiveV1Contract');
+const {DAILY_CANDIDATE_MODE}=require('./eodDailyCandidateFactsContract');
 const POLICY_VERSION='EOD_CANDIDATE_SELECTION_V1';
 const POLICY=Object.freeze({
   trendMax:40,momentumMax:30,volumeMax:20,patternMax:10,
@@ -25,7 +26,9 @@ function requiredMissing(f){
   const d=f.daily??{},t=f.technical??{},ma=t.movingAverages??{},macd=t.macd??{};
   const checks=[
     ['symbol',/^\d{6}$/.test(f.symbol??'')],['targetDate',validDate(f.targetDate)],
-    ['descriptiveAnalysisReady',f.descriptiveAnalysisReady===true],
+    [f.analysisMode===DAILY_CANDIDATE_MODE?'candidateFactsReady':'descriptiveAnalysisReady',
+      f.analysisMode===DAILY_CANDIDATE_MODE?f.candidateFactsReady===true:
+        f.descriptiveAnalysisReady===true],
     ['daily.close',finite(d.close)&&d.close>0],
     ['daily.volume',finite(d.volume)&&d.volume>=0],
     ['daily.averageVolume20',finite(d.averageVolume20)&&d.averageVolume20>0],
@@ -84,7 +87,9 @@ function scoreFacts(f){
 }
 
 function selectOne(f){
-  if(!f||f.schemaVersion!=='EOD_CANDIDATE_FACTS_V1'||f.analysisMode!==ANALYSIS_MODE)
+  if(!f||f.schemaVersion!=='EOD_CANDIDATE_FACTS_V1'||
+    !(f.analysisMode===ANALYSIS_MODE||
+      f.analysisMode===DAILY_CANDIDATE_MODE&&f.sourceType==='DAILY_EVIDENCE_TECHNICAL'))
     throw Error('EOD_CANDIDATE_FACTS_CONTRACT_INVALID');
   const factsMissing=requiredMissing(f);
   const eligible=factsMissing.length===0;
@@ -104,6 +109,12 @@ function selectOne(f){
     'MEDIUM_REVIEW_PRIORITY':'LOW_REVIEW_PRIORITY';
   return {symbol:f.symbol??null,targetDate:f.targetDate??null,
     analysisRunId:f.analysisRunId??null,
+    sourceType:f.sourceType??'FULL_EOD_ANALYSIS',
+    dailyEvidenceRef:f.dailyEvidenceRef??f.evidenceRefs?.daily??null,
+    derivedCalculatorVersion:f.derivedCalculatorVersion??null,
+    testData:f.testData===true,
+    candidateFactsReady:f.analysisMode===DAILY_CANDIDATE_MODE?
+      f.candidateFactsReady===true:f.descriptiveAnalysisReady===true,
     candidateSelectionStatus:eligible?'ELIGIBLE':'NOT_ELIGIBLE',reviewPriority,
     analysisPriorityScore:score,components:scored?.components??null,
     derived:{volumeRatio:scored?.volumeRatio??null},
@@ -121,6 +132,7 @@ function selectOne(f){
       investorFlow:structuredClone(f.investorFlow??null),
       news:structuredClone(f.news??null),
       evidenceRefs:structuredClone(f.evidenceRefs??null),
+      valueOrigins:structuredClone(f.valueOrigins??null),
       newsEvidenceBundleId:f.newsEvidenceBundleId??null},
     descriptiveAnalysisReady:f.descriptiveAnalysisReady===true,
     strictStrategyReady:false,tradeEvidenceReady:false,riskReady:false,

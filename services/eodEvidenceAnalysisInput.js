@@ -306,4 +306,4 @@ function analyzeEodFromPreparedInput(input,{evaluatedAt}={}){
     tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
 }
 module.exports={createEodEvidenceAnalysisInput,analyzeEodFromPreparedInput,
-  admitRealStoredEvidence};
+  admitRealStoredEvidence,rawTarget};
