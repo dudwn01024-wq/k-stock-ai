@@ -285,8 +285,10 @@ test('immutable collection evidence links only selected observed articles to one
     assert.equal(result.analysis.newsEvidenceBundleId,bundle.bundleId);
     assert.deepEqual(result.analysis.newsUsedArticleIds,collection.observedArticleIds);
     assert.equal(result.analysis.newsArticleCount,5);
-    assert.equal(result.analysis.news.reason,'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');
-    assert.equal(result.analysis.news.status,'NOT_READY');
+    assert.equal(result.analysis.news.reason,null);
+    assert.equal(result.analysis.news.status,'READY_WITH_WARNINGS');
+    assert.equal(result.analysis.newsEvaluatedArticleCount,5);
+    assert.ok(!result.analysis.strictStrategyBlockers.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
     assert.equal(result.analysis.newsCoverageStatus,'ARCHIVE_WINDOW_INCOMPLETE');
     assert.equal(result.analysis.calendar.status,'VERIFIED');
     assert.equal(result.analysis.technical.status,'READY_WITH_WARNINGS');

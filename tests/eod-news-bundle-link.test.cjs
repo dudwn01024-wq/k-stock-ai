@@ -108,6 +108,10 @@ test('bundle-only EOD input consumes exactly five selected archive articles and 
   assert.ok(input.reasons.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
   const plan=await f.adapter.plan(f.refs);
   assert.equal(plan.executable,true);assert.equal(plan.newsArticleCount,5);
+  assert.equal(plan.newsEvaluatedArticleCount,5);
+  assert.equal(plan.newsStatus,'READY_WITH_WARNINGS');
+  assert.ok(!plan.blockers.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
+  assert.ok(plan.blockers.length>0);
   const result=await f.adapter.run(f.refs);
   assert.equal(result.newsEvidenceBundleId,f.bundle.bundleId);
   assert.equal(result.newsCollectionEvidenceRef,f.refs.newsCollectionEvidenceRef);
@@ -115,11 +119,19 @@ test('bundle-only EOD input consumes exactly five selected archive articles and 
   assert.equal(result.newsArticleCount,5);assert.equal(result.news.usedArticleCount,5);
   assert.equal(result.newsArticleTimeRange.oldestPubDate,
     f.bundle.articleRefs.map(ref=>ref.parsedPubDate).sort()[0]);
-  assert.equal(result.news.evaluatedArticleCount,0);
-  assert.equal(result.news.reason,'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');
+  assert.equal(result.news.evaluatedArticleCount,5);
+  assert.equal(result.newsEvaluatedArticleCount,5);
+  assert.equal(result.evaluatedNewsArticleCount,5);
+  assert.equal(result.newsEvaluatorVersion,'NEWS_CUE_RULES_V1');
+  assert.equal(result.noClearCueCount,5);
+  assert.equal(result.categoryCounts.OTHER_UNCLASSIFIED,5);
+  assert.equal(result.news.reason,null);
+  assert.deepEqual(result.evaluatedArticleIds,f.bundle.articleRefs.map(ref=>ref.articleId));
+  assert.ok(!result.strictStrategyBlockers.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
   assert.equal(result.newsCoverageStatus,'UNVERIFIED');
   assert.equal(result.newsContinuityStatus,'UNVERIFIED');
   assert.equal(result.fullCoverageProven,false);
+  assert.ok(result.descriptiveWarnings.includes('NEWS_BUNDLE_COVERAGE_UNVERIFIED'));
   assert.equal(result.strictStrategyReady,false);
   assert.equal(result.strictStrategyVerdict,'HELD');
   assert.equal(result.tradeEvidenceReady,false);assert.equal(result.riskReady,false);

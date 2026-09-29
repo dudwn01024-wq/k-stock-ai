@@ -7,6 +7,7 @@ const {sanitizeEvidence}=require('./observationEvidence');
 const {reviewSearchNewsRecord,parsePubDate}=require('./observationSearchNews');
 const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
 const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
+const {evaluateNewsBundle}=require('./deterministicNewsEvaluator');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/live-once');
 const REPLAY_ROOT=path.resolve(__dirname,'../.local/strategy-observations/revalidations');
@@ -76,7 +77,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     }catch{throw Error('EOD_CALENDAR_RECORD_INVALID');}
   }
   async function build({runId,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,newsEvidenceRef,
-    newsCollectionEvidenceRef,newsEvidenceBundleId,calendarEvidenceRef}={}){
+    newsCollectionEvidenceRef,newsEvidenceBundleId,calendarEvidenceRef,newsEvaluationAtKst}={}){
     const bundleMode=newsEvidenceBundleId!==undefined&&newsEvidenceBundleId!==null;
     const refs={daily:dailyEvidenceRef,investor:investorEvidenceRef,
       ...(!bundleMode?{news:newsEvidenceRef}:{})};
@@ -143,7 +144,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       values?.stck_bsop_date===targetDate.replaceAll('-','')&&supplyFields.every(key=>number(values[key])!==null)&&
       !!rawTarget(investorEvidence,'kisInvestor',symbol,targetDate,supplyFields.map(key=>[key,values[key]]));
     if(!investorReady)reasons.push('INVESTOR_REQUIRED_FIELDS_MISSING');
-    let newsReview=null,newsConsistent=false,newsReady=false;
+    let newsReview=null,newsConsistent=false,newsReady=false,newsEvaluation=null;
     if(!bundleMode){
       try{if(Array.isArray(news.pages)&&news.pages.every(page=>Array.isArray(page.items)&&
         page.items.every(item=>JSON.stringify(item.pubDateParsed??null)===JSON.stringify(parsePubDate(item.pubDateRaw)))))
@@ -158,6 +159,10 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       newsReady=newsConsistent&&news.review.strategyNewsStatus==='USABLE'&&
         news.review.collectionStatus==='COMPLETE'&&news.review.fullCoverageProven===true;
       if(!newsReady)reasons.push(newsConsistent?'NEWS_COVERAGE_OR_MEANING_UNVERIFIED':'NEWS_RECORD_REVIEW_INVALID');
+    }else if(newsEvaluationAtKst){
+      try{newsEvaluation=evaluateNewsBundle({bundle,articles:bundleArticles,
+        evaluatedAtKst:newsEvaluationAtKst});}
+      catch{reasons.push('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');}
     }else reasons.push('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE');
     if(supply?.strategyUse?.status!=='USABLE')reasons.push('SUPPLY_FINALITY_UNVERIFIED');
     const raw={daily:{targetOHLCV:daily.targetOHLCV??null,evidence:dailyEvidence},
@@ -207,7 +212,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,newsReady:!!newsReady,
       inputReady:reasons.length===0,reasons:[...new Set(reasons)],raw,normalized,derived:{daily:derived},
       preparedRecord:prepared,eodInputs,calendarEvidence,
-      newsBundle:bundle,newsBundleArticles:bundleArticles};
+      newsBundle:bundle,newsBundleArticles:bundleArticles,newsEvaluation};
   }
   return {build,loadCalendar,loadEvidence:(ref,type)=>{
     if(!['daily','investor'].includes(type))throw Error('EOD_EVIDENCE_TYPE_INVALID');

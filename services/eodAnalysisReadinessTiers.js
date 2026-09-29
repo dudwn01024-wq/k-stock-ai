@@ -27,12 +27,18 @@ function tierResult(input,audit,strictReview=null){
   }).length:0;
   const newsEvidenceValid=fact(audit,'news','symbolAndQuery')&&fact(audit,'news','pubDateParse')&&
     !input.reasons?.includes('NEWS_RECORD_REVIEW_INVALID');
-  const newsReady=!bundleMode&&calendarReady&&newsEvidenceValid&&candidateCount>0;
+  const evaluation=input.newsEvaluation;
+  const evaluationReady=bundleMode&&evaluation?.status==='EVALUATED'&&
+    evaluation.evaluatedArticleCount===candidateCount&&
+    JSON.stringify(evaluation.evaluatedArticleIds)===
+      JSON.stringify(articles.map(article=>article.articleId));
+  const newsReady=calendarReady&&newsEvidenceValid&&candidateCount>0&&
+    (bundleMode?evaluationReady:true);
   const coverageStatus=bundleMode?input.newsBundle?.coverageStatus??'UNVERIFIED':
     input.normalized?.news?.collectionStatus==='INCOMPLETE'?'INCOMPLETE':
     newsReady?'BOUNDED':'UNVERIFIED';
   const strictStrategyBlockers=unique([...audit.blockers.map(blocker=>blocker.replace('.', '_').replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase()),
-    ...(bundleMode?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE']:[])]);
+    ...(bundleMode&&!evaluationReady?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE']:[])]);
   const descriptiveWarnings=unique([
     ...(!calendarReady?['CALENDAR_DATE_UNVERIFIED']:[]),
     ...(!technicalReady?['DAILY_TECHNICAL_INPUT_UNAVAILABLE']:[]),
@@ -41,7 +47,7 @@ function tierResult(input,audit,strictReview=null){
     ...(!investorReady?['INVESTOR_FACTS_UNAVAILABLE']:[]),
     ...(investorReady&&!fact(audit,'investor','finality')?['INVESTOR_FINALITY_UNKNOWN']:[]),
     ...(investorReady&&!fact(audit,'investor','sessionScope')?['INVESTOR_SESSION_SCOPE_UNKNOWN']:[]),
-    ...(bundleMode?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE',
+    ...(bundleMode?[...(!evaluationReady?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE']:[]),
       ...(coverageStatus!=='ARCHIVE_WINDOW_READY'?['NEWS_BUNDLE_COVERAGE_UNVERIFIED']:[])]:
       !newsReady?['NEWS_NOT_USED']:[]),
     ...(newsReady&&!fact(audit,'news','publicationTimeMeaning')?['NEWS_TIME_MEANING_UNVERIFIED']:[]),
@@ -71,12 +77,20 @@ function tierResult(input,audit,strictReview=null){
       }:null,finality:'UNKNOWN',sessionScope:'UNKNOWN',unitScale:'UNKNOWN'},
     news:{status:newsReady?'READY_WITH_WARNINGS':'NOT_READY',newsAnalysisReady:newsReady,
       candidateCount,coverageStatus,
+      evaluatedArticleCount:evaluationReady?evaluation.evaluatedArticleCount:0,
+      evaluatorVersion:evaluationReady?evaluation.evaluatorVersion:null,
+      evaluatedArticleIds:evaluationReady?[...evaluation.evaluatedArticleIds]:[],
+      cueCounts:evaluationReady?Object.fromEntries(['positiveCueCount','negativeCueCount',
+        'cautionCueCount','mixedCueCount','noClearCueCount','unclassifiedCount']
+        .map(key=>[key,evaluation[key]])):null,
+      categoryCounts:evaluationReady?{...evaluation.categoryCounts}:null,
       continuityStatus:bundleMode?input.newsBundle?.continuityStatus??'UNVERIFIED':null,
       continuityProven:bundleMode?input.newsBundle?.continuityProven===true:false,
       usedArticleIds:bundleMode?articles.map(article=>article.articleId):[],
       articleTimeRange:bundleMode&&articleTimes.length?{
         oldestPubDate:articleTimes[0],newestPubDate:articleTimes.at(-1)}:null,
-      reason:bundleMode?'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE':null,
+      reason:bundleMode&&!evaluationReady?'NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE':
+        bundleMode&&candidateCount===0?'NO_BUNDLE_ARTICLES':null,
       fullCoverageProven:false,
       timeMeaning:'TIME_PROVIDED_TO_NAVER_NOT_PUBLICATION_PROOF'},
     descriptiveAnalysisReady:calendarReady&&technicalReady,
@@ -88,10 +102,16 @@ function tierResult(input,audit,strictReview=null){
   };
 }
 
-function createEodAnalysisReadinessTiers({testOnly=false,testDirectory}={}){
+function createEodAnalysisReadinessTiers({testOnly=false,testDirectory,
+  clock=()=>new Date().toISOString()}={}){
+  if(typeof clock!=='function')throw Error('EOD_NEWS_EVALUATION_CLOCK_INVALID');
   const reader=createEodEvidenceAnalysisInput({testOnly,testDirectory});
   return {async evaluate(refs){
-    const input=await reader.build(refs);
+    const at=clock();
+    if(typeof at!=='string'||!Number.isFinite(Date.parse(at)))
+      throw Error('EOD_NEWS_EVALUATION_TIME_INVALID');
+    const newsEvaluationAtKst=new Date(Date.parse(at)+9*3600000).toISOString().replace('Z','+09:00');
+    const input=await reader.build({...refs,newsEvaluationAtKst});
     const audit=evaluateEodEvidenceReadiness({input,
       holidayRecord:input.calendarEvidence?.holidayRecord??null,
       holidayReplay:input.calendarEvidence?.holidayReplay??null,testOnly});

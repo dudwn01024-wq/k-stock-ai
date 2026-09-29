@@ -15,7 +15,7 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
   if(!testOnly&&testDirectory!==undefined||testOnly&&!testDirectory||typeof clock!=='function')
     throw Error('EOD_ANALYSIS_OPTIONS_INVALID');
   const outputDirectory=testOnly?path.join(path.resolve(testDirectory),'analysis'):ROOT;
-  const readiness=createEodAnalysisReadinessTiers({testOnly,testDirectory});
+  const readiness=createEodAnalysisReadinessTiers({testOnly,testDirectory,clock});
   async function inspect(input){
     const tier=await readiness.evaluate(input);
     const identityValid=!tier.evidenceValidationReasons.some(reason=>VALIDATION_FAILURE.test(reason));
@@ -30,6 +30,11 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
         newsCollectionEvidenceRef:tier.newsCollectionEvidenceRef,
         newsEvidenceBundleId:tier.newsEvidenceBundleId,
         newsArticleCount:tier.news.usedArticleIds.length,
+        newsEvaluatedArticleCount:tier.news.evaluatedArticleCount,
+        newsEvaluatorVersion:tier.news.evaluatorVersion,
+        newsCueCounts:tier.news.cueCounts,
+        newsCategoryCounts:tier.news.categoryCounts,
+        evaluatedArticleIds:tier.news.evaluatedArticleIds,
         newsCoverageStatus:tier.news.coverageStatus,
         evidenceIdentityValid:identityValid,calendarStatus:tier.calendar.status,
         technicalStatus:tier.technical.status,investorStatus:tier.investorFlow.status,
@@ -54,6 +59,19 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
           newsCollectionEvidenceRef:tier.newsCollectionEvidenceRef,
           newsEvidenceBundleId:tier.newsEvidenceBundleId,
           newsArticleCount:tier.news.usedArticleIds.length,
+          newsEvaluatedArticleCount:tier.news.evaluatedArticleCount,
+          evaluatedNewsArticleCount:tier.news.evaluatedArticleCount,
+          newsEvaluatorVersion:tier.news.evaluatorVersion,
+          newsCueCounts:tier.news.cueCounts,
+          newsCategoryCounts:tier.news.categoryCounts,
+          positiveCueCount:tier.news.cueCounts?.positiveCueCount??null,
+          negativeCueCount:tier.news.cueCounts?.negativeCueCount??null,
+          cautionCueCount:tier.news.cueCounts?.cautionCueCount??null,
+          mixedCueCount:tier.news.cueCounts?.mixedCueCount??null,
+          noClearCueCount:tier.news.cueCounts?.noClearCueCount??null,
+          unclassifiedCount:tier.news.cueCounts?.unclassifiedCount??null,
+          categoryCounts:tier.news.categoryCounts,
+          evaluatedArticleIds:[...tier.news.evaluatedArticleIds],
           usedNewsArticleCount:tier.news.usedArticleIds.length,
           usedNewsArticleIds:[...tier.news.usedArticleIds],
           newsUsedArticleIds:[...tier.news.usedArticleIds],
@@ -67,7 +85,7 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
         news:{...tier.news,evidenceRef:tier.newsEvidenceBundleId??tier.evidenceRefs.news,
           usedArticleCount:tier.newsEvidenceBundleId?tier.news.usedArticleIds.length:
             tier.news.newsAnalysisReady?tier.news.candidateCount:0,
-          evaluatedArticleCount:tier.newsEvidenceBundleId?0:null,
+          evaluatedArticleCount:tier.newsEvidenceBundleId?tier.news.evaluatedArticleCount:null,
           reason:tier.news.reason??(tier.news.newsAnalysisReady?null:'TARGET_WINDOW_EVIDENCE_UNAVAILABLE')},
         analysisAdapterReady:true,descriptiveAnalysisReady:executable,strictStrategyVerdict:tier.strictStrategyVerdict,
         strictStrategyReady:tier.strictStrategyReady,tradeEvidenceReady:false,
