@@ -11,12 +11,13 @@ const {resolveExecutionMode}=require('./executionMode');
 const path=require('node:path');
 const {createKisReadOnlyTokenCache,issueKisLiveToken}=require('./kisReadOnlyTokenCache');
 
-function reviewInvestorEvidence(input,targetDate) {
+function reviewInvestorEvidence(input,targetDate,symbol='005930') {
   if(!isTargetDate(targetDate))throw Error('INVALID_TARGET_DATE');
+  if(!/^\d{6}$/.test(symbol))throw Error('INVALID_INVESTOR_INPUT');
   const evidence=sanitizeEvidence(input),rows=[],issues=[],target=targetDate.replaceAll('-','');
   for(const e of evidence?.exchanges??[]){
     if(e.kind!=='kisInvestor')continue;
-    if(e.request.symbol!=='005930'||e.request.params.FID_COND_MRKT_DIV_CODE!=='J'||e.request.params.FID_INPUT_DATE_1!==target)issues.push('INVESTOR_REQUEST_MISMATCH');
+    if(e.request.symbol!==symbol||e.request.params.FID_COND_MRKT_DIV_CODE!=='J'||e.request.params.FID_INPUT_DATE_1!==target)issues.push('INVESTOR_REQUEST_MISMATCH');
     const grouped=new Map();
     for(const f of e.response.fields){
       const base=f.path.slice(0,f.path.lastIndexOf('.')),key=f.path.split('.').at(-1);
@@ -46,9 +47,10 @@ function reviewInvestorEvidence(input,targetDate) {
 }
 function createInvestorProvider({credentials,budget,executionMode,tokenCache}){
   assertScope(SCOPE,executionMode);
-  const collector=createEvidenceCollector(scopeTransport(SCOPE,budget.fetch));let used=false;
+  const collector=createEvidenceCollector(scopeTransport(SCOPE,budget.fetch,budget.approvedSymbol??'005930'));let used=false;
   const provider=async(symbol,{targetBusinessDate}={})=>{
-    if(symbol!=='005930'||!isTargetDate(targetBusinessDate))throw Error('INVALID_INVESTOR_INPUT');
+    if(!/^\d{6}$/.test(symbol)||budget.approvedSymbol&&symbol!==budget.approvedSymbol||
+      !isTargetDate(targetBusinessDate))throw Error('INVALID_INVESTOR_INPUT');
     budget.assertApproval(executionFor(symbol,targetBusinessDate));
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
     budget.assertActive();
@@ -76,7 +78,7 @@ function createInvestorObservation({environment=process.env,credentialSource,app
   let used=false;
   return {async observe(symbol,{targetBusinessDate}={}){
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
-    if(symbol!=='005930'||!isTargetDate(targetBusinessDate))throw Error('INVALID_INVESTOR_INPUT');
+    if(!/^\d{6}$/.test(symbol)||!isTargetDate(targetBusinessDate))throw Error('INVALID_INVESTOR_INPUT');
     const credentials=selectObservationCredentials(environment,credentialSource);
     const store=createObservationApprovalStore({environment,testOnly,testDirectory:testApprovalDirectory});
     const lease=await store.consume(approvalId,executionFor(symbol,targetBusinessDate));let budget,resultId=null;

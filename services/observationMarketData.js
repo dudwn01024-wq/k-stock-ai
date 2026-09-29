@@ -21,13 +21,16 @@ function createMarketDataProvider({kisReader,budget,scope=FULL,executionMode,dai
   if(scope==='naver-search-news-only')throw Error('SEARCH_NEWS_PROVIDER_REQUIRED');
   const options=dailyRequestOptions(dailyOptions);
   // Capture only allowlisted data fields after the unchanged budget admits HTTP.
-  const evidence=createEvidenceCollector(scopeTransport(scope,budget.fetch));
+  const evidence=createEvidenceCollector(scopeTransport(scope,budget.fetch,budget.approvedSymbol??'005930'));
   const kis=kisReader.forkWithTransport(evidence.fetch,{waitImpl:budget.wait});
   const naver=scope===FULL?createNaverMarketData({fetchImpl:evidence.fetch,failFast:true}):null;
   let dailyUsed=false;
   const provider=async (symbol,{targetBusinessDate}={})=>{
     if(!isTargetDate(targetBusinessDate))throw Error('INVALID_TARGET_DATE');
-    if(symbol!=='005930')throw Error('SYMBOL_NOT_APPROVED');
+    if(scope===DAILY){
+      if(!/^\d{6}$/.test(symbol)||budget.approvedSymbol&&symbol!==budget.approvedSymbol)
+        throw Error('SYMBOL_NOT_APPROVED');
+    }else if(symbol!=='005930')throw Error('SYMBOL_NOT_APPROVED');
     if(scope===DAILY){
       budget.assertApproval(executionFor(symbol,targetBusinessDate,options));
       if(dailyUsed)throw Error('OBSERVATION_ALREADY_USED');
@@ -83,7 +86,8 @@ function createOneShotObservation({approved=false,testOnly=false,testTransport,t
   return {async observe(symbol,{targetBusinessDate}={}) {
     if(used)throw Error('OBSERVATION_ALREADY_USED');
     if(scope!==DAILY&&!testOnly&&approved!==true)throw Error('EXPLICIT_APPROVAL_REQUIRED');
-    if(symbol!=='005930')throw Error('SYMBOL_NOT_APPROVED');
+    if(scope===DAILY?!/^\d{6}$/.test(symbol):symbol!=='005930')
+      throw Error('SYMBOL_NOT_APPROVED');
     if(!isTargetDate(targetBusinessDate))throw Error('INVALID_TARGET_DATE');
     used=true;
     if(!['GENERIC','KIS_LIVE'].includes(credentialSource))throw Error('CREDENTIAL_SOURCE_INVALID');

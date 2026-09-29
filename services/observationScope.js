@@ -20,15 +20,17 @@ function dailyRequestOptions(options={}) {
   return Object.freeze(values);
 }
 // A narrower admission check, before the unchanged common budget/HTTP transport.
-function scopeTransport(scope,guardedFetch) {
+function scopeTransport(scope,guardedFetch,approvedSymbol='005930') {
   if(scope===FULL)return guardedFetch;
   if(scope!==DAILY&&scope!==INVESTOR&&scope!==NEWS&&scope!==HOLIDAY&&scope!==SEARCH_NEWS)throw Error('OBSERVATION_SCOPE_INVALID');
+  if((scope===DAILY||scope===INVESTOR)&&!/^\d{6}$/.test(approvedSymbol))
+    throw Error('OBSERVATION_SYMBOL_INVALID');
   const {classify,classifyInvestor,classifyNews,classifyHoliday,classifySearchNews}=require('./observationHttpBudget');
   let stopped=false;
   return async(value,options)=>{
     if(stopped)throw Error('OBSERVATION_SCOPE_STOPPED');
     try {
-      const kind=(scope===SEARCH_NEWS?classifySearchNews:scope===INVESTOR?classifyInvestor:scope===NEWS?classifyNews:scope===HOLIDAY?classifyHoliday:classify)(value,options);
+      const kind=(scope===SEARCH_NEWS?classifySearchNews:scope===INVESTOR?classifyInvestor:scope===NEWS?classifyNews:scope===HOLIDAY?classifyHoliday:classify)(value,options,approvedSymbol);
       if(!(scope===SEARCH_NEWS?['searchNews']:scope===HOLIDAY?['kisHoliday','kisToken']:scope===NEWS?['naverNews']:scope===INVESTOR?['kisInvestor','kisToken']:['kisDaily','kisToken']).includes(kind))throw Error('OBSERVATION_SCOPE_REQUEST_FORBIDDEN');
       return await guardedFetch(value,options);
     } catch {

@@ -7,8 +7,9 @@ const fixedQuery=(url,expected)=>{
   const keys=[...url.searchParams.keys()];
   return keys.length===Object.keys(expected).length&&new Set(keys).size===keys.length&&Object.entries(expected).every(([k,v])=>url.searchParams.get(k)===v);
 };
-function classify(value,options={}) {
+function classify(value,options={},approvedSymbol='005930') {
   const u=new URL(value),method=(options.method??'GET').toUpperCase();
+  if(!/^\d{6}$/.test(approvedSymbol))throw Error('REQUEST_NOT_ALLOWED');
   if(u.username||u.password||u.hash)throw Error('REQUEST_NOT_ALLOWED');
   if(u.origin==='https://openapi.koreainvestment.com:9443') {
     if(u.pathname==='/oauth2/tokenP'&&method==='POST'&&!u.search) {
@@ -20,7 +21,7 @@ function classify(value,options={}) {
     if(u.pathname==='/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice'&&method==='GET') {
       const q=Object.fromEntries(u.searchParams);
       if(/^\d{8}$/.test(q.FID_INPUT_DATE_1)&&/^\d{8}$/.test(q.FID_INPUT_DATE_2)&&q.FID_INPUT_DATE_1<=q.FID_INPUT_DATE_2&&
-        fixedQuery(u,{FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:'005930',FID_INPUT_DATE_1:q.FID_INPUT_DATE_1,FID_INPUT_DATE_2:q.FID_INPUT_DATE_2,FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'0'}))return 'kisDaily';
+        fixedQuery(u,{FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:approvedSymbol,FID_INPUT_DATE_1:q.FID_INPUT_DATE_1,FID_INPUT_DATE_2:q.FID_INPUT_DATE_2,FID_PERIOD_DIV_CODE:'D',FID_ORG_ADJ_PRC:'0'}))return 'kisDaily';
     }
   }
   if(method==='GET'&&u.origin==='https://m.stock.naver.com') {
@@ -33,13 +34,14 @@ function classify(value,options={}) {
 }
 // https.request has no redirect/retry loop. One fresh connection per dispatched request.
 // Separate admission table: the existing full/daily classifier never permits this API.
-function classifyInvestor(value,options={}) {
+function classifyInvestor(value,options={},approvedSymbol='005930') {
   const {API_PATH,TR_ID}=require('./observationInvestorContract');
   const u=new URL(value),q=u.searchParams,date=q.get('FID_INPUT_DATE_1');
+  if(!/^\d{6}$/.test(approvedSymbol))throw Error('REQUEST_NOT_ALLOWED');
   if(u.origin==='https://openapi.koreainvestment.com:9443'&&!u.username&&!u.password&&!u.hash&&u.pathname===API_PATH&&
     (options.method??'GET').toUpperCase()==='GET'&&/^\d{8}$/.test(date)&&options.headers?.tr_id===TR_ID&&
-    fixedQuery(u,{FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:'005930',FID_INPUT_DATE_1:date,FID_ORG_ADJ_PRC:'',FID_ETC_CLS_CODE:''}))return 'kisInvestor';
-  if(classify(value,options)==='kisToken')return 'kisToken';
+    fixedQuery(u,{FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:approvedSymbol,FID_INPUT_DATE_1:date,FID_ORG_ADJ_PRC:'',FID_ETC_CLS_CODE:''}))return 'kisInvestor';
+  if(classify(value,options,approvedSymbol)==='kisToken')return 'kisToken';
   throw Error('REQUEST_NOT_ALLOWED');
 }
 function classifyHoliday(value,options={}) {
@@ -95,6 +97,8 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   const approvalKind=approval?approval.approvalScope(approvalLease):null;
   const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only',
     holiday=approvalKind==='kis-holiday-calendar-only',searchNews=approvalKind==='naver-search-news-only';
+  const readOnlySymbol=approval&&['kis-daily-only','kis-investor-daily-only'].includes(approvalKind)?
+    approval.approvalReadOnlySymbol(approvalLease):null;
   const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:
     holiday?{...LIMITS,kisHoliday:1}:searchNews?{...LIMITS,searchNews:approval.approvalSearchNewsLimit(approvalLease)}:LIMITS;
   const counts={kisDaily:0,naverQuote:0,naverNews:0,kisToken:0},seen=new Set();
@@ -103,7 +107,7 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   if(searchNews)counts.searchNews=0;
   let stopped=false,busy=false,blocked=0,reason=null,activeController=null;
   const started=Date.now(),deadline=started+totalTimeoutMs;
-  const snapshot=()=>({symbol:holiday?null:'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
+  const snapshot=()=>({symbol:holiday?null:readOnlySymbol??'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
   await fs.mkdir(path.dirname(file),{recursive:true});
   // Never remove this marker. A fresh process cannot reset this approval's counters.
   await fs.writeFile(file,JSON.stringify({...snapshot(),state:'STARTED'}),{flag:'wx',mode:0o600});
@@ -115,7 +119,7 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
       if(stopped)throw Error('RUN_STOPPED');
       if(busy)throw Error('CONCURRENT_REQUEST_BLOCKED');
       if(Date.now()>=deadline)throw Error('TOTAL_TIMEOUT');
-      group=(searchNews?classifySearchNews:investor?classifyInvestor:news?classifyNews:holiday?classifyHoliday:classify)(value,options);url=new URL(value);url.searchParams.sort();
+      group=(searchNews?classifySearchNews:investor?classifyInvestor:news?classifyNews:holiday?classifyHoliday:classify)(value,options,readOnlySymbol??'005930');url=new URL(value);url.searchParams.sort();
       if(approval)approval.assertApprovalRequest(approvalLease,url,group,counts);
       if(seen.has(url.href))throw Error('AUTOMATIC_RETRY_BLOCKED');
       if(counts[group]>=limits[group])throw Error('REQUEST_LIMIT_REACHED');
@@ -146,7 +150,8 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
     }catch(error){stop(['REQUEST_TIMEOUT','REDIRECT_BLOCKED','HTTP_FAILED','PROVIDER_FAILED','AUTH_FAILED','INVALID_JSON'].includes(error.message)?error.message:'NETWORK_FAILED');throw Error(reason);}
     finally{clearTimeout(timer);busy=false;activeController=null;}
   };
-  return {fetch:guardedFetch,report:snapshot,remainingMs:()=>Math.max(0,deadline-Date.now()),
+  return {fetch:guardedFetch,report:snapshot,approvedSymbol:readOnlySymbol,
+    remainingMs:()=>Math.max(0,deadline-Date.now()),
     approvalId:approvalLease?.approvalId??null,
     assertApproval(execution){if(!approval)throw Error('APPROVAL_REQUIRED');approval.assertApprovalExecution(approvalLease,execution);},
     assertActive(){if(stopped||Date.now()>=deadline){stop('TOTAL_TIMEOUT');throw Error(reason);}},

@@ -10,6 +10,7 @@ const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9
 const keys=['scope','symbol','targetDate','market','timeframe','adjustedPrice','kisDailyMaxRequests','kisTokenMaxRequests'];
 const investorKeys=['scope','symbol','targetDate','market','kisInvestorMaxRequests','kisTokenMaxRequests'];
 const investorScope='kis-investor-daily-only';
+const validReadOnlySymbol=value=>typeof value==='string'&&/^\d{6}$/.test(value);
 const holidayKeys=['scope','queryBaseDate','kisHolidayMaxRequests','kisTokenMaxRequests'];
 const holidayScope='kis-holiday-calendar-only';
 const newsKeys=['scope','symbol','targetDate','page','pageSize','naverNewsMaxRequests'];
@@ -57,12 +58,12 @@ function conditions(value) {
     return Object.fromEntries(selected.map(k=>[k,value[k]]));
   }
   if(value?.scope===investorScope){
-    if(Object.keys(value).sort().join(',')!==[...investorKeys].sort().join(',')||value.symbol!=='005930'||!isTargetDate(value.targetDate)||
+    if(Object.keys(value).sort().join(',')!==[...investorKeys].sort().join(',')||!validReadOnlySymbol(value.symbol)||!isTargetDate(value.targetDate)||
       value.market!=='J'||value.kisInvestorMaxRequests!==1||value.kisTokenMaxRequests!==1)throw Error('APPROVAL_CONDITIONS_INVALID');
     return Object.fromEntries(investorKeys.map(k=>[k,value[k]]));
   }
   if(!value||Object.keys(value).sort().join(',')!==[...keys].sort().join(',')||
-    value.scope!=='kis-daily-only'||value.symbol!=='005930'||!isTargetDate(value.targetDate)||
+    value.scope!=='kis-daily-only'||!validReadOnlySymbol(value.symbol)||!isTargetDate(value.targetDate)||
     value.market!=='J'||value.timeframe!=='D'||value.adjustedPrice!=='0'||
     value.kisDailyMaxRequests!==2||value.kisTokenMaxRequests!==1)throw Error('APPROVAL_CONDITIONS_INVALID');
   return Object.fromEntries(keys.map(k=>[k,value[k]]));
@@ -180,6 +181,11 @@ function assertApprovalRequest(lease,url,group,counts) {
     counts.kisDaily===0&&q.get('FID_INPUT_DATE_2')!==end)throw Error('APPROVAL_RANGE_MISMATCH');
 }
 function approvalScope(lease){const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.scope;}
+function approvalReadOnlySymbol(lease){const info=leases.get(lease);
+  if(!info||!info.claimed||!['kis-daily-only',investorScope].includes(info.conditions.scope)||
+    !validReadOnlySymbol(info.conditions.symbol))throw Error('APPROVAL_LEASE_INVALID');
+  return info.conditions.symbol;
+}
 function approvalNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==newsScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.naverNewsMaxRequests;}
 function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.mode==='target-window'?info.conditions.maxRequests:info.conditions.mode==='rolling-poll'?info.conditions.maxRequestsPerPoll:info.conditions.searchNewsMaxRequests;}
-module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalNewsLimit,approvalSearchNewsLimit};
+module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalReadOnlySymbol,approvalNewsLimit,approvalSearchNewsLimit};

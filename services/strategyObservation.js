@@ -65,7 +65,7 @@ function createObservationService({provider=null,testOnly=false,directory=path.r
           tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결',riskReady:false,ledgerInputReady:false},snapshot);
       }
       if(scope===INVESTOR){
-        const review=require('./observationInvestor').reviewInvestorEvidence(evidence,targetBusinessDate);
+        const review=require('./observationInvestor').reviewInvestorEvidence(evidence,targetBusinessDate,symbol);
         const counts=provider?.getRequestReport?.()?.counts??{};
         return await save({schemaVersion:'OBSERVATION_V2',recordType:'INVESTOR_COLLECTION',id:randomUUID(),symbol,scope,
           approvalId:provider?.getApprovalId?.()??null,source:'KIS_OPEN_API',targetBusinessDate,requestedMarket:'J',testData:testOnly,
