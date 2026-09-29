@@ -1,0 +1,5 @@
+{
+  "policyVersion": "EOD_REVIEW_POLICY_V1",
+  "minimumCandidateScore": 40,
+  "maxDeepReviewSymbols": 5
+}
