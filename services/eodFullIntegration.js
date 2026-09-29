@@ -1,5 +1,5 @@
 'use strict';
-// Evidence-only EOD boundary. Collection approvals and provider runners remain separate.
+// Descriptive, evidence-only EOD boundary. The strict orchestrator's news gate remains separate.
 const path=require('node:path');
 const {resolveExecutionMode}=require('./executionMode');
 const {stockNameFor}=require('./stockCatalog');
@@ -39,6 +39,7 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
     dailyEvidenceRef,investorEvidenceRef,newsCollectionEvidenceRef,newsEvidenceBundleId}={}){
     const blockers=[],warnings=[];
     const output={executable:false,runId:runId??null,symbol:symbol??null,targetDate:null,
+      executionPurpose:'DESCRIPTIVE_OFFLINE_ANALYSIS',strictExecutionAllowed:false,
       planStage:newsEvidenceBundleId?'BUNDLE_LINKED':'PRE_BUNDLE',
       analysisInputValidation:'PENDING_BUNDLE',
       dateStatus:'UNKNOWN',calendarEvidenceRef:calendarEvidenceRef??null,
@@ -48,6 +49,9 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
       dailyReady:false,investorReady:false,newsArchiveWindowStatus:'UNKNOWN',
       newsBundleReady:false,newsArticleCandidateCount:0,newsUsedArticleIds:[],
       dailyInvestorReadinessBasis:'STORED_RECORD_PREFLIGHT',analysisAdapterReady:true,
+      calendarMapped:false,realEvidenceAdmitted:false,analysisRunnerWired:false,
+      newsReady:false,integrationBlockers:[],evidenceBlockers:[],
+      officialProofAudit:null,
       windowStartKst:null,windowEndKst:null,descriptiveAnalysisReady:false,
       strictStrategyReady:false,strictVerdict:'HELD',fullCoverageProven:false,
       tradeEvidenceReady:false,riskReady:false,ledgerInputReady:false,
@@ -162,6 +166,13 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
             newsCollectionEvidenceRef,newsEvidenceBundleId});
           output.newsBundleReady=review.evidenceIdentityValid&&
             review.newsEvidenceBundleId===newsEvidenceBundleId;
+          output.calendarMapped=review.calendarMapped===true;
+          output.realEvidenceAdmitted=review.realEvidenceAdmitted===true;
+          output.analysisRunnerWired=review.analysisRunnerWired===true;
+          output.newsReady=review.newsStatus==='READY_WITH_WARNINGS';
+          output.integrationBlockers=review.integrationBlockers??[];
+          output.evidenceBlockers=review.evidenceBlockers??[];
+          output.officialProofAudit=review.officialProofAudit??null;
           output.descriptiveAnalysisReady=review.descriptiveAnalysisReady&&review.executable;
           output.analysisInputValidation=review.executable?'VALIDATED':'HELD';
           output.newsUsedArticleIds=review.newsArticleCount>0?

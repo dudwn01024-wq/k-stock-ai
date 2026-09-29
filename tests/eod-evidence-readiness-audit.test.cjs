@@ -37,7 +37,8 @@ function fixture(){
     derived:{daily:{averageVolume20:100}},eodInputs:{calendar:null,daily:{market:'KRX',priceBasis:'UNADJUSTED'}}};
   return {input,holidayRecord,holidayReplay};
 }
-const audit=x=>evaluateEodEvidenceReadiness({...x,testOnly:true});
+const audit=x=>evaluateEodEvidenceReadiness({...x,testOnly:true,
+  analysisEvaluationAtKst:'2026-09-27T14:52:00+09:00'});
 test('SYNTHETIC TEST DATA: direct fields are PROVABLE, missing meaning NOT_PROVABLE, undefined provider immutability POLICY_UNDEFINED',()=>{
   const f=fixture(),result=audit(f);
   assert.equal(status(result,'daily','targetDateRow'),'PROVABLE');
@@ -67,8 +68,8 @@ test('SYNTHETIC TEST DATA: verified calendar proves date/window only, never inve
   assert.ok(result.blockers.includes('integration.analysisRunnerWired'));
 });
 test('SYNTHETIC TEST DATA: receipt times remain separate from completion, finality and publication meaning',()=>{
-  const f=fixture();f.input.eodInputs.daily.receivedAt='2026-09-24T12:00:00+09:00';
-  f.input.eodInputs.supply={receivedAt:'2026-09-24T12:01:00+09:00'};
+  const f=fixture();f.input.normalized.daily.receivedAt='2026-09-24T12:00:00+09:00';
+  f.input.normalized.investor.receivedAt='2026-09-24T12:01:00+09:00';
   f.input.normalized.news.articles[0].receivedAt='2026-09-24T12:02:00+09:00';
   const result=audit(f);
   assert.equal(status(result,'daily','receivedAfterCloseBeforeEvaluation'),'PROVABLE');
@@ -77,6 +78,17 @@ test('SYNTHETIC TEST DATA: receipt times remain separate from completion, finali
   assert.equal(status(result,'daily','providerBarCompletion'),'NOT_PROVABLE');
   assert.equal(status(result,'investor','finality'),'NOT_PROVABLE');
   assert.equal(status(result,'news','publicationTimeMeaning'),'NOT_PROVABLE');
+});
+test('SYNTHETIC TEST DATA: receipt must be strictly after close and no later than analysis evaluation',()=>{
+  const f=fixture(),close='2026-09-23T15:30:00+09:00';
+  f.input.normalized.daily.receivedAt=close;
+  f.input.normalized.investor.receivedAt='2026-09-27T14:53:00+09:00';
+  const result=audit(f);
+  assert.equal(status(result,'daily','receivedAfterCloseBeforeEvaluation'),'NOT_PROVABLE');
+  assert.equal(status(result,'investor','receivedAfterCloseBeforeEvaluation'),'NOT_PROVABLE');
+  f.input.normalized.daily.receivedAt='2026-09-24T12:00:00+09:00';
+  assert.equal(status(evaluateEodEvidenceReadiness({...f,testOnly:true}),
+    'daily','receivedAfterCloseBeforeEvaluation'),'NOT_PROVABLE');
 });
 test('SYNTHETIC TEST DATA: missing values, target mismatch, wrong calendar type never become PROVABLE',()=>{
   const missing=fixture();missing.input.dailyReady=false;missing.input.normalized.daily.targetOHLCV=null;

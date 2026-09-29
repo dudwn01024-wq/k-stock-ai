@@ -104,6 +104,8 @@ test('synthetic verified date flows through read-only plan and unverified bundle
   try{
     const plan=await f.integration.plan(f.input);
     assert.equal(plan.executable,true);
+    assert.equal(plan.executionPurpose,'DESCRIPTIVE_OFFLINE_ANALYSIS');
+    assert.equal(plan.strictExecutionAllowed,false);
     assert.equal(plan.dateStatus,'VERIFIED_TEST_ONLY');
     assert.equal(plan.targetDate,targetDate);
     assert.equal(plan.dailyReady,true);assert.equal(plan.investorReady,true);
@@ -277,6 +279,13 @@ test('immutable collection evidence links only selected observed articles to one
       newsEvidenceBundleId:bundle.bundleId};
     const plan=await f.integration.plan(linked);
     assert.equal(plan.executable,true);
+    assert.equal(plan.calendarMapped,true);
+    assert.equal(plan.analysisRunnerWired,true);
+    assert.equal(plan.realEvidenceAdmitted,false);
+    assert.equal(plan.newsReady,true);
+    assert.deepEqual(plan.integrationBlockers,['INTEGRATION_REAL_EVIDENCE_PROOF_ADMITTED']);
+    assert.equal(plan.strictStrategyReady,false);
+    assert.ok(plan.evidenceBlockers.includes('NEWS_FULL_COVERAGE_PROVEN'));
     assert.equal(plan.dailyReady,true);assert.equal(plan.investorReady,true);
     assert.equal(plan.newsArchiveWindowStatus,'ARCHIVE_WINDOW_INCOMPLETE');
     const result=await f.integration.runFromStoredEvidence(linked);

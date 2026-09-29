@@ -15,7 +15,8 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
   if(!testOnly&&testDirectory!==undefined||testOnly&&!testDirectory||typeof clock!=='function')
     throw Error('EOD_ANALYSIS_OPTIONS_INVALID');
   const outputDirectory=testOnly?path.join(path.resolve(testDirectory),'analysis'):ROOT;
-  const readiness=createEodAnalysisReadinessTiers({testOnly,testDirectory,clock});
+  const readiness=createEodAnalysisReadinessTiers({testOnly,testDirectory,clock,
+    analysisRunnerWired:true});
   async function inspect(input){
     const tier=await readiness.evaluate(input);
     const identityValid=!tier.evidenceValidationReasons.some(reason=>VALIDATION_FAILURE.test(reason));
@@ -25,7 +26,9 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
   return {
     async plan(input){
       const {tier,identityValid,executable}=await inspect(input);
-      return {analysisAdapterReady:true,executable,sourceRunId:tier.runId,
+      return {analysisAdapterReady:true,executable,
+        executionPurpose:'DESCRIPTIVE_OFFLINE_ANALYSIS',strictExecutionAllowed:false,
+        sourceRunId:tier.runId,
         symbol:tier.symbol,targetDate:tier.targetDate,evidenceRefs:tier.evidenceRefs,
         newsCollectionEvidenceRef:tier.newsCollectionEvidenceRef,
         newsEvidenceBundleId:tier.newsEvidenceBundleId,
@@ -39,8 +42,13 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
         evidenceIdentityValid:identityValid,calendarStatus:tier.calendar.status,
         technicalStatus:tier.technical.status,investorStatus:tier.investorFlow.status,
         newsStatus:tier.news.status,descriptiveAnalysisReady:tier.descriptiveAnalysisReady,
+        calendarMapped:tier.calendarMapped,realEvidenceAdmitted:tier.realEvidenceAdmitted,
+        analysisRunnerWired:tier.analysisRunnerWired,
         strictStrategyReady:tier.strictStrategyReady,tradeEvidenceReady:false,
-        blockers:tier.strictStrategyBlockers,validationReasons:tier.evidenceValidationReasons,
+        blockers:tier.strictStrategyBlockers,integrationBlockers:tier.integrationBlockers,
+        evidenceBlockers:tier.evidenceBlockers,
+        officialProofAudit:tier.officialProofAudit,
+        validationReasons:tier.evidenceValidationReasons,
         riskReady:false,ledgerInputReady:false,
         tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
     },
@@ -90,6 +98,9 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
         analysisAdapterReady:true,descriptiveAnalysisReady:executable,strictStrategyVerdict:tier.strictStrategyVerdict,
         strictStrategyReady:tier.strictStrategyReady,tradeEvidenceReady:false,
         strictStrategyBlockers:tier.strictStrategyBlockers,
+        calendarMapped:tier.calendarMapped,realEvidenceAdmitted:tier.realEvidenceAdmitted,
+        analysisRunnerWired:tier.analysisRunnerWired,
+        integrationBlockers:tier.integrationBlockers,evidenceBlockers:tier.evidenceBlockers,
         descriptiveWarnings:tier.descriptiveWarnings,
         validationReasons:tier.evidenceValidationReasons,
         riskReady:false,ledgerInputReady:false,

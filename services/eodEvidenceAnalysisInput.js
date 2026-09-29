@@ -6,7 +6,9 @@ const {calculateDailyInputs,validRow}=require('./observationDaily');
 const {sanitizeEvidence}=require('./observationEvidence');
 const {reviewSearchNewsRecord,parsePubDate}=require('./observationSearchNews');
 const {calendarFromStoredEvidence}=require('./kisHolidayCalendar');
+const {resolveLatestCompletedTradingDay}=require('./latestCompletedTradingDay');
 const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
+const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
 const {evaluateNewsBundle}=require('./deterministicNewsEvaluator');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/live-once');
@@ -16,6 +18,74 @@ const specs=Object.freeze({daily:['DAILY_COLLECTION','kis-daily-only'],
   investor:['INVESTOR_COLLECTION','kis-investor-daily-only'],news:['SEARCH_NEWS_COLLECTION','naver-search-news-only']});
 const number=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
 const instant=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?value:null;
+function mappedCalendar(calendarEvidence,targetDate,testOnly){
+  if(!calendarEvidence)return null;
+  try{
+    const {holidayRecord,holidayReplay}=calendarEvidence;
+    const calendar=calendarFromStoredEvidence(holidayRecord,
+      {approvalId:holidayRecord.approvalId,testOnly});
+    const selection=resolveLatestCompletedTradingDay({
+      currentTime:holidayReplay.evaluationKstTime,calendar,testOnly});
+    const status=testOnly?'VERIFIED_TEST_ONLY':'VERIFIED';
+    if(selection.status!==status||holidayReplay.selection?.status!==status||
+      selection.latestCompletedBusinessDate!==targetDate||
+      holidayReplay.selection.latestCompletedBusinessDate!==targetDate||
+      selection.evidence?.decisionWindowComplete!==true||
+      holidayReplay.decisionWindowComplete!==true)return null;
+    const mapped={market:'KRX',session:'REGULAR',from:calendar.from,through:calendar.through,
+      days:Object.fromEntries(Object.entries(calendar.days).map(([date,row])=>
+        [date,{status:row.status,close:row.close??null}])),
+      evidence:{kind:'VERIFIED_HOLIDAY_REPLAY',replayEvidenceRef:holidayReplay.id,
+        holidayEvidenceRef:holidayRecord.id,approvalId:holidayRecord.approvalId}};
+    return sessionWindow({calendar:mapped,targetBusinessDate:targetDate})?mapped:null;
+  }catch{return null;}
+}
+async function admitRealStoredEvidence({testOnly,daily,investor,bundle,bundleArticles,
+  dailyReady,investorReady,symbol,targetDate,dailyEvidenceRef,investorEvidenceRef,
+  newsCollectionEvidenceRef,readPoll}={}){
+  // The reader computes dailyReady/investorReady by comparing selected values to captured raw fields.
+  // Admission confirms their stored provenance; it does not assert completion, finality or coverage.
+  const held={status:'NOT_ADMITTED'};
+  if(testOnly||!dailyReady||!investorReady||!bundle||bundle.testData!==false||
+    bundle.schemaVersion!=='NEWS_EVIDENCE_BUNDLE_V1'||
+    bundle.recordType!=='NEWS_EVIDENCE_BUNDLE'||!uuid(bundle.bundleId)||
+    !uuid(bundle.archiveId)||
+    bundle.collectionEvidenceRef!==newsCollectionEvidenceRef||
+    bundle.symbol!==symbol||bundle.targetDate!==targetDate||
+    bundle.articleCount!==bundleArticles.length||bundleArticles.length===0||
+    !Array.isArray(bundle.articleRefs)||bundle.articleRefs.length!==bundleArticles.length||
+    bundle.articleRefs.some((ref,index)=>ref.articleId!==bundleArticles[index]?.articleId))
+    return held;
+  for(const [record,ref,type,scope] of [
+    [daily,dailyEvidenceRef,'DAILY_COLLECTION','kis-daily-only'],
+    [investor,investorEvidenceRef,'INVESTOR_COLLECTION','kis-investor-daily-only']]){
+    if(record.id!==ref||record.schemaVersion!=='OBSERVATION_V2'||
+      record.recordType!==type||record.scope!==scope||
+      record.symbol!==symbol||record.targetBusinessDate!==targetDate||
+      record.status!=='COLLECTED'||record.testData!==false||record.source!=='KIS_OPEN_API'||
+      !uuid(record.approvalId)||!instant(record.receivedAt)||
+      !Array.isArray(record.evidence?.exchanges)||!record.evidence.exchanges.some(exchange=>
+        exchange.kind===(type==='DAILY_COLLECTION'?'kisDaily':'kisInvestor')&&
+        exchange.response?.status==='CAPTURED'))return held;
+  }
+  const pollIds=[...new Set(bundle.articleRefs.map(ref=>ref.sourcePollRunId))];
+  if(!pollIds.length||pollIds.some(id=>!uuid(id)))return held;
+  try{
+    const pollReader=readPoll??createRollingNewsArchiveStore().readPoll;
+    for(const pollRunId of pollIds){
+      const poll=await pollReader({symbol,pollRunId});
+      if(poll.schemaVersion!=='ROLLING_NEWS_POLL_V1'||poll.archiveId!==bundle.archiveId||
+        poll.symbol!==symbol||poll.query!==bundle.query||poll.testData!==false||
+        poll.source!=='NAVER_API_HUB_SEARCH_NEWS'||!uuid(poll.approvalId)||
+        !instant(poll.receivedAtKst)||!Array.isArray(poll.pages)||!poll.pages.length)
+        return held;
+    }
+  }catch{return held;}
+  return {status:'REAL_STORED_EVIDENCE_ADMITTED',
+    evidenceRefs:{daily:dailyEvidenceRef,investor:investorEvidenceRef,
+      newsCollection:newsCollectionEvidenceRef,bundle:bundle.bundleId},
+    pollRunIds:pollIds};
+}
 function rawTarget(evidence,kind,symbol,targetDate,fields){
   const day=targetDate.replaceAll('-',''),matches=[];
   for(const exchange of evidence?.exchanges??[]){
@@ -181,7 +251,8 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     const derived=dailyReady?calculateDailyInputs(selection):null;
     const normalized={daily:{targetOHLCV:dailyReady?{...daily.targetOHLCV}:null,
       history:dailyReady?rows.map(row=>({...row})):[],receivedAt:instant(daily.receivedAt)},
-    investor:{date:investorReady?targetDate:null,foreignerNet:investorReady?values.frgn_ntby_qty:null,
+    investor:{date:investorReady?targetDate:null,receivedAt:instant(investor.receivedAt),
+      foreignerNet:investorReady?values.frgn_ntby_qty:null,
       institutionNet:investorReady?values.orgn_ntby_qty:null,
       foreignerBuy:investorReady?values.frgn_shnu_vol:null,foreignerSell:investorReady?values.frgn_seln_vol:null,
       institutionBuy:investorReady?values.orgn_shnu_vol:null,institutionSell:investorReady?values.orgn_seln_vol:null,
@@ -201,6 +272,7 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
     const prepared={symbol,dailySelection:selection,evidence:dailyEvidence,
       policy:POLICY,testData:false};
     const eodInputs=createEodInputs(prepared,{targetBusinessDate:targetDate});
+    eodInputs.calendar=mappedCalendar(calendarEvidence,targetDate,testOnly);
     if(derived)eodInputs.daily.averageVolume20=derived.averageVolume20;
     eodInputs.supply={...eodInputs.supply,date:normalized.investor.date,
       foreignerNet:normalized.investor.foreignerNet,institutionNet:normalized.investor.institutionNet,
@@ -209,10 +281,14 @@ function createEodEvidenceAnalysisInput({testOnly=false,testDirectory}={}){
       originalTime:item.pubDateRaw,publishedAt:null,meaning:'UNKNOWN',hasCautionSignal:null,receivedAt:null}))};
     if(!eodInputs.calendar)reasons.push('OFFICIAL_SESSION_WINDOW_UNVERIFIED');
     if(!eodInputs.daily.complete)reasons.push('DAILY_COMPLETION_UNVERIFIED');
+    const storedEvidenceAdmission=await admitRealStoredEvidence({testOnly,daily,investor,
+      bundle,bundleArticles,dailyReady,investorReady,symbol,targetDate,
+      dailyEvidenceRef,investorEvidenceRef,newsCollectionEvidenceRef});
     return {...base,dailyReady:!!dailyReady,investorReady:!!investorReady,newsReady:!!newsReady,
       inputReady:reasons.length===0,reasons:[...new Set(reasons)],raw,normalized,derived:{daily:derived},
       preparedRecord:prepared,eodInputs,calendarEvidence,
-      newsBundle:bundle,newsBundleArticles:bundleArticles,newsEvaluation};
+      newsBundle:bundle,newsBundleArticles:bundleArticles,newsEvaluation,
+      storedEvidenceAdmission};
   }
   return {build,loadCalendar,loadEvidence:(ref,type)=>{
     if(!['daily','investor'].includes(type))throw Error('EOD_EVIDENCE_TYPE_INVALID');
@@ -229,4 +305,5 @@ function analyzeEodFromPreparedInput(input,{evaluatedAt}={}){
     newsEvidenceRef:input.newsEvidenceRef,review,riskReady:false,ledgerInputReady:false,
     tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
 }
-module.exports={createEodEvidenceAnalysisInput,analyzeEodFromPreparedInput};
+module.exports={createEodEvidenceAnalysisInput,analyzeEodFromPreparedInput,
+  admitRealStoredEvidence};

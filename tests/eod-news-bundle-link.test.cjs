@@ -105,11 +105,17 @@ test('bundle-only EOD input consumes exactly five selected archive articles and 
   assert.equal(input.normalized.news.coverageStatus,'UNVERIFIED');
   assert.equal(input.normalized.news.fullCoverageProven,false);
   assert.equal(input.eodInputs.news.articles.length,5);
+  assert.equal(input.eodInputs.calendar.market,'KRX');
+  assert.equal(input.eodInputs.calendar.evidence.replayEvidenceRef,f.source.replay.id);
   assert.ok(input.reasons.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
   const plan=await f.adapter.plan(f.refs);
   assert.equal(plan.executable,true);assert.equal(plan.newsArticleCount,5);
   assert.equal(plan.newsEvaluatedArticleCount,5);
   assert.equal(plan.newsStatus,'READY_WITH_WARNINGS');
+  assert.equal(plan.calendarMapped,true);
+  assert.equal(plan.analysisRunnerWired,true);
+  assert.equal(plan.realEvidenceAdmitted,false);
+  assert.deepEqual(plan.integrationBlockers,['INTEGRATION_REAL_EVIDENCE_PROOF_ADMITTED']);
   assert.ok(!plan.blockers.includes('NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE'));
   assert.ok(plan.blockers.length>0);
   const result=await f.adapter.run(f.refs);
@@ -133,6 +139,9 @@ test('bundle-only EOD input consumes exactly five selected archive articles and 
   assert.equal(result.fullCoverageProven,false);
   assert.ok(result.descriptiveWarnings.includes('NEWS_BUNDLE_COVERAGE_UNVERIFIED'));
   assert.equal(result.strictStrategyReady,false);
+  assert.equal(result.calendarMapped,true);
+  assert.equal(result.realEvidenceAdmitted,false);
+  assert.equal(result.analysisRunnerWired,true);
   assert.equal(result.strictStrategyVerdict,'HELD');
   assert.equal(result.tradeEvidenceReady,false);assert.equal(result.riskReady,false);
   assert.equal(result.ledgerInputReady,false);
@@ -146,6 +155,9 @@ test('bundle mismatch and missing article IDs hold analysis without saving a res
     {...f.refs,newsEvidenceBundleId:randomUUID()},
     {...f.refs,newsEvidenceBundleId:'../outside'}
   ];
+  const wrongDatePlan=await f.adapter.plan(badRefs[1]);
+  assert.equal(wrongDatePlan.calendarMapped,false);
+  assert.ok(wrongDatePlan.integrationBlockers.includes('INTEGRATION_CALENDAR_MAPPED_TO_EOD_INPUT'));
   for(const refs of badRefs){
     const result=await f.adapter.run(refs);
     assert.equal(result.status,'HELD');

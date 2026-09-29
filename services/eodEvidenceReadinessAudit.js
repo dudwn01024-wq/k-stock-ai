@@ -8,7 +8,8 @@ const {resolveLatestCompletedTradingDay}=require('./latestCompletedTradingDay');
 const P='PROVABLE',N='NOT_PROVABLE',U='POLICY_UNDEFINED';
 const asNumber=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
 const asInstant=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?Date.parse(value):null;
-function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=null,testOnly=false}={}){
+function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=null,
+  testOnly=false,analysisRunnerWired=false,analysisEvaluationAtKst=null}={}){
   const refs={daily:input?.dailyEvidenceRef??null,investor:input?.investorEvidenceRef??null,
     news:input?.newsEvidenceBundleId??input?.newsEvidenceRef??null,
     calendar:holidayRecord?.id??null,replay:holidayReplay?.id??null};
@@ -75,12 +76,18 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
   fact('daily','unitEvidence',false,['provider OHLCV unit evidence'],
     'services/observationEod.js#evaluateEod',
     'EOD 입력의 KRW/SHARES 표기는 코드에서 지정되며 저장된 응답 자체의 단위 플래그는 아닙니다.');
-  const dailyReceived=asInstant(input?.eodInputs?.daily?.receivedAt);
-  fact('daily','receivedAfterCloseBeforeEvaluation',!!calendarWindow&&dailyReceived!==null&&
-    dailyReceived>=Date.parse(calendarWindow.end)&&dailyReceived<=asInstant(holidayReplay?.evaluationKstTime),
-    ['daily.receivedAt','newsWindow.end','holidayReplay.evaluationKstTime'],
+  const dailyReceived=asInstant(input?.normalized?.daily?.receivedAt);
+  const evaluation=asInstant(analysisEvaluationAtKst);
+  const receiptProvenance=testOnly||input?.storedEvidenceAdmission?.status===
+    'REAL_STORED_EVIDENCE_ADMITTED';
+  const dailyReceiptProven=!!calendarWindow&&dailyReceived!==null&&
+    evaluation!==null&&receiptProvenance&&dailyReceived>Date.parse(calendarWindow.end)&&
+    dailyReceived<=evaluation;
+  fact('daily','receivedAfterCloseBeforeEvaluation',dailyReceiptProven,
+    ['stored daily.receivedAt','calendar sessionWindow.end','analysisEvaluationAtKst'],
     'services/observationEod.js#evaluateEod',
-    '수신 시각은 원본 데이터 기준 시각이나 일봉 최종 확정 시각이 아닙니다.',
+    dailyReceiptProven?'저장된 수신 시각이 검증된 세션 종료 후이며 분석 평가 시각 이전입니다. 일봉 최종 확정은 별개입니다.':
+      '저장된 수신 시각이 세션 종료 후·분석 평가 전이라는 근거가 부족합니다.',
     [refs.daily,refs.calendar,refs.replay]);
   fact('daily','providerBarCompletion',false,['daily.complete','daily.completionEvidence'],
     'services/observationEod.js#evaluateEod',
@@ -109,12 +116,15 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
     e.kind==='kisInvestor'&&e.request.params.FID_COND_MRKT_DIV_CODE==='J'),
     ['request.FID_COND_MRKT_DIV_CODE'],'services/observationInvestor.js#reviewInvestorEvidence',
     'J는 요청에서 확인한 시장이며 포함 세션 전체의 증거는 아닙니다.');
-  const investorReceived=asInstant(input?.eodInputs?.supply?.receivedAt);
-  fact('investor','receivedAfterCloseBeforeEvaluation',!!calendarWindow&&investorReceived!==null&&
-    investorReceived>=Date.parse(calendarWindow.end)&&investorReceived<=asInstant(holidayReplay?.evaluationKstTime),
-    ['supply.receivedAt','newsWindow.end','holidayReplay.evaluationKstTime'],
+  const investorReceived=asInstant(input?.normalized?.investor?.receivedAt);
+  const investorReceiptProven=!!calendarWindow&&investorReceived!==null&&
+    evaluation!==null&&receiptProvenance&&investorReceived>Date.parse(calendarWindow.end)&&
+    investorReceived<=evaluation;
+  fact('investor','receivedAfterCloseBeforeEvaluation',investorReceiptProven,
+    ['stored investor.receivedAt','calendar sessionWindow.end','analysisEvaluationAtKst'],
     'services/observationEod.js#evaluateEod',
-    '수신 시점이 마감 이후여도 수급 확정시각이나 포함 세션은 증명하지 못합니다.',
+    investorReceiptProven?'저장된 수신 시각이 검증된 세션 종료 후이며 분석 평가 시각 이전입니다. 수급 확정·세션 범위는 별개입니다.':
+      '저장된 수신 시각이 세션 종료 후·분석 평가 전이라는 근거가 부족합니다.',
     [refs.investor,refs.calendar,refs.replay]);
   fact('investor','unitScaleVerified',false,['investorSelection.unit.scale'],
     'services/observationEod.js#evaluateEod','저장 자료의 수량 배율·주 단위 검증은 미완료입니다.');
@@ -166,21 +176,40 @@ function evaluateEodEvidenceReadiness({input,holidayRecord=null,holidayReplay=nu
     'NAVER 제공 시각을 언론사 최초 발행시각으로 바꾸지 않습니다.');
   fact('news','cautionAssessment',false,['articles[].hasCautionSignal'],
     'services/observationEod.js#evaluateEod','기사별 기존 주의 키워드 평가가 검색뉴스 기록에 없습니다.');
-  fact('integration','calendarMappedToEodInput',!!input?.eodInputs?.calendar,
+  const mapped=input?.eodInputs?.calendar,mappedWindow=mapped?sessionWindow(input.eodInputs):null;
+  const calendarMapped=calendarReady&&!!calendarWindow&&!!mappedWindow&&
+    mapped?.evidence?.kind==='VERIFIED_HOLIDAY_REPLAY'&&
+    mapped.evidence.replayEvidenceRef===holidayReplay?.id&&
+    mapped.evidence.holidayEvidenceRef===holidayRecord?.id&&
+    mapped.evidence.approvalId===holidayRecord?.approvalId&&
+    mappedWindow.start===calendarWindow.start&&mappedWindow.end===calendarWindow.end;
+  fact('integration','calendarMappedToEodInput',calendarMapped,
     ['eodInputs.calendar'],'services/eodEvidenceAnalysisInput.js#build',
-    '공식 holiday replay가 있어도 현재 evidence-only EOD 입력에는 연결되지 않았습니다.',
+    '검증된 replay 날짜·세션 경계가 prepared EOD calendar 입력과 일치해야 합니다.',
     [refs.calendar,refs.replay]);
-  fact('integration','realEvidenceProofAdmitted',false,['eodInputs.basis','record.testData'],
-    'services/observationEod.js#evaluateEod',
-    '현재 평가기는 실제 STORED_EVIDENCE가 아닌 SYNTHETIC_TEST에서만 완성·확정 증명을 허용합니다.');
-  fact('integration','analysisRunnerWired',false,['analysisRunner'],
-    'services/eodExecutionAdapters.js#plan',
-    '운영 execution adapter의 analysisRunner는 아직 연결되지 않아 plan이 NOT_READY입니다.');
+  const admitted=!testOnly&&valid&&input?.storedEvidenceAdmission?.status===
+    'REAL_STORED_EVIDENCE_ADMITTED'&&
+    input.storedEvidenceAdmission.evidenceRefs?.daily===input.dailyEvidenceRef&&
+    input.storedEvidenceAdmission.evidenceRefs?.investor===input.investorEvidenceRef&&
+    input.storedEvidenceAdmission.evidenceRefs?.newsCollection===input.newsCollectionEvidenceRef&&
+    input.storedEvidenceAdmission.evidenceRefs?.bundle===input.newsEvidenceBundleId;
+  fact('integration','realEvidenceProofAdmitted',admitted,
+    ['storedEvidenceAdmission','daily/investor raw provider facts','bundle.articleRefs[]',
+      'poll.approvalId'],
+    'services/eodEvidenceAnalysisInput.js#admitRealStoredEvidence',
+    '실제 저장 기록의 출처만 인정합니다. 제공처 완성·확정성이나 뉴스 coverage는 별도입니다.');
+  const runnerReady=analysisRunnerWired===true&&valid&&!!input?.newsEvidenceBundleId&&
+    !!input.newsBundle&&input.newsEvaluation?.status==='EVALUATED'&&
+    input.dailyReady===true&&input.investorReady===true;
+  fact('integration','analysisRunnerWired',runnerReady,
+    ['evidence-only analysis runner','newsEvidenceBundleId'],
+    'services/eodAnalysisAdapter.js#createEodAnalysisAdapter',
+    '저장 evidence와 bundle만 읽는 분석 runner 연결을 확인합니다. 외부 수집 단계는 실행하지 않습니다.');
   const blockers=Object.entries(sections).flatMap(([group,items])=>items.filter(item=>item.status!==P&&
     item.item!=='calendarCollectionComplete'&&item.item!=='providerValueFinality').map(item=>`${group}.${item.item}`));
   return {symbol:input?.symbol??null,targetDate:input?.targetDate??null,refs,sections,
     strategyNewsWindow:calendarWindow,
-    overallReady:blockers.length===0,analysisAdapterReady:false,blockers,
+    overallReady:blockers.length===0,analysisAdapterReady:runnerReady,blockers,
     riskReady:false,ledgerInputReady:false,tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'};
 }
 module.exports={evaluateEodEvidenceReadiness};

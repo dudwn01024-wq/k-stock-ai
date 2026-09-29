@@ -2,6 +2,7 @@
 // Read-only explanation tiers. This does not authorize an EOD strategy or a trade.
 const {createEodEvidenceAnalysisInput,analyzeEodFromPreparedInput}=require('./eodEvidenceAnalysisInput');
 const {evaluateEodEvidenceReadiness}=require('./eodEvidenceReadinessAudit');
+const {auditOfficialProofs}=require('./eodOfficialProofAudit');
 
 const PROVABLE='PROVABLE';
 const fact=(audit,group,item)=>audit.sections[group].find(entry=>entry.item===item)?.status===PROVABLE;
@@ -39,6 +40,8 @@ function tierResult(input,audit,strictReview=null){
     newsReady?'BOUNDED':'UNVERIFIED';
   const strictStrategyBlockers=unique([...audit.blockers.map(blocker=>blocker.replace('.', '_').replace(/([a-z])([A-Z])/g,'$1_$2').toUpperCase()),
     ...(bundleMode&&!evaluationReady?['NEWS_ARTICLE_EVALUATION_NOT_AVAILABLE']:[])]);
+  const integrationBlockers=strictStrategyBlockers.filter(blocker=>blocker.startsWith('INTEGRATION_'));
+  const evidenceBlockers=strictStrategyBlockers.filter(blocker=>!blocker.startsWith('INTEGRATION_'));
   const descriptiveWarnings=unique([
     ...(!calendarReady?['CALENDAR_DATE_UNVERIFIED']:[]),
     ...(!technicalReady?['DAILY_TECHNICAL_INPUT_UNAVAILABLE']:[]),
@@ -96,14 +99,19 @@ function tierResult(input,audit,strictReview=null){
     descriptiveAnalysisReady:calendarReady&&technicalReady,
     strictStrategyVerdict:bundleMode?'HELD':strictReview?.status??'HELD',
     strictStrategyReady:!bundleMode&&input.inputReady===true&&audit.overallReady===true&&strictReview?.status==='PASS',
-    analysisAdapterReady:false,tradeEvidenceReady:false,riskReady:false,ledgerInputReady:false,
-    strictStrategyBlockers,descriptiveWarnings,
+    calendarMapped:fact(audit,'integration','calendarMappedToEodInput'),
+    realEvidenceAdmitted:fact(audit,'integration','realEvidenceProofAdmitted'),
+    analysisRunnerWired:fact(audit,'integration','analysisRunnerWired'),
+    analysisAdapterReady:audit.analysisAdapterReady,tradeEvidenceReady:false,
+    riskReady:false,ledgerInputReady:false,
+    strictStrategyBlockers,integrationBlockers,evidenceBlockers,descriptiveWarnings,
+    officialProofAudit:auditOfficialProofs(audit),
     tradeAuthorization:'거래 허가 미평가 / 주문 기능 미연결'
   };
 }
 
 function createEodAnalysisReadinessTiers({testOnly=false,testDirectory,
-  clock=()=>new Date().toISOString()}={}){
+  clock=()=>new Date().toISOString(),analysisRunnerWired=false}={}){
   if(typeof clock!=='function')throw Error('EOD_NEWS_EVALUATION_CLOCK_INVALID');
   const reader=createEodEvidenceAnalysisInput({testOnly,testDirectory});
   return {async evaluate(refs){
@@ -114,11 +122,12 @@ function createEodAnalysisReadinessTiers({testOnly=false,testDirectory,
     const input=await reader.build({...refs,newsEvaluationAtKst});
     const audit=evaluateEodEvidenceReadiness({input,
       holidayRecord:input.calendarEvidence?.holidayRecord??null,
-      holidayReplay:input.calendarEvidence?.holidayReplay??null,testOnly});
+      holidayReplay:input.calendarEvidence?.holidayReplay??null,testOnly,analysisRunnerWired,
+      analysisEvaluationAtKst:newsEvaluationAtKst});
     let strictReview=null;
-    if(input.eodInputs&&input.preparedRecord&&input.calendarEvidence?.holidayReplay?.evaluationKstTime){
+    if(input.eodInputs&&input.preparedRecord){
       try{strictReview=analyzeEodFromPreparedInput(input,
-        {evaluatedAt:input.calendarEvidence.holidayReplay.evaluationKstTime}).review;}
+        {evaluatedAt:newsEvaluationAtKst}).review;}
       catch{/* An invalid stored replay cannot establish strict readiness. */}
     }
     return tierResult(input,audit,strictReview);
