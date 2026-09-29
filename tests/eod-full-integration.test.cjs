@@ -5,6 +5,7 @@ const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:pa
 const {randomUUID,createHash}=require('node:crypto');
 const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {createEodFullIntegration}=require('../services/eodFullIntegration');
+const {forbiddenImportsDuring}=require('./helpers/no-forbidden-dependencies.cjs');
 const {createNewsCollectionEvidenceStore}=require('../services/newsCollectionEvidence');
 const {createNewsEvidenceBundleStore}=require('../services/newsEvidenceBundle');
 
@@ -102,7 +103,14 @@ test('synthetic verified date flows through read-only plan and unverified bundle
   const originalFetch=global.fetch;let http=0;
   global.fetch=()=>{http++;throw Error('HTTP_FORBIDDEN');};
   try{
-    const plan=await f.integration.plan(f.input);
+    const guarded=async operation=>{
+      const {result,forbidden}=await forbiddenImportsDuring(
+        /[\\/](?:observationMarketData|kisAuth|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/,
+        operation);
+      assert.deepEqual(forbidden,[]);
+      return result;
+    };
+    const plan=await guarded(()=>f.integration.plan(f.input));
     assert.equal(plan.executable,true);
     assert.equal(plan.executionPurpose,'DESCRIPTIVE_OFFLINE_ANALYSIS');
     assert.equal(plan.strictExecutionAllowed,false);
@@ -118,8 +126,12 @@ test('synthetic verified date flows through read-only plan and unverified bundle
     await assert.rejects(fs.access(path.join(f.dir,'news-bundles')));
     await assert.rejects(fs.access(path.join(f.dir,'analysis')));
     assert.equal(http,0);
-    const result=await f.integration.runFromStoredEvidence(f.input);
+    const result=await guarded(()=>f.integration.runFromStoredEvidence(f.input));
     assert.equal(result.status,'PARTIAL_DESCRIPTIVE');
+    assert.equal(result.analysisMode,'DESCRIPTIVE_EOD_V1');
+    assert.equal(result.analysis.analysisMode,'DESCRIPTIVE_EOD_V1');
+    assert.ok(result.analysis.knownStrictLimitations.every(code=>
+      result.analysis.strictStrategyBlockers.includes(code)));
     assert.equal(result.analysis.sourceRunId,f.input.runId);
     assert.equal(result.analysis.targetDate,targetDate);
     assert.equal(result.analysis.newsEvidenceBundleId,result.newsEvidenceBundleId);
@@ -139,13 +151,13 @@ test('synthetic verified date flows through read-only plan and unverified bundle
     assert.ok(!result.usedNewsArticleIds.includes(
       f.selected.articles[0].articleId));
     assert.equal(bundle.fullCoverageProven,false);
-    const linkedPlan=await createEodFullIntegration({environment,testOnly:true,
+    const linkedPlan=await guarded(()=>createEodFullIntegration({environment,testOnly:true,
       testDirectory:f.dir,archiveStore:{read:f.archive.read,
         selectNewsForEodWindow:async()=>({...f.selected,status:'ARCHIVE_WINDOW_INCOMPLETE',
           articles:[],observedArticles:f.selected.articles.slice(1),
           observedArticleCount:5,observedCoverageStatus:'UNVERIFIED',
           searchResultContinuityProven:false})},clock}).plan({
-      ...f.input,newsEvidenceBundleId:result.newsEvidenceBundleId});
+      ...f.input,newsEvidenceBundleId:result.newsEvidenceBundleId}));
     assert.equal(linkedPlan.executable,true);
     assert.equal(linkedPlan.analysisInputValidation,'VALIDATED');
     assert.equal(linkedPlan.descriptiveAnalysisReady,true);
@@ -154,8 +166,6 @@ test('synthetic verified date flows through read-only plan and unverified bundle
     assert.deepEqual(await Promise.all(inputFiles.map(file=>fs.readFile(file))),inputBytes);
     assert.deepEqual(await Promise.all(pollNames.map(name=>fs.readFile(path.join(pollDir,name)))),pollBytes);
     assert.equal(http,0);
-    assert.deepEqual(Object.keys(require.cache).filter(file=>
-      /[\\/](?:observationMarketData|kisAuth|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/.test(file)),[]);
   }finally{global.fetch=originalFetch;}
 });
 

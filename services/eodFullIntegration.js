@@ -11,6 +11,7 @@ const {createRollingNewsArchiveStore}=require('./rollingNewsArchive');
 const {createNewsEvidenceBundleStore}=require('./newsEvidenceBundle');
 const {createNewsCollectionEvidenceStore}=require('./newsCollectionEvidence');
 const {createEodAnalysisAdapter}=require('./eodAnalysisAdapter');
+const {ANALYSIS_MODE}=require('./eodDescriptiveV1Contract');
 
 const uuid=value=>typeof value==='string'&&
   /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
@@ -39,6 +40,7 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
     dailyEvidenceRef,investorEvidenceRef,newsCollectionEvidenceRef,newsEvidenceBundleId}={}){
     const blockers=[],warnings=[];
     const output={executable:false,runId:runId??null,symbol:symbol??null,targetDate:null,
+      analysisMode:ANALYSIS_MODE,knownStrictLimitations:[],
       executionPurpose:'DESCRIPTIVE_OFFLINE_ANALYSIS',strictExecutionAllowed:false,
       planStage:newsEvidenceBundleId?'BUNDLE_LINKED':'PRE_BUNDLE',
       analysisInputValidation:'PENDING_BUNDLE',
@@ -53,7 +55,8 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
       newsReady:false,integrationBlockers:[],evidenceBlockers:[],
       officialProofAudit:null,
       windowStartKst:null,windowEndKst:null,descriptiveAnalysisReady:false,
-      strictStrategyReady:false,strictVerdict:'HELD',fullCoverageProven:false,
+      strictStrategyReady:false,strictVerdict:'HELD',strictStrategyVerdict:'HELD',
+      fullCoverageProven:false,
       tradeEvidenceReady:false,riskReady:false,ledgerInputReady:false,
       requiredExternalApprovals:APPROVALS.map(item=>({...item,
         required:!uuid(item.stage==='daily'?dailyEvidenceRef:investorEvidenceRef)})),
@@ -172,6 +175,7 @@ function createEodFullIntegration({environment=process.env,testOnly=false,testDi
           output.newsReady=review.newsStatus==='READY_WITH_WARNINGS';
           output.integrationBlockers=review.integrationBlockers??[];
           output.evidenceBlockers=review.evidenceBlockers??[];
+          output.knownStrictLimitations=review.knownStrictLimitations??[];
           output.officialProofAudit=review.officialProofAudit??null;
           output.descriptiveAnalysisReady=review.descriptiveAnalysisReady&&review.executable;
           output.analysisInputValidation=review.executable?'VALIDATED':'HELD';

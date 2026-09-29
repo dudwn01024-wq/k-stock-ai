@@ -5,6 +5,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
 const {randomUUID}=require('node:crypto');
 const {createEodAnalysisReadinessTiers}=require('../services/eodAnalysisReadinessTiers');
 const {createEodAnalysisAdapter}=require('../services/eodAnalysisAdapter');
+const {forbiddenImportsDuring}=require('./helpers/no-forbidden-dependencies.cjs');
 const {reviewSearchNewsRecord}=require('../services/observationSearchNews');
 const symbol='005930',targetDate='2026-09-23';
 
@@ -109,13 +110,17 @@ for(const [name,mutate,expected] of [
 
 test('SYNTHETIC TEST DATA: calendar ref rejects traversal and absent records; evaluation performs no network',async t=>{
   const h=await setup(t);
-  for(const calendarEvidenceRef of ['../outside','C:\\secrets\\record.json',randomUUID()]){
-    const result=await h.reader.evaluate({...h.refs,calendarEvidenceRef});
-    assert.equal(result.calendar.status,'UNKNOWN');assert.equal(result.descriptiveAnalysisReady,false);
-    assert.equal(result.tradeEvidenceReady,false);
-  }
+  const {forbidden}=await forbiddenImportsDuring(
+    /[\\/](?:observationMarketData|kisMarketData|accountSnapshot|orderLifecycle|paperTrading)\.js$/,
+    async()=>{
+      for(const calendarEvidenceRef of ['../outside','C:\\secrets\\record.json',randomUUID()]){
+        const result=await h.reader.evaluate({...h.refs,calendarEvidenceRef});
+        assert.equal(result.calendar.status,'UNKNOWN');assert.equal(result.descriptiveAnalysisReady,false);
+        assert.equal(result.tradeEvidenceReady,false);
+      }
+    });
   assert.throws(()=>fetch('https://example.com'),/EXTERNAL_NETWORK_FORBIDDEN/);
-  assert.deepEqual(Object.keys(require.cache).filter(file=>/[\\/](?:observationMarketData|kisMarketData|accountSnapshot|orderLifecycle|paperTrading)\.js$/.test(file)),[]);
+  assert.deepEqual(forbidden,[]);
 });
 
 test('SYNTHETIC TEST DATA: a target-window candidate stays bounded and cannot prove publication or full coverage',async t=>{
@@ -204,8 +209,9 @@ test('SYNTHETIC TEST DATA: public adapter is blocked, and offline analysis impor
   const h=await setup(t);
   assert.throws(()=>createEodAnalysisAdapter({environment:{KSTOCK_EXECUTION_MODE:'public',NODE_ENV:'production'},
     testOnly:true,testDirectory:h.directory}),/EOD_ANALYSIS_REQUIRES_PERSONAL_LOCAL/);
-  await adapterFor(h.directory).run(h.refs);
-  const forbidden=Object.keys(require.cache).filter(file=>/[\\/](?:observationMarketData|observationHoliday|kisMarketData|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/.test(file));
+  const {forbidden}=await forbiddenImportsDuring(
+    /[\\/](?:observationMarketData|observationHoliday|kisMarketData|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/,
+    ()=>adapterFor(h.directory).run(h.refs));
   assert.deepEqual(forbidden,[]);
   assert.doesNotMatch(await fs.readFile(path.join(__dirname,'../services/eodAnalysisAdapter.js'),'utf8'),
     /observationApproval|\.issue\(|\.consume\(/);

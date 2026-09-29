@@ -7,6 +7,7 @@ const {createRollingNewsArchiveStore}=require('../services/rollingNewsArchive');
 const {createNewsEvidenceBundleStore}=require('../services/newsEvidenceBundle');
 const {createEodEvidenceAnalysisInput}=require('../services/eodEvidenceAnalysisInput');
 const {createEodAnalysisAdapter}=require('../services/eodAnalysisAdapter');
+const {forbiddenImportsDuring}=require('./helpers/no-forbidden-dependencies.cjs');
 const {planStoredNewsPruning}=require('../services/newsArchiveLifecycle');
 const {articleIdFor}=require('../services/rollingNewsArticleId');
 
@@ -204,11 +205,10 @@ test('bundle analysis uses no HTTP, token or approval modules',async t=>{
   const f=await setup(t),oldFetch=global.fetch;
   let calls=0;global.fetch=()=>{calls++;throw Error('HTTP_FORBIDDEN');};
   try{
-    await f.adapter.plan(f.refs);
-    await f.adapter.run(f.refs);
+    const {forbidden}=await forbiddenImportsDuring(
+      /[\\/](?:observationMarketData|observationHoliday|kisMarketData|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/,
+      async()=>{await f.adapter.plan(f.refs);await f.adapter.run(f.refs);});
     assert.equal(calls,0);
-    const forbidden=Object.keys(require.cache).filter(file=>
-      /[\\/](?:observationMarketData|observationHoliday|kisMarketData|accountSnapshot|orderLifecycle|paperTrading|aiService)\.js$/.test(file));
     assert.deepEqual(forbidden,[]);
   }finally{global.fetch=oldFetch;}
 });

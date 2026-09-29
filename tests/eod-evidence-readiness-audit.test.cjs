@@ -3,6 +3,7 @@ require('./helpers/local-only.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
 const {evaluateEodEvidenceReadiness}=require('../services/eodEvidenceReadinessAudit');
+const {forbiddenImportsDuring}=require('./helpers/no-forbidden-dependencies.cjs');
 const date='2026-09-23',symbol='005930';
 const status=(audit,group,item)=>audit.sections[group].find(f=>f.item===item)?.status;
 function fixture(){
@@ -104,8 +105,12 @@ test('SYNTHETIC TEST DATA: missing values, target mismatch, wrong calendar type 
   const wrongType=fixture();wrongType.holidayRecord.schemaVersion='OTHER';
   assert.equal(status(audit(wrongType),'calendar','latestCompletedBusinessDate'),'NOT_PROVABLE');
 });
-test('SYNTHETIC TEST DATA: audit is read-only and performs no HTTP, token, account, order or PAPER work',()=>{
-  const f=fixture(),before=JSON.stringify(f);audit(f);assert.equal(JSON.stringify(f),before);
+test('SYNTHETIC TEST DATA: audit is read-only and performs no HTTP, token, account, order or PAPER work',async()=>{
+  const f=fixture(),before=JSON.stringify(f);
+  const {forbidden}=await forbiddenImportsDuring(
+    /[\\/](?:observationMarketData|accountSnapshot|orderLifecycle|paperTrading)\.js$/,
+    ()=>audit(f));
+  assert.equal(JSON.stringify(f),before);
   assert.throws(()=>fetch('https://example.com'),/EXTERNAL_NETWORK_FORBIDDEN/);
-  assert.deepEqual(Object.keys(require.cache).filter(file=>/[\\/](?:observationMarketData|accountSnapshot|orderLifecycle|paperTrading)\.js$/.test(file)),[]);
+  assert.deepEqual(forbidden,[]);
 });

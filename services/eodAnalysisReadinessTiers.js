@@ -14,6 +14,12 @@ function tierResult(input,audit,strictReview=null){
   const technicalReady=calendarReady&&input.dailyReady===true&&
     ['targetDateRow','OHLCV','historyForExistingCalculators'].every(item=>fact(audit,'daily',item))&&
     input.derived?.daily?.chartAnalysis?.latestDate===input.targetDate.replaceAll('-','');
+  const history=technicalReady?input.normalized.daily.history:[];
+  const previousClose=history.at(-1)?.date===input.targetDate.replaceAll('-','')&&
+    Number.isFinite(history.at(-2)?.close)&&history.at(-2).close>0?
+    history.at(-2).close:null;
+  const close=technicalReady?input.normalized.daily.targetOHLCV.close:null;
+  const dailyChange=Number.isFinite(close)&&previousClose!==null?close-previousClose:null;
   const investorReady=calendarReady&&input.investorReady===true&&
     ['targetDateRow','foreignBuySellNet','institutionBuySellNet','arithmeticConsistency'].every(item=>fact(audit,'investor',item));
   const window=audit.strategyNewsWindow;
@@ -67,6 +73,8 @@ function tierResult(input,audit,strictReview=null){
       evidenceRef:input.calendarEvidenceRef??null},
     technical:{status:technicalReady?'READY_WITH_WARNINGS':'NOT_READY',
       targetOHLCV:technicalReady?input.normalized.daily.targetOHLCV:null,
+      previousClose,dailyChange,
+      dailyChangePercent:dailyChange===null?null:dailyChange/previousClose*100,
       historyCount:technicalReady?input.normalized.daily.history.length:0,
       indicators:technicalReady?input.derived.daily.chartAnalysis:null,
       volume:technicalReady?input.derived.daily.volume:null,

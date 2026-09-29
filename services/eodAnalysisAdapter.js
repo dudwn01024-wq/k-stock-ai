@@ -5,6 +5,7 @@ const fs=require('node:fs/promises'),path=require('node:path');
 const {resolveExecutionMode}=require('./executionMode');
 const {POLICY}=require('./observationEod');
 const {createEodAnalysisReadinessTiers}=require('./eodAnalysisReadinessTiers');
+const {ANALYSIS_MODE,knownStrictLimitations}=require('./eodDescriptiveV1Contract');
 
 const kstInstant=instant=>new Date(Date.parse(instant)+9*3600000).toISOString().replace('Z','+09:00');
 const VALIDATION_FAILURE=/INVALID|MISMATCH/;
@@ -27,6 +28,7 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
     async plan(input){
       const {tier,identityValid,executable}=await inspect(input);
       return {analysisAdapterReady:true,executable,
+        analysisMode:ANALYSIS_MODE,strictStrategyVerdict:'HELD',
         executionPurpose:'DESCRIPTIVE_OFFLINE_ANALYSIS',strictExecutionAllowed:false,
         sourceRunId:tier.runId,
         symbol:tier.symbol,targetDate:tier.targetDate,evidenceRefs:tier.evidenceRefs,
@@ -44,9 +46,10 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
         newsStatus:tier.news.status,descriptiveAnalysisReady:tier.descriptiveAnalysisReady,
         calendarMapped:tier.calendarMapped,realEvidenceAdmitted:tier.realEvidenceAdmitted,
         analysisRunnerWired:tier.analysisRunnerWired,
-        strictStrategyReady:tier.strictStrategyReady,tradeEvidenceReady:false,
+        strictStrategyReady:false,tradeEvidenceReady:false,
         blockers:tier.strictStrategyBlockers,integrationBlockers:tier.integrationBlockers,
         evidenceBlockers:tier.evidenceBlockers,
+        knownStrictLimitations:knownStrictLimitations(tier.strictStrategyBlockers),
         officialProofAudit:tier.officialProofAudit,
         validationReasons:tier.evidenceValidationReasons,
         riskReady:false,ledgerInputReady:false,
@@ -58,6 +61,7 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
       if(typeof now!=='string'||!Number.isFinite(Date.parse(now)))throw Error('EOD_ANALYSIS_TIME_INVALID');
       const status=executable?'PARTIAL_DESCRIPTIVE':'HELD';
       const result={schemaVersion:'EOD_DESCRIPTIVE_ANALYSIS_V1',recordType:'EOD_DESCRIPTIVE_ANALYSIS',
+        analysisMode:ANALYSIS_MODE,
         testData:testOnly,analysisRunId:randomUUID(),sourceRunId:tier.runId,symbol:tier.symbol,targetDate:tier.targetDate,
         createdAtKst:kstInstant(now),policy:POLICY,status,
         evidenceRefs:tier.evidenceRefs,
@@ -95,9 +99,10 @@ function createEodAnalysisAdapter({environment=process.env,testOnly=false,testDi
             tier.news.newsAnalysisReady?tier.news.candidateCount:0,
           evaluatedArticleCount:tier.newsEvidenceBundleId?tier.news.evaluatedArticleCount:null,
           reason:tier.news.reason??(tier.news.newsAnalysisReady?null:'TARGET_WINDOW_EVIDENCE_UNAVAILABLE')},
-        analysisAdapterReady:true,descriptiveAnalysisReady:executable,strictStrategyVerdict:tier.strictStrategyVerdict,
-        strictStrategyReady:tier.strictStrategyReady,tradeEvidenceReady:false,
+        analysisAdapterReady:true,descriptiveAnalysisReady:executable,strictStrategyVerdict:'HELD',
+        strictStrategyReady:false,tradeEvidenceReady:false,
         strictStrategyBlockers:tier.strictStrategyBlockers,
+        knownStrictLimitations:knownStrictLimitations(tier.strictStrategyBlockers),
         calendarMapped:tier.calendarMapped,realEvidenceAdmitted:tier.realEvidenceAdmitted,
         analysisRunnerWired:tier.analysisRunnerWired,
         integrationBlockers:tier.integrationBlockers,evidenceBlockers:tier.evidenceBlockers,
