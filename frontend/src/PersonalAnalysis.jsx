@@ -67,11 +67,19 @@ function Detail({detail,loading,error,onBack}){
   if(error)return <section className="pa-detail pa-placeholder"><ShieldAlert/><p>{errMessage(error)}</p><button onClick={onBack}>후보 목록으로</button></section>;
   if(!detail)return <section className="pa-detail pa-placeholder">종목을 선택하면 저장된 근거가 여기에 표시됩니다.</section>;
   const {daily,investor,news,analysis,ranked}=detail;
+  const judgement=[
+    ['분석 대상일',detail.targetDate??'자료 없음'],
+    ['관찰 우선순위',ranked?.analysisPriorityScore===null||ranked?.analysisPriorityScore===undefined?'자료 없음':`${ranked.analysisPriorityScore}점 · ${priority[ranked.reviewPriority]??'자료 없음'}`],
+    ['설명용 분석',analysis?analysis.descriptiveAnalysisReady?'사용 가능':'자료 부족':'상세 EOD 기록 없음'],
+    ['strict 전략',analysis?signalLabels[analysis.strictStrategyVerdict]??analysis.strictStrategyVerdict??'판단 기록 없음':'판단 기록 없음'],
+    ['거래 허가',detail.tradeEvidenceReady===false?'미평가':'상태 미확인']
+  ];
   return <section className="pa-detail" aria-label={`${detail.name} 상세`}>
     <div className="pa-detail-heading"><button className="pa-back" onClick={onBack}><ArrowLeft size={16}/> 목록으로</button>
       <div className="pa-detail-title"><div><div className="pa-kicker">종목 상세 · {detail.targetDate}</div><h2>{detail.name} <small>{detail.symbol}</small></h2></div><StatusPill value={ranked?.reviewPriority}/></div>
       <p className="pa-detail-sub">저장 일봉으로 계산한 후보 · 읽은 시각 {formatTime(detail.readAtKst)}</p>
     </div>
+    <div className="pa-status-summary" aria-label="저장된 판단 상태 요약">{judgement.map(([label,value])=><div key={label}><span>{label}</span><b>{value}</b></div>)}</div>
     <div className="pa-section-heading"><BarChart3 size={17}/><h3>기술 흐름</h3><span>저장 일봉 기준</span></div>
     <div className="pa-card pa-price"><div><span className="pa-label">대상일 종가</span><strong>{formatNumber(daily.close)}</strong><small>전일 대비 {daily.dailyChange===null?'자료 없음':`${daily.dailyChange>0?'+':''}${formatNumber(daily.dailyChange)}`}</small></div><Sparkline rows={daily.chart}/></div>
     <div className="pa-metrics">
@@ -93,12 +101,10 @@ function Detail({detail,loading,error,onBack}){
       <div className="pa-card pa-empty">해당 대상일 저장 수급 근거가 없습니다.</div>}
     <div className="pa-section-heading"><FileText size={17}/><h3>뉴스 분석</h3><span>저장된 분석 bundle만 사용</span></div>
     {news?<div className="pa-card"><div className="pa-news-summary"><div><span>입력 기사</span><strong>{formatNumber(news.inputArticleCount)}</strong></div><div><span>내용 평가 기사</span><strong>{formatNumber(news.evaluatedArticleCount)}</strong></div><div><span>수집 범위</span><b>{signalLabels[news.coverageStatus]??news.coverageStatus}</b></div></div>
-      <div className="pa-cues">{Object.entries(cueNames).map(([key,label])=><div key={key}><span>{label}</span><b>{formatNumber(news.cueCounts?.[key])}</b></div>)}</div>
-      <p className="pa-warning">기사 단서는 매매 신호가 아닙니다. 연속성 {signalLabels[news.continuityStatus]??news.continuityStatus} · 전체 범위 증명 {news.fullCoverageProven?'예':'아니요'}</p>
+      <div className="pa-cues">{Object.entries(cueNames).map(([key,label])=><div key={key} className={key==='noClearCueCount'?'pa-cue-no-clear':''}><span>{label}</span><b>{formatNumber(news.cueCounts?.[key])}</b></div>)}</div>
+      <p className="pa-warning pa-news-warning"><ShieldAlert size={16}/><span>기사 단서는 매매 신호가 아닙니다. 뉴스 수집 범위 {signalLabels[news.coverageStatus]??news.coverageStatus} · 연속성 {signalLabels[news.continuityStatus]??news.continuityStatus} · 전체 범위 증명 {news.fullCoverageProven?'예':'아니요'}</span></p>
       <details className="pa-articles"><summary>사용한 기사 {news.articles.length}건 보기 <ChevronDown size={16}/></summary><div className="pa-article-list">{news.articles.map(article=><article key={article.articleId}><b>{article.title??'제목 없음'}</b><span>제공처 표기 시각 {article.providerPubDate}</span></article>)}</div></details>
     </div>:<div className="pa-card pa-empty">해당 대상일 뉴스 분석 기록 없음</div>}
-    <div className="pa-section-heading"><ShieldAlert size={17}/><h3>판단 상태</h3></div>
-    <div className="pa-card pa-judgement"><div><span>설명용 분석</span><b>{analysis?analysis.descriptiveAnalysisReady?'사용 가능':'자료 부족':'상세 EOD 기록 없음'}</b></div><div><span>strict 전략</span><b>{analysis?signalLabels[analysis.strictStrategyVerdict]??analysis.strictStrategyVerdict:'판단 기록 없음'}</b></div><div><span>거래 허가</span><b>미평가</b></div></div>
     <p className="pa-muted pa-provenance">일봉 원본 수신 {formatTime(daily.receivedAt)} · 분석 실행 {analysis?formatTime(analysis.createdAtKst):'기록 없음'}</p>
     <Evidence detail={detail}/>
   </section>;
@@ -110,8 +116,8 @@ function CandidateCard({candidate,selected,onSelect}){
     <div className="pa-candidate-top"><span className="pa-rank">{candidate.rank?String(candidate.rank).padStart(2,'0'):'–'}</span><div className="pa-candidate-name"><b>{candidate.name}</b><small>{candidate.symbol}</small></div><span className="pa-score">{candidate.analysisPriorityScore===null?'–':candidate.analysisPriorityScore}<small>/ 100</small></span></div>
     <div className="pa-candidate-flags"><StatusPill value={candidate.reviewPriority}/><span className="pa-review">{candidate.deepReviewSelected?'상세검토 선정':'상세검토 미선정'}</span></div>
     <div className="pa-components">{Object.entries(componentNames).map(([key,label])=><span key={key}>{label} <b>{candidate.components?.[key]?.score??'–'}</b></span>)}</div>
-    <div className="pa-candidate-foot"><span>{active.length?active.join(' · '):'가점 규칙 없음'}</span><ArrowRight size={15}/></div>
-    {candidate.warnings?.length>0&&<p className="pa-card-warning">{candidate.warnings.slice(0,2).join(' · ')}</p>}
+    <div className="pa-candidate-foot"><span><b>선정 이유</b> {active.length?active.join(' · '):'가점 규칙 없음'}</span><ArrowRight size={15}/></div>
+    {candidate.warnings?.length>0&&<p className="pa-card-warning"><b>확인할 사항</b> {candidate.warnings.slice(0,2).join(' · ')}</p>}
   </button>;
 }
 export default function PersonalAnalysis(){
