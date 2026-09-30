@@ -115,8 +115,17 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
   }
   // The grant directories are immutable attribution records. The budget domain is
   // shared by every grant on the same KST day, including revoked grants.
-  async function dailyUsage(kstDate){
+  async function dailyUsage(kstDate,{recordRoot}={}){
     if(!/^\d{4}-\d{2}-\d{2}$/.test(kstDate))throw Error('NEWS_AUTOMATION_DATE_INVALID');
+    // An explicit read-only source keeps an audit in another worktree from
+    // silently treating its empty local evidence directory as the source.
+    if(recordRoot!==undefined){
+      if(typeof recordRoot!=='string'||!path.isAbsolute(recordRoot)||(!testOnly&&
+        (path.basename(recordRoot)!=='strategy-observations'||
+        path.basename(path.dirname(recordRoot))!=='.local')))
+        throw Error('NEWS_AUTOMATION_RECORD_ROOT_INVALID');
+      await safeDir(path.resolve(recordRoot),null);
+    }
     let names;try{names=await fs.readdir(root);}catch(e){if(e.code==='ENOENT')names=[];else throw e;}
     const records=[];
     for(const name of names){
@@ -124,15 +133,17 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
       if(!uuid(name))throw Error('NEWS_AUTOMATION_DIRECTORY_INVALID');
       records.push(...await usageRecords(name,kstDate));
     }
-    let pollSuccessCount=0,httpRequestCount=0,httpCountConfirmed=true,lastPollAtKst=null;
+    let pollSuccessCount=0,httpRequestCount=0,httpCountConfirmed=true,
+      pollCompletionConfirmed=true,lastPollAtKst=null;
     const pollRunIds=new Set(),grantIds=new Set();
     for(const record of records){
       grantIds.add(record.grantId);
-      const sharedApproval=path.resolve(root,'../approvals',record.plannedApprovalId);
+      const sharedApproval=path.resolve(recordRoot??root,'../approvals',record.plannedApprovalId);
+      const explicitApproval=recordRoot&&path.join(recordRoot,'approvals',record.plannedApprovalId);
       const localApproval=path.resolve(__dirname,'../.local/strategy-observations/approvals',record.plannedApprovalId);
-      const approvalDir=testOnly||sharedApproval===localApproval?sharedApproval:
+      const approvalDir=explicitApproval??(testOnly||sharedApproval===localApproval?sharedApproval:
         await fs.access(path.join(sharedApproval,'requests.json')).then(()=>sharedApproval,
-          error=>error.code==='ENOENT'?localApproval:Promise.reject(error));
+          error=>error.code==='ENOENT'?localApproval:Promise.reject(error)));
       try{
         const journal=await readFile(path.join(approvalDir,'requests.json'),approvalDir);
         if(journal.state!=='FINISHED')httpCountConfirmed=false;
@@ -142,25 +153,45 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
       }catch(e){if(e.code==='ENOENT')httpCountConfirmed=false;else throw e;}
       const symbol=record.symbol??'005930';
       if(!/^\d{6}$/.test(symbol))throw Error('NEWS_AUTOMATION_USAGE_INVALID');
-      const sharedSlot=path.resolve(root,'../rolling-news-scheduler',symbol);
+      const sharedSlot=path.resolve(recordRoot??root,'../rolling-news-scheduler',symbol);
+      const explicitSlot=recordRoot&&path.join(recordRoot,'rolling-news-scheduler',symbol);
       const localSlot=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler',symbol);
-      const slotRoot=testOnly?path.resolve(root,'../slots',symbol):
+      const slotRoot=explicitSlot??(testOnly?path.resolve(root,'../slots',symbol):
         sharedSlot===localSlot?sharedSlot:
           await fs.access(path.join(sharedSlot,record.schedulerSlotKey+'.result.json')).then(()=>sharedSlot,
-            error=>error.code==='ENOENT'?localSlot:Promise.reject(error));
+            error=>error.code==='ENOENT'?localSlot:Promise.reject(error)));
       try{
         const slot=await readFile(path.join(slotRoot,record.schedulerSlotKey+'.result.json'),slotRoot);
+        if(slot.slotKey&&slot.slotKey!==record.schedulerSlotKey)throw Error('NEWS_AUTOMATION_USAGE_INVALID');
+        if(slot.status==='SUCCESS'&&(!uuid(slot.pollRunId)||
+          !Number.isFinite(Date.parse(slot.completedAtKst))))throw Error('NEWS_AUTOMATION_USAGE_INVALID');
+        if(!slot.completedAtKst||!Number.isFinite(Date.parse(slot.completedAtKst)))
+          pollCompletionConfirmed=false;
         if(slot.status==='SUCCESS')pollSuccessCount++;
         if(uuid(slot.pollRunId))pollRunIds.add(slot.pollRunId);
         if(slot.completedAtKst&&Number.isFinite(Date.parse(slot.completedAtKst))&&
           (!lastPollAtKst||Date.parse(slot.completedAtKst)>Date.parse(lastPollAtKst)))
           lastPollAtKst=slot.completedAtKst;
-      }catch(e){if(e.code!=='ENOENT')throw e;}
+      }catch(e){if(e.code==='ENOENT')pollCompletionConfirmed=false;else throw e;}
     }
     return {budgetDomain:'rolling-news-automation',kstDate,pollAttemptCount:records.length,
-      pollSuccessCount,httpRequestCount:httpCountConfirmed?httpRequestCount:null,
+      pollSuccessCount:pollCompletionConfirmed?pollSuccessCount:null,
+      pollCompletionConfirmed,httpRequestCount:httpCountConfirmed?httpRequestCount:null,
       httpBudgetCommitted:records.reduce((sum,record)=>sum+record.maxRequests,0),
       grantIds:[...grantIds].sort(),pollRunIds:[...pollRunIds].sort(),lastPollAtKst};
+  }
+  async function inspectDailyUsage(kstDate,options){
+    const recomputed=await dailyUsage(kstDate,options),ledgerRoot=path.join(root,'daily-ledger');
+    let snapshot;
+    try{snapshot=await readFile(path.join(ledgerRoot,kstDate+'.json'),ledgerRoot);}
+    catch(e){if(e.code==='ENOENT')return {recomputed,snapshot:null,snapshotStatus:'MISSING'};throw e;}
+    if(snapshot.budgetDomain!=='rolling-news-automation'||snapshot.kstDate!==kstDate||
+      !kst(snapshot.updatedAtKst))throw Error('NEWS_AUTOMATION_USAGE_INVALID');
+    const fields=['pollAttemptCount','pollSuccessCount','httpRequestCount','httpBudgetCommitted',
+      'grantIds','pollRunIds','lastPollAtKst'];
+    return {recomputed,snapshot,snapshotAsOfKst:snapshot.updatedAtKst,
+      snapshotStatus:fields.every(field=>isDeepStrictEqual(snapshot[field],recomputed[field]))?
+        'MATCHES_SOURCE':'STALE'};
   }
   async function reserve({grantId,plan,currentTime}={}){
     if(!kst(currentTime)||!plan?.pollPlan||!uuid(grantId))throw Error('NEWS_AUTOMATION_RESERVATION_INVALID');
@@ -187,7 +218,7 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
         schedulerSlotKey:plan.slotKey,archiveId:plan.archiveId,archiveRevision:plan.archiveRevision,
         maxRequests:limit,plannedApprovalId,reservedAtKst:clock()});
       const updated=await dailyUsage(day);
-      const snapshot={...updated,updatedAtKst:clock()};
+      const snapshot={...updated,snapshotKind:'AS_OF_RESERVATION',updatedAtKst:clock()};
       const staged=path.join(ledgerRoot,day+'.'+reservationId+'.tmp');
       await write(staged,snapshot);
       await fs.rename(staged,path.join(ledgerRoot,day+'.json'));
@@ -198,7 +229,7 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
       await fs.unlink(lock);
     }
   }
-  return {issue,read,revoke,usage,usageRecords,dailyUsage,reserve};
+  return {issue,read,revoke,usage,usageRecords,dailyUsage,inspectDailyUsage,reserve};
 }
 async function planAutomationGrant({grantId,schedulerPlan,policy={},automationPolicy=DEFAULT_AUTOMATION_POLICY,
   currentTime,environment=process.env,grantStore}={}){
