@@ -14,6 +14,10 @@ async function planAutomaticObservedApply({symbol,pollRunId,testOnly=false,testD
   const base={ready:false,sourcePollRunId:pollRunId,archiveApplyPlan:null,
     newCollectionWatermark:null,continuityProven:false,fullCoverageProven:false,
     coverageStatus:'UNVERIFIED'};
+  // The V1 atomic publisher is bound to a GAP-created segment. A V2 bootstrap
+  // segment needs its own reviewed recovery policy; never fail the poll after save.
+  if(event.schemaVersion==='ROLLING_NEWS_POLL_V2')
+    return {...base,reason:'BOOTSTRAP_RECOVERY_POLICY_REQUIRED'};
   if(event.failed||!event.segment||event.review?.status!=='UNVERIFIED'||
     event.review.watermarkReached!==true||event.requests.length!==event.pages.length||
     event.requests.some(request=>request.outcome!=='RESPONSE'))

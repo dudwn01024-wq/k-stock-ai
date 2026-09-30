@@ -7,6 +7,7 @@ const {isDeepStrictEqual}=require('node:util');
 const {stockNameFor}=require('./stockCatalog');
 const {articleIdFor}=require('./rollingNewsArticleId');
 const {parsePubDate,searchArticleIdentity,searchArticleSignature}=require('./observationSearchNews');
+const {articleMetadataSignature,compareArticleObservations}=require('./rollingNewsMetadataDrift');
 
 const ROOT=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-archive');
 const MAX_REQUESTS_PER_POLL=5,DISPLAY=100;
@@ -28,11 +29,15 @@ const segmentArticle=(item,event)=>({identity:searchArticleIdentity(item),signat
   description:item.description??null,pubDateRaw:item.pubDateRaw,pubDateParsed:parsePubDate(item.pubDateRaw),
   sourcePollRunId:event.pollRunId,firstSeenAtKst:event.receivedAtKst});
 const eventDigest=event=>createHash('sha256').update(JSON.stringify(event)).digest('hex');
+const recoveredSegmentId=(archiveId,pollRunId)=>{
+  const h=eventDigest(`bootstrap:${archiveId}:${pollRunId}`).slice(0,32);
+  return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20)}`;
+};
 const initialState=(archiveId,symbol,query)=>({schemaVersion:'ROLLING_NEWS_ARCHIVE_V1',archiveId,symbol,query,
   archiveRevision:0,
   newestSeenPubDate:null,oldestSeenPubDate:null,lastSuccessfulPollAtKst:null,watermark:null,
   continuityStatus:'NOT_STARTED',searchResultContinuityProven:false,requestHistory:[],articleCount:0,
-  articles:[],warnings:[],fullCoverageProven:false});
+  articles:[],warnings:[],metadataObservations:[],fullCoverageProven:false});
 
 function reviewPageChronology(pages){
   const summaries=[];
@@ -109,11 +114,179 @@ function assessPoll(prior,pages,{failed=false,maxRequestsPerPoll}={}){
     fullCoverageProven:false};
 }
 
+function recoverFromStoredPolls(state,events,event){
+  const sources=event.sourcePollRunIds?.map(id=>events.find(source=>source.pollRunId===id));
+  if(!Array.isArray(sources)||sources.length<2||sources.some((source,i)=>
+    !source||source.sequence!==i+1||event.sourceDigests?.[i]!==eventDigest(source))||
+    event.sourceDigests.length!==sources.length||
+    event.sourcePollRunIds.length!==state.requestHistory.length||
+    state.requestHistory.some((item,i)=>item.pollRunId!==sources[i].pollRunId)||
+    sources[0].review?.status!=='INITIAL_UNVERIFIED'||
+    state.requestHistory.slice(1).some(item=>item.status!=='UNVERIFIED'))
+    throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+  const existing=new Map(state.articles.map(article=>[article.identity,article]));
+  const known=new Map(existing),links=new Map(),additions=new Map(),versions=[];
+  for(const article of existing.values())if(article.link)links.set(article.link,article);
+  let watermark=sources[0].review.watermark,drift=false;
+  for(const source of sources.slice(1)){
+    if(source.failed||source.requests.length!==source.pages.length||
+      source.requests.some(request=>request.outcome!=='RESPONSE'))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    const chronology=reviewPageChronology(source.pages);
+    if(chronology.withinPageChronologyValid!==true||chronology.parseFailureCount!==0)
+      throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    drift=drift||chronology.pageBoundaryDrift;
+    const reached=source.pages.some(page=>page.items.some(item=>
+      searchArticleIdentity(item)===watermark.identity&&item.pubDateRaw===watermark.pubDateRaw));
+    if(!reached)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    for(const [pageIndex,page] of source.pages.entries())for(const [itemIndex,item] of page.items.entries()){
+      const identity=searchArticleIdentity(item),parsed=parsePubDate(item.pubDateRaw);
+      if(!identity||!parsed||!isDeepStrictEqual(parsed,item.pubDateParsed))
+        throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      const alias=links.get(item.link),earlier=known.get(identity);
+      const kind=alias&&searchArticleIdentity(alias)!==identity?
+        compareArticleObservations(alias,item):earlier?
+          compareArticleObservations(earlier,item):'NEW_ARTICLE';
+      if(kind==='NEW_ARTICLE'){
+        known.set(identity,item);
+        if(item.link)links.set(item.link,item);
+        additions.set(identity,{articleIdentity:identity,sourcePollRunId:source.pollRunId,
+          requestIndex:pageIndex+1,itemIndex});
+      }else if(kind==='ARTICLE_METADATA_DRIFT')versions.push({articleIdentity:identity,
+        sourcePollRunId:source.pollRunId,observedAtKst:source.receivedAtKst,
+        requestIndex:pageIndex+1,itemIndex,metadataSignature:articleMetadataSignature(item)});
+      else if(kind!=='SAME')throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    }
+    const first=source.pages[0]?.items[0];
+    if(!first||!parsePubDate(first.pubDateRaw))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+    watermark={identity:searchArticleIdentity(first),signature:searchArticleSignature(first),
+      pubDateRaw:first.pubDateRaw,instant:parsePubDate(first.pubDateRaw).instant};
+  }
+  if(!isDeepStrictEqual([...additions.values()],event.newArticleRefs)||
+    !isDeepStrictEqual(versions,event.metadataVersions)||
+    !isDeepStrictEqual(watermark,event.collectionWatermark)||
+    additions.size!==event.appliedArticleCount||
+    existing.size+additions.size!==event.proposedArchiveArticleCount||
+    event.pageBoundaryDrift!==drift)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+  const articles=[];
+  for(const ref of additions.values()){
+    const source=sources.find(item=>item.pollRunId===ref.sourcePollRunId),
+      item=source.pages[ref.requestIndex-1].items[ref.itemIndex];
+    articles.push({identity:ref.articleIdentity,signature:searchArticleSignature(item),
+      archiveId:state.archiveId,pollRunId:source.pollRunId,sourcePollRunId:source.pollRunId,
+      symbol:state.symbol,query:state.query,firstSeenAtKst:source.receivedAtKst,
+      title:item.title??null,originallink:item.originallink??null,link:item.link??null,
+      description:item.description??null,pubDateRaw:item.pubDateRaw,pubDateParsed:parsePubDate(item.pubDateRaw),
+      segmentId:event.segmentId,observationStatus:'OBSERVED_UNVERIFIED'});
+  }
+  return {articles,versions,watermark,lastSource:sources.at(-1)};
+}
+
+// V1 reviews are replayed unchanged. V2 distinguishes mutable article text from
+// URL/date conflicts; it never treats a drift warning as coverage proof.
+function assessPollV2(prior,pages,{failed=false,maxRequestsPerPoll}={}){
+  const chronology=reviewPageChronology(pages),priorArticles=new Map(
+    (prior?.articles??[]).filter(item=>item.identity).map(item=>[item.identity,item]));
+  const seen=new Map(priorArticles),links=new Map(),hard=new Set(),drift=new Set();
+  let duplicateCount=0,identityMissingCount=0,hardConflictCount=0;
+  for(const item of priorArticles.values())if(item.link)links.set(item.link,item);
+  for(const page of pages)for(const item of page.items){
+    const identity=searchArticleIdentity(item);
+    if(!identity){identityMissingCount++;continue;}
+    const alias=links.get(item.link),earlier=seen.get(identity);
+    if(alias&&searchArticleIdentity(alias)!==identity){
+      hard.add(compareArticleObservations(alias,item));hardConflictCount++;continue;
+    }
+    if(!earlier){seen.set(identity,item);if(item.link)links.set(item.link,item);continue;}
+    const kind=compareArticleObservations(earlier,item);
+    if(kind==='SAME')duplicateCount++;
+    else if(kind==='ARTICLE_METADATA_DRIFT')drift.add(identity);
+    else {hard.add(kind);hardConflictCount++;}
+  }
+  const first=pages[0]?.items[0],firstParsed=parsePubDate(first?.pubDateRaw);
+  const watermarkArticle=priorArticles.get(prior?.watermark?.identity);
+  const watermarkReached=pages.some(page=>page.items.some(item=>
+    searchArticleIdentity(item)===prior?.watermark?.identity&&
+    item.pubDateRaw===prior.watermark.pubDateRaw&&
+    (!watermarkArticle||['SAME','ARTICLE_METADATA_DRIFT'].includes(
+      compareArticleObservations(watermarkArticle,item)))));
+  const warnings=[...(chronology.parseFailureCount?['PUBDATE_UNPARSEABLE']:[]),
+    ...(chronology.withinPageChronologyValid===false?['WITHIN_PAGE_ORDER_REVERSED']:[]),
+    ...(chronology.pageBoundaryDrift?['PAGE_BOUNDARY_DRIFT']:[]),
+    ...(identityMissingCount?['ARTICLE_IDENTITY_MISSING']:[]),
+    ...[...hard].sort(),...(drift.size?['ARTICLE_METADATA_DRIFT']:[])];
+  if(!first||!firstParsed||!searchArticleIdentity(first))warnings.push('FIRST_ARTICLE_NOT_USABLE');
+  const invalid=failed||chronology.parseFailureCount>0||
+    chronology.withinPageChronologyValid!==true||identityMissingCount>0||
+    !firstParsed||!searchArticleIdentity(first);
+  const status=failed?'FAILED':invalid?'UNVERIFIED':!prior?.watermark?'INITIAL_UNVERIFIED':
+    !watermarkReached?'GAP_DETECTED':hard.size||chronology.pageBoundaryDrift?'UNVERIFIED':'VERIFIED';
+  const watermark=['INITIAL_UNVERIFIED','VERIFIED'].includes(status)?{
+    identity:searchArticleIdentity(first),signature:searchArticleSignature(first),
+    pubDateRaw:first.pubDateRaw,instant:firstParsed.instant}:prior?.watermark??null;
+  return {status,watermarkReached,searchResultContinuityProven:status==='VERIFIED',
+    watermark,parseFailureCount:chronology.parseFailureCount,
+    observedDescendingOrder:chronology.observedDescendingOrder,identityMissingCount,
+    duplicateCount,duplicateConflictCount:hardConflictCount,metadataDriftCount:drift.size,
+    hardConflictTypes:[...hard].sort(),warnings,
+    stopReason:failed?'REQUEST_FAILED':!prior?.watermark?'INITIAL_SNAPSHOT':
+      watermarkReached?'WATERMARK_REACHED':
+        pages.at(-1)?.items.length===0?'EMPTY_PAGE':
+        pages.length===maxRequestsPerPoll?'REQUEST_LIMIT_REACHED':'STOPPED',
+    fullCoverageProven:false};
+}
+
 function materialize(manifest,events){
   const state=initialState(manifest.archiveId,manifest.symbol,manifest.query),seen=new Map(),conflicted=new Set();
-  let priorPollRunId=null,gapSeed=null,segmentState=null;
+  let priorPollRunId=null,gapSeed=null,bootstrapSeed=null,segmentState=null;
   for(const [index,event] of events.entries()){
     state.articles=[...seen.values()].filter(article=>!conflicted.has(article.identity));
+    if(event.schemaVersion==='ROLLING_NEWS_METADATA_RECOVERY_V1'){
+      if(event.testData!==manifest.testData||event.archiveId!==manifest.archiveId||
+        event.symbol!==manifest.symbol||event.query!==manifest.query||
+        event.sequence!==index+1||event.expectedArchiveRevision!==state.archiveRevision||
+        !uuid(event.recoveryId)||!uuid(event.segmentId)||!kstInstant(event.appliedAtKst)||
+        event.segmentId!==recoveredSegmentId(event.archiveId,event.sourcePollRunIds?.[0])||
+        segmentState||state.activeSegment||state.requestHistory.some(item=>item.type==='METADATA_RECOVERY')||
+        !isDeepStrictEqual(event.expectedWatermark,state.watermark)||
+        event.policyVersion!=='ROLLING_NEWS_METADATA_RECOVERY_V1'||
+        event.continuityProven!==false||event.coverageStatus!=='UNVERIFIED'||
+        event.fullCoverageProven!==false||event.snapshotConsistency!=='NOT_PROVEN'||
+        event.gapBefore!==false)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      const derived=recoverFromStoredPolls(state,events.slice(0,index),event);
+      for(const article of derived.articles)seen.set(article.identity,article);
+      state.metadataObservations.push(...derived.versions.map(version=>({...version,
+        warning:'ARTICLE_METADATA_DRIFT'})));
+      const all=[...seen.values()];
+      const dated=all.map(article=>({raw:article.pubDateRaw,
+        at:Date.parse(article.pubDateParsed?.instant??'')})).filter(item=>Number.isFinite(item.at));
+      if(dated.length!==all.length)throw Error('NEWS_ARCHIVE_RECORD_INVALID');
+      state.newestSeenPubDate=dated.reduce((a,b)=>b.at>a.at?b:a).raw;
+      state.oldestSeenPubDate=dated.reduce((a,b)=>b.at<a.at?b:a).raw;
+      segmentState={archiveId:state.archiveId,segmentId:event.segmentId,
+        sourcePollRunId:event.sourcePollRunIds[0],sourceSequence:1,
+        segmentRevision:1,bootstrap:true,active:true,gapBefore:false,
+        watermark:derived.watermark,collectionWatermark:derived.watermark,
+        articles:all,articleCount:all.length,
+        newestPubDate:state.newestSeenPubDate,oldestPubDate:state.oldestSeenPubDate,
+        collectedThroughKst:derived.lastSource.receivedAtKst,
+        continuityProven:false,continuityStatus:'UNVERIFIED',hasUnverifiedPoll:true,
+        coverageStatus:'UNVERIFIED',fullCoverageProven:false,
+        snapshotConsistency:'NOT_PROVEN',warnings:event.pageBoundaryDrift?['PAGE_BOUNDARY_DRIFT']:[]};
+      state.activeSegment=segmentState;
+      state.watermark=derived.watermark;
+      state.collectionWatermark=derived.watermark;
+      state.lastSuccessfulPollAtKst=derived.lastSource.receivedAtKst;
+      state.continuityStatus='UNVERIFIED';state.searchResultContinuityProven=false;
+      state.coverageStatus='UNVERIFIED';state.fullCoverageProven=false;
+      state.snapshotConsistency='NOT_PROVEN';
+      if(event.pageBoundaryDrift)state.warnings.push('PAGE_BOUNDARY_DRIFT');
+      state.requestHistory.push({type:'METADATA_RECOVERY',recoveryId:event.recoveryId,
+        sourcePollRunIds:event.sourcePollRunIds,segmentId:event.segmentId,
+        receivedAtKst:event.appliedAtKst,status:'UNVERIFIED',
+        observedArticleCount:derived.articles.length});
+      state.archiveRevision=event.sequence;
+      continue;
+    }
     if(event.schemaVersion==='ROLLING_NEWS_OBSERVED_APPLY_V1'){
       const source=events.find(item=>item.pollRunId===event.sourcePollRunId),
         chronology=source?.pages&&reviewPageChronology(source.pages),
@@ -179,7 +352,11 @@ function materialize(manifest,events){
       state.archiveRevision=event.sequence;
       continue;
     }
-    if(event.schemaVersion!=='ROLLING_NEWS_POLL_V1'||event.testData!==manifest.testData||
+    const v2=event.schemaVersion==='ROLLING_NEWS_POLL_V2';
+    if(!['ROLLING_NEWS_POLL_V1','ROLLING_NEWS_POLL_V2'].includes(event.schemaVersion)||
+      (v2?(event.bootstrap&&!uuid(event.bootstrapSegmentId)||
+        !event.bootstrap&&event.bootstrapSegmentId!==undefined):
+        event.bootstrapSegmentId!==undefined)||event.testData!==manifest.testData||
       !['SYNTHETIC_TEST_RESPONSE','SYNTHETIC_TEST_TRANSPORT','NAVER_API_HUB_SEARCH_NEWS'].includes(event.source)||
       (event.source!=='SYNTHETIC_TEST_RESPONSE'&&!uuid(event.approvalId))||
       (event.source!=='SYNTHETIC_TEST_RESPONSE'&&event.bootstrap!==(event.segment?false:state.watermark===null))||
@@ -198,11 +375,11 @@ function materialize(manifest,events){
       throw Error('NEWS_ARCHIVE_RECORD_INVALID');
     let assessmentPrior=state;
     if(event.segment){
-      const binding=event.segment;
+      const binding=event.segment,seed=gapSeed??bootstrapSeed;
       if(Object.keys(binding).sort().join(',')!==
         'revisionBefore,segmentId,sourcePollRunId,watermarkBefore'||
-        !uuid(binding.segmentId)||!uuid(binding.sourcePollRunId)||!gapSeed||
-        binding.sourcePollRunId!==gapSeed.sourcePollRunId||
+        !uuid(binding.segmentId)||!uuid(binding.sourcePollRunId)||!seed||
+        binding.sourcePollRunId!==seed.sourcePollRunId||
         segmentState?.continuityStatus==='GAP_DETECTED')throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       if(!segmentState)segmentState={segmentId:binding.segmentId,sourcePollRunId:binding.sourcePollRunId,
         segmentRevision:1,watermark:gapSeed.watermark,articles:gapSeed.articles,
@@ -216,7 +393,7 @@ function materialize(manifest,events){
         throw Error('NEWS_ARCHIVE_RECORD_INVALID');
       assessmentPrior=segmentState;
     }
-    const review=assessPoll(assessmentPrior,event.pages,{failed:event.failed===true,
+    const review=(v2?assessPollV2:assessPoll)(assessmentPrior,event.pages,{failed:event.failed===true,
       maxRequestsPerPoll:event.maxRequestsPerPoll});
     if(JSON.stringify(review)!==JSON.stringify(event.review))throw Error('NEWS_ARCHIVE_RECORD_INVALID');
     if(event.segment){
@@ -240,9 +417,18 @@ function materialize(manifest,events){
         collectedThroughKst:review.status==='VERIFIED'?event.receivedAtKst:segmentState.collectedThroughKst,
         bootstrap:review.status==='VERIFIED'?false:segmentState.bootstrap,
         hasUnverifiedPoll:segmentState.hasUnverifiedPoll||review.status==='UNVERIFIED',
-        continuityProven:review.status==='VERIFIED'&&!segmentState.hasUnverifiedPoll,
+        continuityProven:review.status==='FAILED'?segmentState.continuityProven:
+          review.status==='VERIFIED'&&!segmentState.hasUnverifiedPoll,
         continuityStatus:review.status==='FAILED'?segmentState.continuityStatus:review.status};
       state.activeSegment=segmentState;
+      if(bootstrapSeed){
+        state.continuityStatus=segmentState.continuityStatus;
+        state.searchResultContinuityProven=segmentState.continuityProven;
+        if(review.status==='VERIFIED'){
+          state.watermark=segmentState.watermark;
+          state.lastSuccessfulPollAtKst=event.receivedAtKst;
+        }
+      }
     }
     if(review.status==='GAP_DETECTED'&&!event.segment&&event.pages[0]?.items[0]){
       const first=event.pages[0].items[0],byIdentity=new Map();
@@ -269,7 +455,20 @@ function materialize(manifest,events){
       }
       if(!identity)continue;
       const existing=seen.get(identity);
-      if(existing&&existing.signature!==signature){conflicted.add(identity);continue;}
+      if(existing&&existing.signature!==signature){
+        if(v2){
+          const kind=compareArticleObservations(existing,item);
+          if(kind==='ARTICLE_METADATA_DRIFT')state.metadataObservations.push({
+            articleIdentity:identity,sourcePollRunId:event.pollRunId,
+            observedAtKst:event.receivedAtKst,metadataSignature:articleMetadataSignature(item),
+            requestIndex:event.pages.findIndex(page=>page.items.includes(item))+1,
+            itemIndex:event.pages.find(page=>page.items.includes(item)).items.indexOf(item),
+            warning:kind});
+          else state.warnings.push(kind);
+          continue;
+        }
+        conflicted.add(identity);continue;
+      }
       if(!existing)seen.set(identity,{identity,signature,archiveId:manifest.archiveId,
         pollRunId:event.pollRunId,symbol:event.symbol,query:event.query,firstSeenAtKst:event.receivedAtKst,
         title:item.title??null,originallink:item.originallink??null,link:item.link??null,
@@ -277,6 +476,22 @@ function materialize(manifest,events){
     }
     if(!event.segment&&['INITIAL_UNVERIFIED','VERIFIED'].includes(review.status)){
       state.watermark=review.watermark;state.lastSuccessfulPollAtKst=event.receivedAtKst;
+    }
+    if(v2&&event.bootstrap&&review.status==='INITIAL_UNVERIFIED'){
+      const articles=[...seen.values()].map(article=>({...article,
+        segmentId:event.bootstrapSegmentId,sourcePollRunId:event.pollRunId,
+        observationStatus:'OBSERVED_UNVERIFIED'}));
+      bootstrapSeed={segmentId:event.bootstrapSegmentId,archiveId:manifest.archiveId,
+        sourcePollRunId:event.pollRunId,sourceSequence:event.sequence,
+        segmentRevision:1,watermark:review.watermark,
+        collectionWatermark:review.watermark,articles,articleCount:articles.length,
+        newestPubDate:state.newestSeenPubDate,oldestPubDate:state.oldestSeenPubDate,
+        collectedThroughKst:event.receivedAtKst,bootstrap:true,active:true,
+        gapBefore:false,continuityProven:false,hasUnverifiedPoll:false,
+        continuityStatus:'INITIAL_UNVERIFIED',coverageStatus:'UNVERIFIED',
+        fullCoverageProven:false,warnings:[]};
+      segmentState=bootstrapSeed;state.activeSegment=segmentState;
+      state.coverageStatus='UNVERIFIED';
     }
     if(review.status!=='FAILED'&&!event.segment){
       state.continuityStatus=review.status;
@@ -287,11 +502,13 @@ function materialize(manifest,events){
       requests:event.requests,starts:event.requests.map(r=>r.start),requestCount:event.requests.length,
       rawArticleCount:event.pages.reduce((count,page)=>count+page.items.length,0),status:review.status,
       stopReason:review.stopReason,warnings:review.warnings,
+      ...(event.bootstrapSegmentId?{segmentId:event.bootstrapSegmentId}:{}),
       ...(event.segment?{segmentId:event.segment.segmentId,
         segmentRevisionBefore:event.segment.revisionBefore}:{} )});
     if(review.status!=='FAILED')state.warnings.push(...review.warnings);
     if(review.status==='GAP_DETECTED')state.warnings.push('POLL_GAP_DETECTED');
-    if(review.status!=='FAILED'&&state.warnings.length)state.searchResultContinuityProven=false;
+    if(review.status!=='FAILED'&&state.warnings.some(warning=>warning!=='ARTICLE_METADATA_DRIFT'))
+      state.searchResultContinuityProven=false;
     state.archiveRevision=event.sequence;
     priorPollRunId=event.pollRunId;
   }
@@ -434,13 +651,17 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       (active?.active.segmentRevision??null)!==plan.segmentRevision)
       throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
     const pollRunId=randomUUID(),archiveId=prior?.archiveId??randomUUID();
-    const review=assessPoll(assessmentPrior,pages,{failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
+    const versioned=active?.active.gapBefore!==true;
+    const review=(versioned?assessPollV2:assessPoll)(assessmentPrior,pages,
+      {failed,maxRequestsPerPoll:plan.maxRequestsPerPoll});
     const lastPoll=prior?.requestHistory.findLast(item=>item.pollRunId);
-    const event={schemaVersion:'ROLLING_NEWS_POLL_V1',archiveId,pollRunId,approvalId,
+    const event={schemaVersion:versioned?'ROLLING_NEWS_POLL_V2':'ROLLING_NEWS_POLL_V1',
+      archiveId,pollRunId,approvalId,
       bootstrap:assessmentPrior?.watermark==null,symbol:plan.symbol,
       query:plan.query,priorPollRunId:lastPoll?.pollRunId??null,
       sequence:plan.archiveRevision+1,receivedAtKst,maxRequestsPerPoll:plan.maxRequestsPerPoll,
       requests,pages,failed,review,testData:testOnly,
+      ...(versioned&&assessmentPrior?.watermark==null?{bootstrapSegmentId:randomUUID()}:{}),
       ...(active?{segment:{segmentId:plan.segmentId,sourcePollRunId:active.active.sourcePollRunId,
         revisionBefore:plan.segmentRevision,watermarkBefore:plan.watermark}}:{}),
       source:testOnly?'SYNTHETIC_TEST_TRANSPORT':'NAVER_API_HUB_SEARCH_NEWS'};
@@ -540,6 +761,92 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       throw Error(error.code==='EEXIST'?'ARCHIVE_OR_SEGMENT_STATE_CHANGED':error.message);
     }finally{await fs.unlink(stage).catch(()=>{});}
     return {event,archive:await read(plan.symbol),recordPath:file};
+  }
+  async function appendMetadataRecovery(plan,{appliedAtKst=nowKst(),testBeforePublish,
+    testAfterPublish}={}){
+    if(!plan?.ready||plan.status!=='NOT_APPLIED'||plan.applyExecutable!==true||
+      plan.policyVersion!=='ROLLING_NEWS_METADATA_RECOVERY_V1'||
+      !kstInstant(appliedAtKst)||
+      (testBeforePublish!==undefined&&(!testOnly||typeof testBeforePublish!=='function'))||
+      (testAfterPublish!==undefined&&(!testOnly||typeof testAfterPublish!=='function')))
+      throw Error('NEWS_METADATA_RECOVERY_PLAN_INVALID');
+    await ensureRoot();
+    const preLock=await read(plan.symbol);
+    const previous=preLock?.requestHistory.find(item=>item.type==='METADATA_RECOVERY');
+    if(previous)return {status:'ALREADY_APPLIED',recoveryId:previous.recoveryId,archive:preLock};
+    const lockFile=path.join(root,`.${plan.symbol}-metadata-recovery.lock`);
+    let lock;
+    try{lock=await fs.open(lockFile,'wx',0o600);}
+    catch(error){throw Error(error.code==='EEXIST'?'RECOVERY_ALREADY_RUNNING':'NEWS_METADATA_RECOVERY_LOCK_FAILED');}
+    try{
+      const current=await read(plan.symbol);
+      const applied=current?.requestHistory.find(item=>item.type==='METADATA_RECOVERY');
+      if(applied)return {status:'ALREADY_APPLIED',recoveryId:applied.recoveryId,archive:current};
+      if(!current||current.archiveId!==plan.archiveId||
+        current.archiveRevision!==plan.expectedArchiveRevision||current.activeSegment)
+        throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+      const {createRollingNewsMetadataRecovery}=require('./rollingNewsMetadataRecovery');
+      const fresh=await createRollingNewsMetadataRecovery({testOnly,
+        testDirectory:testOnly?path.basename(root)==='rolling-archive'?path.dirname(root):root:undefined})
+        .replay({symbol:plan.symbol,bootstrapPollRunId:plan.sourcePollRunIds[0],
+          pollRunIds:plan.sourcePollRunIds.slice(1)});
+      if(!fresh.ready||!isDeepStrictEqual(fresh,plan))
+        throw Error('NEWS_METADATA_RECOVERY_SOURCE_CHANGED');
+      const event={schemaVersion:'ROLLING_NEWS_METADATA_RECOVERY_V1',
+        policyVersion:plan.policyVersion,recoveryId:randomUUID(),
+        archiveId:plan.archiveId,symbol:plan.symbol,query:current.query,
+        sequence:plan.expectedArchiveRevision+1,
+        expectedArchiveRevision:plan.expectedArchiveRevision,
+        expectedWatermark:plan.migration.collectionWatermark,
+        sourcePollRunIds:plan.sourcePollRunIds,sourceDigests:plan.sourceDigests,
+        segmentId:plan.migration.proposedSegmentId,
+        newArticleRefs:plan.newArticleRefs,metadataVersions:plan.metadataVersions,
+        appliedArticleCount:plan.applyEligibleArticleCount,
+        proposedArchiveArticleCount:plan.proposedArchiveArticleCount,
+        collectionWatermark:plan.proposedCollectionWatermark,
+        pageBoundaryDrift:plan.anyPageBoundaryDrift,
+        gapBefore:false,continuityProven:false,coverageStatus:'UNVERIFIED',
+        fullCoverageProven:false,snapshotConsistency:'NOT_PROVEN',
+        appliedAtKst,testData:testOnly};
+      const dir=location(plan.symbol),pollDir=path.join(dir,'polls');
+      const [dirStat,pollStat,realDir,realPoll]=await Promise.all([
+        fs.lstat(dir),fs.lstat(pollDir),fs.realpath(dir),fs.realpath(pollDir)]);
+      if(!dirStat.isDirectory()||dirStat.isSymbolicLink()||!pollStat.isDirectory()||
+        pollStat.isSymbolicLink()||path.dirname(realDir)!==await fs.realpath(root)||
+        path.dirname(realPoll)!==realDir)throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+      const names=(await fs.readdir(pollDir)).sort(),events=[];
+      for(const name of names)events.push(await safeFile(path.join(pollDir,name),pollDir));
+      const manifest=await safeFile(path.join(dir,'manifest.json'),dir);
+      const preview=materialize(manifest,[...events,event]);
+      if(preview.articleCount!==plan.proposedArchiveArticleCount||
+        preview.activeSegment?.segmentRevision!==1||
+        !isDeepStrictEqual(preview.activeSegment.collectionWatermark,plan.proposedCollectionWatermark))
+        throw Error('NEWS_METADATA_RECOVERY_PREVIEW_INVALID');
+      const stage=path.join(root,`.${plan.symbol}-recovery-${event.recoveryId}.json`),
+        file=path.join(pollDir,`${String(event.sequence).padStart(6,'0')}.json`);
+      try{
+        await writeExclusive(stage,event);
+        const latest=await read(plan.symbol);
+        if(latest.archiveRevision!==plan.expectedArchiveRevision||latest.activeSegment)
+          throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+        const latestNames=(await fs.readdir(pollDir)).sort();
+        if(!isDeepStrictEqual(latestNames,names))throw Error('ARCHIVE_OR_SEGMENT_STATE_CHANGED');
+        for(const [i,name] of latestNames.entries()){
+          const source=await safeFile(path.join(pollDir,name),pollDir);
+          if(eventDigest(source)!==event.sourceDigests[i])
+            throw Error('NEWS_METADATA_RECOVERY_SOURCE_CHANGED');
+        }
+        if(testBeforePublish)await testBeforePublish();
+        for(const [i,name] of latestNames.entries()){
+          const source=await safeFile(path.join(pollDir,name),pollDir);
+          if(eventDigest(source)!==event.sourceDigests[i])
+            throw Error('NEWS_METADATA_RECOVERY_SOURCE_CHANGED');
+        }
+        await fs.link(stage,file); // Single immutable event is the only visibility boundary.
+        if(testAfterPublish)await testAfterPublish();
+      }finally{await fs.unlink(stage).catch(()=>{});}
+      return {status:'APPLIED',event,archive:await read(plan.symbol),recordPath:file};
+    }finally{await lock.close();await fs.unlink(lockFile).catch(()=>{});}
   }
   async function collectSyntheticPoll({symbol,maxRequestsPerPoll,readPage,
     receivedAtKst=nowKst()}={}){
@@ -646,6 +953,8 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
         ...(archive?.warnings??[]),...(archive&&!archive.searchResultContinuityProven?['POLL_CONTINUITY_NOT_PROVEN']:[])]};
   }
   return {read,listSymbols,readPoll,planPoll,reservePoll,appendPoll,appendObservedApply,
+    appendMetadataRecovery,
     collectSyntheticPoll,selectNewsForEodWindow};
 }
-module.exports={createRollingNewsArchiveStore,assessPoll,reviewPageChronology,nowKst,MAX_REQUESTS_PER_POLL};
+module.exports={createRollingNewsArchiveStore,assessPoll,assessPollV2,
+  reviewPageChronology,nowKst,MAX_REQUESTS_PER_POLL};

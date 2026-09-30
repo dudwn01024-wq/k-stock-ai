@@ -76,7 +76,21 @@ function createRollingNewsGapRecovery({testOnly=false,testDirectory}={}){
   async function readActive(symbol){
     let segments;
     try{segments=await read(symbol);}catch{throw Error('SEGMENT_STATE_INVALID');}
-    if(!segments)return null;
+    if(!segments){
+      const archiveState=await archive.read(symbol),active=archiveState?.activeSegment;
+      if(!active)return null;
+      const first=archiveState.requestHistory[0];
+      const recovered=archiveState.requestHistory.find(item=>item.type==='METADATA_RECOVERY');
+      if(active.gapBefore!==false||active.sourceSequence!==1||
+        active.sourcePollRunId!==first?.pollRunId||
+        active.segmentId!==(first?.segmentId??recovered?.segmentId)||
+        (recovered&&archiveState.requestHistory.filter(item=>item.type==='METADATA_RECOVERY').length!==1)||
+        active.fullCoverageProven!==false||
+        active.coverageStatus!=='UNVERIFIED'||!active.collectionWatermark)
+        throw Error('SEGMENT_STATE_INVALID');
+      return {archive:archiveState,segments:[active],active:{...active,
+        archiveId:archiveState.archiveId,archiveRevision:archiveState.archiveRevision}};
+    }
     const archiveState=await archive.read(symbol),seed=segments[1],overlay=archiveState.activeSegment;
     const later=archiveState.requestHistory.slice(seed.sourceSequence);
     if(archiveState.archiveId!==seed.archiveId||archiveState.archiveRevision<seed.sourceSequence||

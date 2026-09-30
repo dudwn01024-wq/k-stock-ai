@@ -95,7 +95,7 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
   let used=false;
   return {async observe(symbol,{targetBusinessDate}={}){
     if(used)throw Error('OBSERVATION_ALREADY_USED');used=true;
-    const {createRollingNewsArchiveStore,assessPoll,nowKst}=require('./rollingNewsArchive');
+    const {createRollingNewsArchiveStore,assessPoll,assessPollV2,nowKst}=require('./rollingNewsArchive');
     const execution=executionFor(symbol,targetBusinessDate,searchNewsOptions);
     if(!testOnly&&!['target-window','rolling-poll'].includes(execution.mode)&&
       execution.searchNewsMaxRequests!==LIVE_MAX_REQUESTS)
@@ -108,7 +108,7 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
     }
     const rollingStore=execution.mode==='rolling-poll'?createRollingNewsArchiveStore({testOnly,
       testDirectory:testOnly?path.join(directory,'rolling-archive'):undefined}):null;
-    let rollingPlan=null,rollingPrior=null;
+    let rollingPlan=null,rollingPrior=null,reviewRollingPoll=assessPollV2;
     if(rollingStore){
       rollingPlan=await rollingStore.planPoll({symbol});
       if(rollingPlan.query!==execution.query||rollingPlan.archiveId!==execution.expectedArchiveId||
@@ -122,6 +122,7 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
       const active=await createRollingNewsGapRecovery({testOnly,
         testDirectory:testOnly?directory:undefined}).readActive(symbol);
       rollingPrior=active?.active??await rollingStore.read(symbol);
+      if(active?.active.gapBefore===true)reviewRollingPoll=assessPoll;
     }
     const keyId=environment.NAVER_API_HUB_API_KEY_ID,key=environment.NAVER_API_HUB_API_KEY;
     if(typeof keyId!=='string'||!keyId.trim()||typeof key!=='string'||!key.trim())throw Error('SEARCH_NEWS_CREDENTIALS_MISSING');
@@ -164,7 +165,7 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
           if(attempt){attempt.outcome='RESPONSE';attempt.returnedCount=items.length;}
           // Both modes remain collection evidence, never a strategy news verdict.
           if(execution.mode==='rolling-poll'){
-            const review=assessPoll(rollingPrior,pages,
+            const review=reviewRollingPoll(rollingPrior,pages,
               {maxRequestsPerPoll:execution.maxRequestsPerPoll});
             if(!rollingPlan.watermark||review.watermarkReached||review.warnings.length||items.length===0)break;
           }else if(execution.mode==='target-window'){
