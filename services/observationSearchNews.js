@@ -167,7 +167,8 @@ function createSearchNewsObservation({environment=process.env,approvalId,testOnl
           if(execution.mode==='rolling-poll'){
             const review=reviewRollingPoll(rollingPrior,pages,
               {maxRequestsPerPoll:execution.maxRequestsPerPoll});
-            if(!rollingPlan.watermark||review.watermarkReached||review.warnings.length||items.length===0)break;
+            if(!rollingPlan.watermark||review.watermarkReached||
+              review.warnings.some(warning=>warning!=='ARTICLE_METADATA_DRIFT')||items.length===0)break;
           }else if(execution.mode==='target-window'){
             const review=reviewTargetWindowPages(pages,execution);
             if(review.lowerBoundaryReached||review.pubDateInvalidCount||!review.observedDescendingOrder||

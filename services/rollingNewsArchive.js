@@ -272,6 +272,8 @@ function materialize(manifest,events){
         continuityProven:false,continuityStatus:'UNVERIFIED',hasUnverifiedPoll:true,
         coverageStatus:'UNVERIFIED',fullCoverageProven:false,
         snapshotConsistency:'NOT_PROVEN',warnings:event.pageBoundaryDrift?['PAGE_BOUNDARY_DRIFT']:[]};
+      // The validated recovery event is the bootstrap lineage for subsequent polls.
+      bootstrapSeed=segmentState;
       state.activeSegment=segmentState;
       state.watermark=derived.watermark;
       state.collectionWatermark=derived.watermark;
@@ -419,7 +421,8 @@ function materialize(manifest,events){
         hasUnverifiedPoll:segmentState.hasUnverifiedPoll||review.status==='UNVERIFIED',
         continuityProven:review.status==='FAILED'?segmentState.continuityProven:
           review.status==='VERIFIED'&&!segmentState.hasUnverifiedPoll,
-        continuityStatus:review.status==='FAILED'?segmentState.continuityStatus:review.status};
+        continuityStatus:review.status==='FAILED'?segmentState.continuityStatus:
+          review.status==='VERIFIED'&&segmentState.hasUnverifiedPoll?'UNVERIFIED':review.status};
       state.activeSegment=segmentState;
       if(bootstrapSeed){
         state.continuityStatus=segmentState.continuityStatus;
@@ -677,10 +680,11 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
     const dir=location(plan.symbol),name=`${String(event.sequence).padStart(6,'0')}.json`;
     let file;
     if(!prior){
-      const stage=path.join(root,`.${plan.symbol}-stage-${pollRunId}`);
-      await fs.mkdir(path.join(stage,'polls'),{recursive:true});
       const manifest={schemaVersion:'ROLLING_NEWS_MANIFEST_V1',archiveId,symbol:plan.symbol,
         query:plan.query,createdAtKst:receivedAtKst,testData:testOnly};
+      materialize(manifest,[event]);
+      const stage=path.join(root,`.${plan.symbol}-stage-${pollRunId}`);
+      await fs.mkdir(path.join(stage,'polls'),{recursive:true});
       await writeExclusive(path.join(stage,'manifest.json'),manifest);
       await writeExclusive(path.join(stage,'polls',name),event);
       await fs.rename(stage,dir);file=path.join(dir,'polls',name);
@@ -692,10 +696,14 @@ function createRollingNewsArchiveStore({testOnly=false,testDirectory}={}){
       if(!dirStat.isDirectory()||dirStat.isSymbolicLink()||!pollStat.isDirectory()||
         pollStat.isSymbolicLink()||path.dirname(realDir)!==await fs.realpath(root)||
         path.dirname(realPoll)!==realDir)throw Error('NEWS_ARCHIVE_DIRECTORY_INVALID');
+      const manifest=await safeFile(path.join(dir,'manifest.json'),dir),events=[];
+      for(const existingName of (await fs.readdir(pollDir)).sort())
+        events.push(await safeFile(path.join(pollDir,existingName),pollDir));
+      materialize(manifest,[...events,event]);
       const stage=path.join(root,`.${plan.symbol}-stage-${pollRunId}.json`);
       await writeExclusive(stage,event);
       file=path.join(pollDir,name);
-      await fs.link(stage,file);await fs.unlink(stage);
+      try{await fs.link(stage,file);}finally{await fs.unlink(stage).catch(()=>{});}
     }
     return {event,archive:await read(plan.symbol),recordPath:file};
   }
