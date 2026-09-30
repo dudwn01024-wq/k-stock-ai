@@ -42,7 +42,12 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
   if(!personal(environment))throw Error('NEWS_AUTOMATION_PERSONAL_LOCAL_REQUIRED');
   if(testOnly?!testDirectory:testDirectory!==undefined)throw Error('NEWS_AUTOMATION_DIRECTORY_INVALID');
   if(!testOnly&&clock!==nowKst)throw Error('NEWS_AUTOMATION_CLOCK_FORBIDDEN');
-  const root=testOnly?path.resolve(testDirectory):ROOT;
+  const sharedRoot=environment.KSTOCK_ROLLING_NEWS_GRANT_ROOT;
+  if(!testOnly&&sharedRoot!==undefined&&
+    (!path.isAbsolute(sharedRoot)||path.basename(sharedRoot)!=='rolling-news-automation-grants'||
+      path.basename(path.dirname(sharedRoot))!=='strategy-observations'))
+    throw Error('NEWS_AUTOMATION_DIRECTORY_INVALID');
+  const root=testOnly?path.resolve(testDirectory):sharedRoot?path.resolve(sharedRoot):ROOT;
   async function safeDir(dir,parent){
     const stat=await fs.lstat(dir);
     if(!stat.isDirectory()||stat.isSymbolicLink()||
@@ -123,8 +128,11 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
     const pollRunIds=new Set(),grantIds=new Set();
     for(const record of records){
       grantIds.add(record.grantId);
-      const approvalDir=testOnly?path.resolve(root,'../approvals',record.plannedApprovalId):
-        path.resolve(__dirname,'../.local/strategy-observations/approvals',record.plannedApprovalId);
+      const sharedApproval=path.resolve(root,'../approvals',record.plannedApprovalId);
+      const localApproval=path.resolve(__dirname,'../.local/strategy-observations/approvals',record.plannedApprovalId);
+      const approvalDir=testOnly||sharedApproval===localApproval?sharedApproval:
+        await fs.access(path.join(sharedApproval,'requests.json')).then(()=>sharedApproval,
+          error=>error.code==='ENOENT'?localApproval:Promise.reject(error));
       try{
         const journal=await readFile(path.join(approvalDir,'requests.json'),approvalDir);
         if(journal.state!=='FINISHED')httpCountConfirmed=false;
@@ -132,8 +140,14 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
           journal.counts.searchNews>record.maxRequests)throw Error('NEWS_AUTOMATION_USAGE_INVALID');
         else httpRequestCount+=journal.counts.searchNews;
       }catch(e){if(e.code==='ENOENT')httpCountConfirmed=false;else throw e;}
-      const slotRoot=testOnly?path.resolve(root,'../slots','005930'):
-        path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler/005930');
+      const symbol=record.symbol??'005930';
+      if(!/^\d{6}$/.test(symbol))throw Error('NEWS_AUTOMATION_USAGE_INVALID');
+      const sharedSlot=path.resolve(root,'../rolling-news-scheduler',symbol);
+      const localSlot=path.resolve(__dirname,'../.local/strategy-observations/rolling-news-scheduler',symbol);
+      const slotRoot=testOnly?path.resolve(root,'../slots',symbol):
+        sharedSlot===localSlot?sharedSlot:
+          await fs.access(path.join(sharedSlot,record.schedulerSlotKey+'.result.json')).then(()=>sharedSlot,
+            error=>error.code==='ENOENT'?localSlot:Promise.reject(error));
       try{
         const slot=await readFile(path.join(slotRoot,record.schedulerSlotKey+'.result.json'),slotRoot);
         if(slot.status==='SUCCESS')pollSuccessCount++;
@@ -169,6 +183,7 @@ function createAutomationGrantStore({environment=process.env,testOnly=false,test
         return {status:'DAILY_LIMIT_REACHED',used};
       const reservationId=randomUUID(),plannedApprovalId=randomUUID();
       await write(path.join(dayDir,reservationId+'.json'),{reservationId,grantId,kstDate:day,
+        symbol:plan.symbol,
         schedulerSlotKey:plan.slotKey,archiveId:plan.archiveId,archiveRevision:plan.archiveRevision,
         maxRequests:limit,plannedApprovalId,reservedAtKst:clock()});
       const updated=await dailyUsage(day);
