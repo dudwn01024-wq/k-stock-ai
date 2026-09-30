@@ -12,13 +12,33 @@ const {createObservationHttpBudget}=require('../services/observationHttpBudget')
 const http=require('node:http'),express=require('express');
 const {installExecutionMode,resolveExecutionMode}=require('../services/executionMode');
 const {createObservationRouter}=require('../services/observationApi');
+const {forbiddenImportsDuring}=require('./helpers/no-forbidden-dependencies.cjs');
 const date='2026-09-23',environment={NODE_ENV:'development',KSTOCK_EXECUTION_MODE:'personal-local',
   NAVER_API_HUB_API_KEY_ID:'TEST_ID',NAVER_API_HUB_API_KEY:'TEST_KEY'};
 const item=(n,raw='Thu, 24 Sep 2026 10:00:00 +0900')=>({title:`TEST DATA ${n}`,originallink:`https://example.test/${n}`,
   link:`https://news.naver.com/${n}`,description:'TEST DATA',pubDate:raw});
-test('TEST DATA: search scope imports no KIS, account, order, PAPER, ledger or AI module',()=>{
-  const forbidden=Object.keys(require.cache).filter(file=>/[/\\](?:kisMarketData|kisAuth|accountSnapshot|orderLifecycle|paperTrading|liveRiskLedger|aiService)\.js$/.test(file));
+const forbiddenDependency=/[/\\](?:kisMarketData|kisAuth|accountSnapshot|orderLifecycle|paperTrading|liveRiskLedger|aiService)\.js$/;
+test('TEST DATA: search scope imports no KIS, account, order, PAPER, ledger or AI module',async t=>{
+  const entry=require.resolve('../services/observationSearchNews');
+  const cached=require.cache[entry];
+  const {forbidden}=await forbiddenImportsDuring(forbiddenDependency,async()=>{
+    // Re-evaluate only this entrypoint so the check still covers its static imports.
+    delete require.cache[entry];
+    try{assert.equal(typeof require('../services/observationSearchNews').createSearchNewsObservation,'function');}
+    finally{if(cached)require.cache[entry]=cached;else delete require.cache[entry];}
+    const h=await setup(t,{searchNewsMaxRequests:1,pages:[[]]});
+    await h.run();
+  });
   assert.deepEqual(forbidden,[]);
+});
+test('TEST DATA: import guard detects a synthetic forbidden module even when cached',async t=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'search-news-import-test-'));
+  const fake=path.join(directory,'accountSnapshot.js');
+  t.after(async()=>{delete require.cache[fake];await fs.rm(directory,{recursive:true,force:true});});
+  await fs.writeFile(fake,'module.exports={testData:true};');
+  assert.equal(require(fake).testData,true);
+  const {forbidden}=await forbiddenImportsDuring(forbiddenDependency,()=>require(fake));
+  assert.deepEqual(forbidden,[fake]);
 });
 test('TEST DATA: search scope rejects stock news, quote, KIS, account and order before transport',async()=>{
   let calls=0;const guarded=scopeTransport(SCOPE,async()=>{calls++;return {status:200};});
