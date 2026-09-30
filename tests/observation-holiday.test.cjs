@@ -1,14 +1,22 @@
 'use strict';
 require('./helpers/local-only.cjs');
-const {test}=require('node:test'),assert=require('node:assert/strict');
+const {test:nodeTest}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const {randomUUID}=require('node:crypto'),express=require('express');
-const forbidden={account:0,order:0,paper:0,ledger:0,strategy:0,naver:0};
-for(const [name,key] of [['accountSnapshot','account'],['paperTrading','paper'],['liveRiskLedger','ledger'],
-  ['tradingStrategy','strategy'],['naverMarketData','naver']]){
-  const module=require('../services/'+name);
-  for(const method of Object.keys(module))if(typeof module[method]==='function')module[method]=()=>{forbidden[key]++;throw Error('FORBIDDEN_CALL');};
-}
+const {patchFunctions}=require('./helpers/scoped-module-functions.cjs');
+const guarded=[['accountSnapshot','account'],['paperTrading','paper'],['liveRiskLedger','ledger'],
+  ['tradingStrategy','strategy'],['naverMarketData','naver']];
+let forbidden;
+function test(name,body){return nodeTest(name,async t=>{
+  const counts={account:0,order:0,paper:0,ledger:0,strategy:0,naver:0};
+  forbidden=counts;
+  const specs=guarded.map(([name,key])=>({module:require('../services/'+name),key}));
+  const restore=patchFunctions(specs.map(({module})=>({module,keys:Object.keys(module).filter(k=>typeof module[k]==='function')})),
+    (original,key,module)=>()=>{counts[specs.find(spec=>spec.module===module).key]++;throw Error('FORBIDDEN_CALL');});
+  try{return await body(t);}finally{
+    restore();assert.deepEqual(counts,{account:0,order:0,paper:0,ledger:0,strategy:0,naver:0});
+  }
+});}
 const {createHolidayObservation,executionFor}=require('../services/observationHoliday');
 const {createObservationApprovalStore}=require('../services/observationApproval');
 const {createObservationHttpBudget,classify,classifyHoliday}=require('../services/observationHttpBudget');
@@ -23,7 +31,8 @@ const rows=()=>['20300107','20300108','20300109'].map(bass_dt=>({bass_dt,wday_dv
   tr_day_yn:'Y',opnd_yn:'Y',sttl_day_yn:'Y'}));
 async function setup(t,{output=rows(),holidayError=false,tokenError=false,trCont='D',at=currentTime,queryBaseDate=baseDate}={}){
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'kstock-holiday-test-'));
-  t.after(async()=>{await fs.rm(root,{recursive:true,force:true});assert.deepEqual(forbidden,{account:0,order:0,paper:0,ledger:0,strategy:0,naver:0});});
+  const counts=forbidden;
+  t.after(async()=>{await fs.rm(root,{recursive:true,force:true});assert.deepEqual(counts,{account:0,order:0,paper:0,ledger:0,strategy:0,naver:0});});
   const approvalId=randomUUID(),approvalDir=path.join(root,'approvals'),calendarDir=path.join(root,'calendar');
   const approvals=createObservationApprovalStore({environment,testOnly:true,testDirectory:approvalDir});
   await approvals.issue({approvalId,execution:executionFor(queryBaseDate),userApproved:true});

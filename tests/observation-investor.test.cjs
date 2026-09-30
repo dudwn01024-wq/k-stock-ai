@@ -1,12 +1,25 @@
 'use strict';
 require('./helpers/local-only.cjs');
-const {test}=require('node:test'),assert=require('node:assert/strict');
+const {test:nodeTest}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path'),http=require('node:http');
 const {randomUUID}=require('node:crypto'),express=require('express');
-const forbidden={naver:0,account:0,paper:0,ledger:0,strategy:0};
-for(const [file,key] of [['naverMarketData','naver'],['accountSnapshot','account'],['paperTrading','paper'],['liveRiskLedger','ledger'],['tradingStrategy','strategy']]){
-  const mod=require('../services/'+file);for(const name of Object.keys(mod))if(typeof mod[name]==='function')mod[name]=()=>{forbidden[key]++;throw Error('FORBIDDEN_CALL');};
-}
+const {patchFunctions,reloadForTest}=require('./helpers/scoped-module-functions.cjs');
+const guarded=[['naverMarketData','naver'],['accountSnapshot','account'],['paperTrading','paper'],
+  ['liveRiskLedger','ledger'],['tradingStrategy','strategy']];
+let forbidden;
+function test(name,body){return nodeTest(name,async t=>{
+  const counts={naver:0,account:0,paper:0,ledger:0,strategy:0};
+  forbidden=counts;
+  const specs=guarded.map(([file,key])=>({module:require('../services/'+file),key}));
+  const restore=patchFunctions(specs.map(({module})=>({module,keys:Object.keys(module).filter(k=>typeof module[k]==='function')})),
+    (original,key,module)=>()=>{counts[specs.find(spec=>spec.module===module).key]++;throw Error('FORBIDDEN_CALL');});
+  let isolated;
+  try{isolated=reloadForTest([require.resolve('../services/strategyObservation')]);return await body(t);}
+  finally{
+    isolated?.restore();restore();
+    assert.deepEqual(counts,{naver:0,account:0,paper:0,ledger:0,strategy:0});
+  }
+});}
 const {SCOPE,API_PATH,TR_ID,FIELDS,executionFor}=require('../services/observationInvestorContract');
 const {createOneShotObservation,createMarketDataProvider}=require('../services/observationMarketData');
 const {createInvestorProvider,reviewInvestorEvidence}=require('../services/observationInvestor');
@@ -38,7 +51,8 @@ async function setup(t,{output2=[row()],output1={stck_prpr:'999'},error=false,to
   };
   const options={scope:SCOPE,credentialSource:'KIS_LIVE',environment,approvalId,testOnly:true,testTransport:transport,testApprovalDirectory,directory};
   const run=(extra={})=>createOneShotObservation({...options,...extra}).observe('005930',{targetBusinessDate:date});
-  t.after(async()=>{for(const close of closes)await close();assert.equal(path.dirname(directory),os.tmpdir());assert.ok(path.basename(directory).startsWith('kstock-investor-test-'));await fs.rm(directory,{recursive:true,force:true});assert.deepEqual(forbidden,{naver:0,account:0,paper:0,ledger:0,strategy:0});});
+  const counts=forbidden;
+  t.after(async()=>{for(const close of closes)await close();assert.equal(path.dirname(directory),os.tmpdir());assert.ok(path.basename(directory).startsWith('kstock-investor-test-'));await fs.rm(directory,{recursive:true,force:true});assert.deepEqual(counts,{naver:0,account:0,paper:0,ledger:0,strategy:0});});
   return {directory,approvalId,store,execution,requests,transport,options,run,closes};
 }
 async function api(t,options,publicMode=false){

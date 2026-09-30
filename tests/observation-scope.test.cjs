@@ -1,25 +1,44 @@
 'use strict';
 require('./helpers/local-only.cjs');
-const {test}=require('node:test'),assert=require('node:assert/strict');
+const {test:nodeTest}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),vm=require('node:vm'),http=require('node:http');
 const express=require('express');
+const {patchFunctions,reloadForTest}=require('./helpers/scoped-module-functions.cjs');
 // Detect accidental computation/trading calls as well as actual HTTP dispatches.
-const calls={strategy:0,chart:0,naverFactory:0,quote:0,news:0,forbidden:0};
-for(const [file,key,counter] of [['tradingStrategy','calculateTradingStrategy','strategy'],['chartAnalysis','analyzeMovingAverages','chart']]) {
-  const mod=require('../services/'+file),original=mod[key];mod[key]=(...args)=>{calls[counter]++;return original(...args);};
-}
-const naver=require('../services/naverMarketData'),originalNaver=naver.createNaverMarketData;
-naver.createNaverMarketData=(...args)=>{calls.naverFactory++;const result=originalNaver(...args);
-  for(const [key,counter] of [['fetchStockQuoteData','quote'],['fetchStockNewsBySymbol','news']]){
-    const original=result[key];result[key]=(...params)=>{calls[counter]++;return original(...params);};
-  }return result;
-};
-for(const name of ['paperTrading','accountSnapshot','liveRiskLedger']){
-  const mod=require('../services/'+name);for(const key of Object.keys(mod))if(typeof mod[key]==='function')mod[key]=()=>{calls.forbidden++;throw Error('TRADING_FORBIDDEN');};
-}
-const {createMarketDataProvider,createOneShotObservation}=require('../services/observationMarketData');
-const {createObservationService}=require('../services/strategyObservation');
-const {createObservationRouter}=require('../services/observationApi');
+let calls,createMarketDataProvider,createOneShotObservation,createObservationService,createObservationRouter;
+function test(name,body){return nodeTest(name,async t=>{
+  calls={strategy:0,chart:0,naverFactory:0,quote:0,news:0,forbidden:0};
+  const undo=[];let isolated;
+  try{
+    for(const [file,key,counter] of [['tradingStrategy','calculateTradingStrategy','strategy'],
+      ['chartAnalysis','analyzeMovingAverages','chart']]){
+      const module=require('../services/'+file);
+      undo.push(patchFunctions([{module,keys:[key]}],original=>(...args)=>{
+        calls[counter]++;return original(...args);
+      }));
+    }
+    const naver=require('../services/naverMarketData');
+    undo.push(patchFunctions([{module:naver,keys:['createNaverMarketData']}],original=>(...args)=>{
+      calls.naverFactory++;const result=original(...args);
+      for(const [key,counter] of [['fetchStockQuoteData','quote'],['fetchStockNewsBySymbol','news']]){
+        const invoke=result[key];result[key]=(...params)=>{calls[counter]++;return invoke(...params);};
+      }return result;
+    }));
+    const forbiddenModules=['paperTrading','accountSnapshot','liveRiskLedger'].map(name=>require('../services/'+name));
+    undo.push(patchFunctions(forbiddenModules.map(module=>({module,
+      keys:Object.keys(module).filter(key=>typeof module[key]==='function')})),
+    ()=>()=>{calls.forbidden++;throw Error('TRADING_FORBIDDEN');}));
+    isolated=reloadForTest(['observationDaily','strategyObservation','observationMarketData','observationApi']
+      .map(name=>require.resolve('../services/'+name)));
+    ({createObservationService}=isolated.loaded[1]);
+    ({createMarketDataProvider,createOneShotObservation}=isolated.loaded[2]);
+    ({createObservationRouter}=isolated.loaded[3]);
+    return await body(t);
+  }finally{
+    isolated?.restore();for(const restore of undo.reverse())restore();
+    assert.equal(calls.forbidden,0);
+  }
+});}
 const {createObservationHttpBudget}=require('../services/observationHttpBudget');
 const {selectObservationCredentials}=require('../services/observationCredentials');
 const {installExecutionMode,resolveExecutionMode}=require('../services/executionMode');
@@ -107,6 +126,23 @@ test('TEST DATA: explicit one-shot scope uses LIVE bundle and cannot repeat; sho
   assert.equal(requests.counts.naverQuote,0);assert.equal(requests.counts.naverNews,0);assert.deepEqual(calls,before);
   assert.equal(environment.KIS_APP_KEY,'');assert.equal(environment.KIS_APP_SECRET,'');
   await assert.rejects(run.observe('005930',{targetBusinessDate}),/OBSERVATION_ALREADY_USED/);assert.equal(h.requests.length,3);
+});
+nodeTest('TEST DATA: a forbidden function call and thrown test body restore their scoped probes',async()=>{
+  const fake={run:()=> 'ORIGINAL'};
+  let forbiddenCalls=0;
+  await assert.rejects(async()=>{
+    const restore=patchFunctions([{module:fake,keys:['run']}],()=>()=>{
+      forbiddenCalls++;throw Error('TRADING_FORBIDDEN');
+    });
+    try{fake.run();}finally{restore();}
+  },/TRADING_FORBIDDEN/);
+  assert.equal(forbiddenCalls,1);
+  assert.equal(fake.run(),'ORIGINAL');
+  await assert.rejects(async()=>{
+    const restore=patchFunctions([{module:fake,keys:['run']}],()=>()=> 'SYNTHETIC');
+    try{throw Error('SYNTHETIC_BODY_FAILURE');}finally{restore();}
+  },/SYNTHETIC_BODY_FAILURE/);
+  assert.equal(fake.run(),'ORIGINAL');
 });
 test('TEST DATA: default and explicit full-observation preserve KIS/Naver/news/strategy and original record shape',async t=>{
   for(const scopeOption of [{},{scope:'full-observation'}]){
