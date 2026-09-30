@@ -181,6 +181,17 @@ function assertApprovalRequest(lease,url,group,counts) {
     counts.kisDaily===0&&q.get('FID_INPUT_DATE_2')!==end)throw Error('APPROVAL_RANGE_MISMATCH');
 }
 function approvalScope(lease){const info=leases.get(lease);if(!info||!info.claimed)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.scope;}
+function approvalJournalContext(lease){
+  const info=leases.get(lease);
+  if(!info||!info.claimed||!uuid(lease.approvalId))throw Error('APPROVAL_LEASE_INVALID');
+  const c=info.conditions,symbol=c.scope===holidayScope?null:c.symbol;
+  if(symbol!==null&&!validReadOnlySymbol(symbol)||
+    c.scope===searchScope&&(typeof c.query!=='string'||!c.query))
+    throw Error('APPROVAL_LEASE_INVALID');
+  return Object.freeze({approvalId:lease.approvalId,scope:c.scope,
+    ...(c.mode?{mode:c.mode}:{}),symbol,
+    ...(c.scope===searchScope?{query:c.query}:{})});
+}
 function approvalReadOnlySymbol(lease){const info=leases.get(lease);
   if(!info||!info.claimed||!['kis-daily-only',investorScope].includes(info.conditions.scope)||
     !validReadOnlySymbol(info.conditions.symbol))throw Error('APPROVAL_LEASE_INVALID');
@@ -188,4 +199,6 @@ function approvalReadOnlySymbol(lease){const info=leases.get(lease);
 }
 function approvalNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==newsScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.naverNewsMaxRequests;}
 function approvalSearchNewsLimit(lease){const info=leases.get(lease);if(!info||!info.claimed||info.conditions.scope!==searchScope)throw Error('APPROVAL_LEASE_INVALID');return info.conditions.mode==='target-window'?info.conditions.maxRequests:info.conditions.mode==='rolling-poll'?info.conditions.maxRequestsPerPoll:info.conditions.searchNewsMaxRequests;}
-module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,assertApprovalRequest,approvalScope,approvalReadOnlySymbol,approvalNewsLimit,approvalSearchNewsLimit};
+module.exports={createObservationApprovalStore,claimApprovalJournal,assertApprovalExecution,
+  assertApprovalRequest,approvalScope,approvalJournalContext,approvalReadOnlySymbol,
+  approvalNewsLimit,approvalSearchNewsLimit};

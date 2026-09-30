@@ -94,11 +94,12 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   const approval=approvalLease?require('./observationApproval'):null;
   const file=approval?approval.claimApprovalJournal(approvalLease,!!testTransport):testTransport?testJournalPath:RUN_FILE;
   if(!file)throw Error('JOURNAL_REQUIRED');
-  const approvalKind=approval?approval.approvalScope(approvalLease):null;
+  const journalContext=approval?approval.approvalJournalContext(approvalLease):null;
+  const approvalKind=journalContext?.scope??null;
   const investor=approvalKind==='kis-investor-daily-only',news=approvalKind==='naver-news-only',
     holiday=approvalKind==='kis-holiday-calendar-only',searchNews=approvalKind==='naver-search-news-only';
-  const readOnlySymbol=approval&&['kis-daily-only','kis-investor-daily-only'].includes(approvalKind)?
-    approval.approvalReadOnlySymbol(approvalLease):null;
+  const readOnlySymbol=['kis-daily-only','kis-investor-daily-only'].includes(approvalKind)?
+    journalContext.symbol:null;
   const limits=investor?{...LIMITS,kisInvestor:1}:news?{...LIMITS,naverNews:approval.approvalNewsLimit(approvalLease)}:
     holiday?{...LIMITS,kisHoliday:1}:searchNews?{...LIMITS,searchNews:approval.approvalSearchNewsLimit(approvalLease)}:LIMITS;
   const counts={kisDaily:0,naverQuote:0,naverNews:0,kisToken:0},seen=new Set();
@@ -107,7 +108,9 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
   if(searchNews)counts.searchNews=0;
   let stopped=false,busy=false,blocked=0,reason=null,activeController=null;
   const started=Date.now(),deadline=started+totalTimeoutMs;
-  const snapshot=()=>({symbol:holiday?null:readOnlySymbol??'005930',testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,startedAt:new Date(started).toISOString()});
+  const snapshot=()=>({...(journalContext??{approvalId:null,scope:'legacy-unapproved',symbol:'005930'}),
+    testData:!!testTransport,counts:{...counts},blockedRequests:blocked,reason,stopped,
+    startedAt:new Date(started).toISOString()});
   await fs.mkdir(path.dirname(file),{recursive:true});
   // Never remove this marker. A fresh process cannot reset this approval's counters.
   await fs.writeFile(file,JSON.stringify({...snapshot(),state:'STARTED'}),{flag:'wx',mode:0o600});
@@ -119,7 +122,9 @@ async function createObservationHttpBudget({testTransport,testJournalPath,approv
       if(stopped)throw Error('RUN_STOPPED');
       if(busy)throw Error('CONCURRENT_REQUEST_BLOCKED');
       if(Date.now()>=deadline)throw Error('TOTAL_TIMEOUT');
-      group=(searchNews?classifySearchNews:investor?classifyInvestor:news?classifyNews:holiday?classifyHoliday:classify)(value,options,readOnlySymbol??'005930');url=new URL(value);url.searchParams.sort();
+      group=(searchNews?classifySearchNews(value,options):investor?classifyInvestor(value,options,readOnlySymbol):
+        news?classifyNews(value,options):holiday?classifyHoliday(value,options):
+          classify(value,options,readOnlySymbol??'005930'));url=new URL(value);url.searchParams.sort();
       if(approval)approval.assertApprovalRequest(approvalLease,url,group,counts);
       if(seen.has(url.href))throw Error('AUTOMATIC_RETRY_BLOCKED');
       if(counts[group]>=limits[group])throw Error('REQUEST_LIMIT_REACHED');
