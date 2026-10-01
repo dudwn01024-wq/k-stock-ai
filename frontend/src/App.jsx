@@ -2,6 +2,7 @@ import PaperPanel from './PaperPanel.jsx';
 import PaperAccess from './PaperAccess.jsx';
 import ObservationPanel from './ObservationPanel.jsx';
 import CandidateOverview from './CandidateOverview.jsx';
+import {createRecommendationLoader} from './utils/recommendationRun.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
@@ -420,10 +421,11 @@ recentLow20:
     return response.json();
   }
 
-  async getRecommendationAI() {
-    const response = await fetch(`${this.baseUrl}/stock/recommendations-ai`);
-    if (!response.ok) throw new Error(`추천 AI 분석 API 오류 (${response.status})`);
-    return response.json();
+  async getRecommendationAI(scanId) {
+    const response = await fetch(`${this.baseUrl}/stock/recommendations-ai?scanId=${encodeURIComponent(scanId)}`);
+    const body=await response.json();
+    if (!response.ok) throw new Error(body.message || `AI 설명을 가져오지 못했습니다 (${response.status}). 후보를 다시 조회해 주세요.`);
+    return body;
   }
 }
 
@@ -450,13 +452,10 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
 
-  const [recommendationData, setRecommendationData] = useState(null);
-  const [recommendationsCollapsed, setRecommendationsCollapsed] = useState(false);
-  const [recommendationLoading, setRecommendationLoading] = useState(false);
-  const [recommendationError, setRecommendationError] = useState(null);
-  const [recommendationAIData, setRecommendationAIData] = useState(null);
-  const [recommendationAILoading, setRecommendationAILoading] = useState(false);
-  const [recommendationAIError, setRecommendationAIError] = useState(null);
+  const [recommendationRun,setRecommendationRun]=useState({data:null,loading:false,error:null,ai:null,aiLoading:false,aiError:null});
+  const {data:recommendationData,loading:recommendationLoading,error:recommendationError,
+    ai:recommendationAIData,aiLoading:recommendationAILoading,aiError:recommendationAIError}=recommendationRun;
+  const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
 
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -525,96 +524,10 @@ export default function App() {
     loadRealStockData('005930', '삼성전자', '1M');
   }, [loadRealStockData]);
 
-  const loadRecommendations = useCallback(async () => {
-  setRecommendationLoading(true);
-  setRecommendationError(null);
-  setRecommendationAIError(null);
-  setRecommendationAIData(null);
-
-  try {
-    const result = await backendService.getRecommendations();
-
-    const priority = Array.isArray(result?.priority) ? result.priority : [];
-    const chase = Array.isArray(result?.chase) ? result.chase : [];
-    const watch = Array.isArray(result?.watch) ? result.watch : [];
-
-    const recommendations = [
-      ...priority,
-      ...chase,
-      ...watch
-    ];
-
-    const normalizedResult = {
-      ...result,
-      recommendations,
-
-      universeSize:
-        result?.universeSize ??
-        result?.scannedCount ??
-        null,
-
-      recommendationCount:
-        result?.recommendationCount ??
-        result?.candidateCount ??
-        recommendations.length,
-
-      priorityCandidateCount:
-        result?.priorityCandidateCount ??
-        result?.priorityCount ??
-        priority.length,
-
-      chaseCautionCount:
-        result?.chaseCautionCount ??
-        result?.chaseCount ??
-        chase.length,
-
-      watchCandidateCount:
-        result?.watchCandidateCount ??
-        result?.watchCount ??
-        watch.length
-    };
-
-    setRecommendationData(normalizedResult);
-    setRecommendationLoading(false);
-
-    const hasAIEligibleCandidate = recommendations.some(
-      (item) =>
-        item?.grade === 'PRIORITY_CANDIDATE' ||
-        item?.grade === 'CHASE_CAUTION'
-    );
-
-    if (hasAIEligibleCandidate) {
-      setRecommendationAILoading(true);
-
-      try {
-        const aiResult = await backendService.getRecommendationAI();
-        setRecommendationAIData(aiResult);
-      } catch (aiError) {
-        console.error('Recommendation AI Error:', aiError);
-        setRecommendationAIError(
-          aiError?.message ||
-          '추천 종목 AI 분석을 일시적으로 불러오지 못했습니다.'
-        );
-      } finally {
-        setRecommendationAILoading(false);
-      }
-    } else {
-      setRecommendationAILoading(false);
-    }
-  } catch (error) {
-    console.error('Recommendations Error:', error);
-    setRecommendationError(
-      error?.message ||
-      '수집 데이터 기반 추천 종목을 불러오지 못했습니다.'
-    );
-    setRecommendationLoading(false);
-    setRecommendationAILoading(false);
-  }
-}, [backendService]);
-
-  useEffect(() => {
-    loadRecommendations();
-  }, [loadRecommendations]);
+  const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
+    patch=>setRecommendationRun(previous=>({...previous,...patch}))),[backendService]);
+  const loadRecommendations=useCallback(()=>recommendationLoader.load(),[recommendationLoader]);
+  useEffect(()=>{loadRecommendations();return ()=>recommendationLoader.cancel();},[loadRecommendations,recommendationLoader]);
 
   const handleSearch = async (event) => {
     event.preventDefault();
@@ -685,6 +598,7 @@ export default function App() {
 
   const recommendationAIMap = useMemo(() => {
   const map = new Map();
+  if(!recommendationData?.scanId || recommendationAIData?.scanId!==recommendationData.scanId)return map;
 
   const items = Array.isArray(recommendationAIData?.ai)
     ? recommendationAIData.ai
@@ -699,7 +613,7 @@ export default function App() {
   });
 
   return map;
-}, [recommendationAIData]);
+}, [recommendationAIData,recommendationData]);
 
   const renderConditionStatus = (val) => {
     if (val === true) return <span className="text-emerald-400 font-semibold">통과</span>;
@@ -784,7 +698,7 @@ export default function App() {
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
         {activeTab !== 'paper' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
-          error={recommendationError} onSelect={handlePopularStock} onRefresh={loadRecommendations} />}
+          error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} />}
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
             <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mx-auto" />
@@ -863,7 +777,7 @@ export default function App() {
             </div>
 
             {recommendationLoading ? (
-              <div className="py-8 text-center text-xs text-slate-400">30종목의 추천 조건을 확인하고 있습니다...</div>
+              <div className="py-8 text-center text-xs text-slate-400">조회 대상 종목의 추천 조건을 확인하고 있습니다...</div>
             ) : recommendationError ? (
               <div className="bg-red-950/30 border border-red-900/40 rounded-xl p-4 text-center text-xs text-red-200">
                 {recommendationError}
