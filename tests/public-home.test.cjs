@@ -51,3 +51,16 @@ test('candidate selection passes only existing stock identity to detail handler'
   const visit=node=>{if(!node||typeof node!=='object')return;if(node.type==='button'&&node.props.children?.[0]==='테스트 종목')node.props.onClick();React.Children.forEach(node.props?.children,visit);};
   visit(tree);assert.deepEqual({...selected},{code:'TEST',name:'테스트 종목'});
 });
+
+test('candidate remains visible while Gemini waits or fails, with separate execution/source times',()=>{
+  const data={...payload(candidate()),scanId:'TEST_SCAN',validCount:1,failedCount:0,scanStartedAt:'2026-09-30T00:00:00Z',scanCompletedAt:'2026-09-30T00:00:01Z'};
+  const waiting=render({data,aiLoading:true});assert.match(waiting,/테스트 종목/);assert.match(waiting,/Gemini 설명 대기/);assert.match(waiting,/원본 시세 기준시각이 아닙니다/);
+  const failed=render({data,aiError:'합성 실패'});assert.match(failed,/테스트 종목/);assert.match(failed,/AI 설명을 가져오지 못함/);assert.doesNotMatch(failed,/Gemini 설명 완료/);
+});
+
+test('only the matching scan explanation is rendered and AI text cannot execute HTML',()=>{
+  const data={...payload(candidate()),scanId:'NEW'};
+  const ai={scanId:'OLD',aiStatus:'COMPLETED',ai:[{symbol:'TEST',summary:'<script>잘못된설명</script>'}]};
+  assert.doesNotMatch(render({data,aiData:ai}),/잘못된설명|Gemini 설명 완료/);
+  const html=render({data,aiData:{...ai,scanId:'NEW'}});assert.match(html,/Gemini 설명 완료/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);
+});
