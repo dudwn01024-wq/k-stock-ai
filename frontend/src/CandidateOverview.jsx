@@ -21,18 +21,20 @@ export function candidateSummary(item) {
 
 const runTime=value=>value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value)):'미제공';
 const gradeLabels={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
-export default function CandidateOverview({ data, loading, error, aiData, aiLoading, aiError, onSelect, onRefresh }) {
+export default function CandidateOverview({ data, loading, error, aiData, aiLoading, aiError, onSelect, onRefresh, onHistory, historical=false }) {
   const available = ['priority', 'chase', 'watch'].every(key => Array.isArray(data?.[key]));
   const items = available ? data.recommendations : [];
   const matchingAI=Boolean(data?.scanId&&aiData?.scanId===data.scanId);
   const explanations=matchingAI&&Array.isArray(aiData.ai)?aiData.ai:[];
   return <section className="candidate-overview" aria-labelledby="candidate-heading" aria-busy={loading}>
     <div className="home-heading">
-      <div><p className="home-eyebrow">자동추천 · 기존 후보 기준</p><h2 id="candidate-heading">지금 살펴볼 분석 후보</h2>
+      <div><p className="home-eyebrow">자동추천 · 기존 후보 기준</p><h2 id="candidate-heading">{historical?"당시 분석 후보":"지금 살펴볼 분석 후보"}</h2>
         <p>조회 대상 안의 분석 후보입니다. 시장 전체 요약이나 매수 허가가 아닙니다.</p></div>
-      <button className="home-secondary" onClick={onRefresh} disabled={loading}>후보 새로고침</button>
+      <div className="history-controls">{!historical&&<button className="home-secondary" onClick={onRefresh} disabled={loading}>후보 새로고침</button>}{onHistory&&<button className="home-secondary" onClick={onHistory}>추천 이력 보기</button>}</div>
     </div>
-    <p className="home-notice">추천과 상세의 조회 시점이 다를 수 있습니다. 데이터 기준 시각과 위험을 함께 확인하세요.</p>
+    <p className="home-notice">{historical?"과거 실행에 저장된 후보와 설명입니다. 현재 시세가 아닙니다.":"추천과 상세의 조회 시점이 다를 수 있습니다. 데이터 기준 시각과 위험을 함께 확인하세요."}</p>
+    {!historical&&data?.history&&<p className={data.history.status==='STORED'?'home-notice':'home-warning'}>{data.history.status==='STORED'?'후보 이력 저장 완료':data.history.status==='NOT_CONFIGURED'?'이력 저장 미설정 · 현재 후보는 표시하지만 영구 보존되지 않습니다.':'이력 저장 실패 · 현재 후보는 유지됩니다. 자동 재조회하지 않습니다.'}</p>}
+    {aiData?.history?.status==='FAILED'&&<p className="home-warning">AI 결과의 이력 저장 실패 · 화면 설명과 저장 이력이 다를 수 있습니다.</p>}
     {loading ? <p role="status" className="home-state">분석 후보를 불러오는 중입니다…</p>
       : error ? <p role="alert" className="home-state home-warning">갱신 실패 · 후보를 확인할 수 없습니다. 잠시 후 다시 조회하세요.</p>
       : !available ? <p role="status" className="home-state">데이터 없음 · 후보 응답이 제공되지 않았습니다.</p>
@@ -52,8 +54,8 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
             const summary = candidateSummary(item);
             const ai=explanations.find(entry=>entry.symbol===item.symbol);
             return <li className="candidate-card" key={item.symbol}>
-              <div className="candidate-name"><button onClick={() => onSelect({ code: item.symbol, name: item.stockName })}>{item.stockName || item.symbol} <span aria-hidden="true">↗</span></button><span>{item.symbol} · 상세 분석</span></div>
-              <div className="candidate-price"><span className="home-label">현재가</span><strong>{price === null ? '데이터 없음' : `${price.toLocaleString('ko-KR')}원`}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
+              <div className="candidate-name"><button onClick={() => onSelect({ code: item.symbol, name: item.stockName })}>{item.stockName || item.symbol} <span aria-hidden="true">↗</span></button><span>{item.symbol} · {historical?"저장 근거":"상세 분석"}</span></div>
+              <div className="candidate-price"><span className="home-label">{historical?"당시 조회가":"현재가"}</span><strong>{price === null ? '데이터 없음' : `${price.toLocaleString('ko-KR')}원`}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
               <div className="candidate-context"><p><span className="home-label">선정 이유</span>{summary.reason}</p><p className="home-warning"><span className="home-label">주요 위험</span>{summary.risk}</p></div>
               <div className="candidate-score">후보 점수 {item.score??'미확인'} / {item.maxScore??'미확인'} · {gradeLabels[item.grade]??item.grade??'등급 미확인'}</div>
               {ai?.summary&&<div className="candidate-ai"><span className="home-label">Gemini 설명 · 동일 scanId</span><p>{ai.summary}</p><details><summary>설명 근거와 주의 사항</summary>
