@@ -9,7 +9,7 @@ const fail=(code,status,message)=>Object.assign(new Error(message),{code,status}
 const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
 
 function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured=()=>true,
-  now=Date.now,makeId=randomUUID,ttlMs=SCAN_TTL_MS,maxEntries=MAX_STORED_SCANS}) {
+  now=Date.now,makeId=randomUUID,ttlMs=SCAN_TTL_MS,maxEntries=MAX_STORED_SCANS,history=null,universe=[],codeVersion=null}) {
   const entries=new Map();
   let inFlight=null;
   const prune=()=>{for(const [id,entry] of entries)if(now()>=entry.expiresAt&&entry.aiState!=='PENDING')entries.delete(id);};
@@ -32,18 +32,18 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
     }
     const scanId=makeId(),scanStartedAt=new Date(now()).toISOString();
     inFlight=(async()=>{
-      const {validResults,ranked}=await scan();
+      const {validResults,ranked,failures=[]}=await scan();
       if(!Array.isArray(validResults)||!Array.isArray(ranked))throw fail('SCAN_FAILED',502,'후보 조회 결과를 확인하지 못했습니다.');
-      if(validResults.length===0)throw fail('SCAN_NO_DATA',502,'조회된 종목 자료가 없어 후보를 계산하지 못했습니다.');
+
       const completed=now(),scanCompletedAt=new Date(completed).toISOString();
       const all=structuredClone(ranked);
       const priority=all.filter(x=>x.grade==='PRIORITY_CANDIDATE');
       const chase=all.filter(x=>x.grade==='CHASE_CAUTION');
       const watch=all.filter(x=>x.grade==='WATCH_CANDIDATE');
-      const result=freeze({scanId,protocolVersion:PROTOCOL_VERSION,scanStartedAt,scanCompletedAt,
+      const payload={scanId,protocolVersion:PROTOCOL_VERSION,scanStartedAt,scanCompletedAt,
         expiresAt:new Date(completed+ttlMs).toISOString(),reuseTtlMs:ttlMs,
         scannedCount:totalCount,validCount:validResults.length,failedCount:totalCount-validResults.length,
-        scanStatus:validResults.length===totalCount?'COMPLETED':'PARTIAL',
+        scanStatus:!validResults.length?'FAILED':validResults.length===totalCount?'COMPLETED':'PARTIAL',
         candidateCount:priority.length+chase.length+watch.length,
         priorityCount:priority.length,chaseCount:chase.length,watchCount:watch.length,
         excludedCount:all.filter(x=>x.grade==='EXCLUDED').length,priority,chase,watch,all,
@@ -51,7 +51,14 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
           newsCondition:'실제로 조회된 최신 뉴스에서 명확한 주의 신호가 있는지 확인',
           riskRewardCondition:'기술조건과 뉴스 조건 통과 후 현재가 기준 손익비 확인',
           finalOrder:'차트 + 거래량 + 수급 + 최신 뉴스 + 현재가 손익비 → 최종 추천'},
-        source:'Retrieved stock price, volume, supply-demand and news data',fetchedAt:scanCompletedAt});
+        source:'Retrieved stock price, volume, supply-demand and news data',fetchedAt:scanCompletedAt,failures};
+      let saved={status:'NOT_CONFIGURED'};
+      if(history?.status().status==='CONFIGURED'){
+        try{saved=history.saveCandidate(payload,{universe,codeVersion,aiSymbols:[...priority,...chase].slice(0,aiLimit).map(x=>x.symbol)});}
+        catch(e){saved={status:'FAILED',reason:e.code?.startsWith('HISTORY_')?e.code:'HISTORY_WRITE_FAILED'};}
+      }
+      const result=freeze({...payload,history:saved});
+      if(validResults.length===0)throw fail('SCAN_NO_DATA',502,'조회된 종목 자료가 없어 후보를 계산하지 못했습니다.');
       entries.set(scanId,{result,expiresAt:completed+ttlMs,
         aiCandidates:freeze([...priority,...chase].slice(0,aiLimit)),aiState:'IDLE',aiPromise:null});
       return result;
@@ -65,11 +72,21 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
     entry.aiPromise=(async()=>{
       let aiResult={recommendations:[],modelUsed:null,attemptUsed:null};
       let aiStatus='NOT_REQUIRED',aiError=null;
+      let historyState=entry.result.history,started=false;
       if(entry.aiCandidates.length){
         try{
+          if(['STORED','ALREADY_STORED'].includes(historyState.status)){
+            try{const start=history.startAI(id,new Date(now()).toISOString());
+              if(start.status==='ALREADY_STORED')throw Error('HISTORY_DUPLICATE_AI');started=true;
+            }catch(e){historyState={status:'FAILED',reason:'HISTORY_AI_WRITE_FAILED'};
+              // Do not submit an untracked provider call for an already persisted run.
+              throw e;}
+          }
           if(!aiConfigured())throw Error('AI_NOT_CONFIGURED');
           // Existing Gemini prompt and output validation remain authoritative.
-          aiResult=await analyze(entry.aiCandidates);
+          aiResult=await analyze(entry.aiCandidates,{onInput:input=>{
+            if(started)try{history.saveInput(id,input);}catch(e){historyState={status:'FAILED',reason:'HISTORY_AI_INPUT_WRITE_FAILED'};throw e;}
+          }});
           const explained=aiResult.recommendations?.filter(x=>typeof x.summary==='string'&&x.summary.trim()).length??0;
           aiStatus=explained===entry.aiCandidates.length?'COMPLETED':explained?'PARTIAL':'FAILED';
           if(aiStatus!=='COMPLETED')aiError='일부 또는 전체 AI 설명을 가져오지 못했습니다. 후보 조회 결과는 유지됩니다.';
@@ -78,14 +95,16 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
         }
       }
       entry.aiState=aiStatus;
-      return freeze({scanId:entry.result.scanId,protocolVersion:PROTOCOL_VERSION,
+      const result={scanId:entry.result.scanId,protocolVersion:PROTOCOL_VERSION,
         scanStartedAt:entry.result.scanStartedAt,scanCompletedAt:entry.result.scanCompletedAt,
         aiStatus,aiCompletedAt:new Date(now()).toISOString(),
-        ai:aiResult.recommendations??[],modelUsed:aiResult.modelUsed??null,attemptUsed:aiResult.attemptUsed??null,aiError});
+        ai:aiResult.recommendations??[],modelUsed:aiResult.modelUsed??null,attemptUsed:aiResult.attemptUsed??null,aiError};
+      if(started)try{history.finishAI(id,result);}catch{historyState={status:'FAILED',reason:'HISTORY_AI_RESULT_WRITE_FAILED'};}
+      return freeze({...result,history:historyState});
     })();
     return entry.aiPromise;
   };
-  return {candidates,explain};
+  return {candidates,explain,pendingIds:()=>[...entries].filter(([,e])=>e.aiState==='PENDING').map(([id])=>id)};
 }
 
 function registerRecommendationRoutes(app,store){

@@ -2,6 +2,7 @@ import PaperPanel from './PaperPanel.jsx';
 import PaperAccess from './PaperAccess.jsx';
 import ObservationPanel from './ObservationPanel.jsx';
 import CandidateOverview from './CandidateOverview.jsx';
+import RecommendationHistory from './RecommendationHistory.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
@@ -415,6 +416,15 @@ recentLow20:
     return response.json();
   }
 
+  async historyRead(path) {
+    const response=await fetch(this.baseUrl+'/stock/recommendation-history'+path);
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.message||'추천 이력 API가 준비되지 않았거나 기록을 읽지 못했습니다. 자동 재조회하지 않습니다.');
+    return body;
+  }
+  getHistory({page=1,symbol=''}) {return this.historyRead('?page='+page+(symbol?'&symbol='+encodeURIComponent(symbol):''));}
+  getHistoryDetail(id) {return this.historyRead('/'+encodeURIComponent(id));}
+  compareHistory(before,after) {return this.historyRead('/compare?before='+encodeURIComponent(before)+'&after='+encodeURIComponent(after));}
   async getRecommendations() {
     const response = await fetch(`${this.baseUrl}/stock/recommendations`);
     if (!response.ok) throw new Error(`추천 종목 API 오류 (${response.status})`);
@@ -455,6 +465,7 @@ export default function App() {
   const [recommendationRun,setRecommendationRun]=useState({data:null,loading:false,error:null,ai:null,aiLoading:false,aiError:null});
   const {data:recommendationData,loading:recommendationLoading,error:recommendationError,
     ai:recommendationAIData,aiLoading:recommendationAILoading,aiError:recommendationAIError}=recommendationRun;
+  const [historyOpen,setHistoryOpen]=useState(false);
   const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -697,8 +708,10 @@ export default function App() {
       </div>
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-        {activeTab !== 'paper' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
-          error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} />}
+        {activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
+        {activeTab !== 'paper' && !historyOpen && <CandidateOverview data={recommendationData} loading={recommendationLoading}
+          error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {!historyOpen && <>
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
             <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mx-auto" />
@@ -2247,6 +2260,7 @@ export default function App() {
 
 
 
+        </>}
       </main>
 
       <footer className="border-t border-slate-800/80 bg-slate-950 px-4 lg:px-8 py-4 text-center text-xs text-slate-500 space-y-1">

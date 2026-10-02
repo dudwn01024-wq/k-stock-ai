@@ -2036,8 +2036,9 @@ const scanRecommendationUniverse =
       );
 
     return {
-      validResults,
-      ranked
+      validResults,ranked,
+      failures:RECOMMENDATION_WATCHLIST.filter(stock=>!validResults.some(item=>item.symbol===stock.symbol))
+        .map(stock=>({symbol:stock.symbol,stockName:stock.name,reason:'LOOKUP_FAILED'}))
     };
   };
 
@@ -3430,7 +3431,7 @@ const analyzeStockWithGemini =
 // ========================================
 
 const buildRecommendationGeminiPrompt =
-  (candidates) => {
+  (candidates,onInput) => {
     const safeCandidates =
       candidates.map(
         (candidate) => ({
@@ -3514,6 +3515,7 @@ const buildRecommendationGeminiPrompt =
         })
       );
 
+    onInput?.(safeCandidates);
     return `
 너는 K-Stock AI 스크리닝 후보 설명 AI다.
 SCREENING은 분석 후보 탐색이며 주문 허가가 아니다. 최종 진입 조건은 별도 조회한 상세 ENTRY_GATE 전략만 판단한다.
@@ -3590,7 +3592,7 @@ ${JSON.stringify(
 // ========================================
 
 const analyzeRecommendationsWithGemini =
-  async (candidates) => {
+  async (candidates,{onInput}={}) => {
     if (
       !Array.isArray(
         candidates
@@ -3612,10 +3614,9 @@ const analyzeRecommendationsWithGemini =
         RECOMMENDATION_AI_LIMIT
       );
 
-    const prompt =
-      buildRecommendationGeminiPrompt(
-        limitedCandidates
-      );
+    let suppliedInput;
+    const prompt=buildRecommendationGeminiPrompt(limitedCandidates,input=>{suppliedInput=input;});
+    await onInput?.({prompt,input:suppliedInput,promptVersion:'PUBLIC_RECOMMENDATION_PROMPT_V1'});
 
     const geminiResult =
       await callGeminiPromptWithRetry(
@@ -3844,6 +3845,8 @@ app.get(
       ok: true,
       service: 'K-Stock AI Backend',
       recommendationProtocol: 'RECOMMENDATION_SCAN_V1',
+      recommendationHistoryProtocol:'RECOMMENDATION_HISTORY_V1',
+      recommendationHistory:recommendationHistory.status(),
       buildCommit: process.env.RENDER_GIT_COMMIT || null,
       geminiConfigured:
         Boolean(GEMINI_API_KEY),
@@ -4407,12 +4410,17 @@ app.get(
 // ========================================
 
 const {createRecommendationScans,registerRecommendationRoutes}=require('./services/recommendationScans');
+const {historyFromEnvironment,registerHistoryRoutes,hash}=require('./services/recommendationHistory');
+const recommendationHistory=historyFromEnvironment();
 const recommendationScans=createRecommendationScans({
+  history:recommendationHistory,universe:RECOMMENDATION_WATCHLIST,
+  codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,calculateRiskReward,assessLatestNews,getRecommendationScore,getFinalRecommendationGrade,rankRecommendationResults,buildRecommendationGeminiPrompt].map(fn=>fn.toString()).join('\n'))),
   scan:scanRecommendationUniverse,analyze:analyzeRecommendationsWithGemini,
   totalCount:RECOMMENDATION_WATCHLIST.length,aiLimit:RECOMMENDATION_AI_LIMIT,
   aiConfigured:()=>Boolean(GEMINI_API_KEY)
 });
 registerRecommendationRoutes(app,recommendationScans);
+registerHistoryRoutes(app,recommendationHistory,recommendationScans.pendingIds);
 
 // ========================================
 // KIS OHLCV TEST API
