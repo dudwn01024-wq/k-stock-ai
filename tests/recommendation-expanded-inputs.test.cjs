@@ -195,7 +195,7 @@ test('TEST_ONLY mixed stock suffixes survive universe ordering, duplicate checks
 });
 
 test('TEST_ONLY invalid mixed patterns still fail closed in universe normalization',async()=>{
-  for(const itemCode of ['1234I5','1234O5','1234U5','123A45','A12345','12345A','1234a5','1234-5','12345','1234567',null,123456,'1234A5 ']){
+  for(const itemCode of ['1234I5','1234O5','1234U5','123A45','A12345','1234a5','1234-5','12345','1234567',null,123456,'1234A5 ']){
     const rows=testOnlyMarket('KOSPI',400);rows[0]={...rows[0],itemCode};
     await assert.rejects(createRecommendationUniverse({fetchPage:pages(rows).fetchPage,testOnly:true}).load(),
       {code:'UNIVERSE_ROW_INVALID'});
@@ -228,4 +228,57 @@ test('TEST_ONLY invalid mixed stock suffixes are blocked before any price transp
     assert.throws(()=>calculateFastScreen({symbol},dailyRows(21)),{code:'FAST_SCREEN_SYMBOL_INVALID'});
   }
   assert.equal(calls,0);assert.equal(fast.requestCount(),0);
+});
+
+const {testOnlyStockType}=require('./helpers/test-only-stock-type.cjs');
+
+test('TEST_ONLY final-letter COMMON classification preserves exact identifier and top500 proof',async()=>{
+  const kospi=testOnlyMarket('KOSPI',400);kospi[0]={...kospi[0],itemCode:'12345K'};
+  const data=pages(kospi),snapshot=await createRecommendationUniverse({fetchPage:data.fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[testOnlyStockType()]}).load();
+  const stock=snapshot.stocks.find(x=>x.symbol==='12345K');
+  assert.equal(snapshot.count,500);assert.equal(snapshot.requestCount,6);
+  assert.equal(stock.codeSyntax,'VALID');assert.equal(stock.securityType,'COMMON');
+  assert.equal(stock.securityTypeEvidence.krxCode,'A12345K');assert.equal(stock.securityTypeEvidence.testOnly,true);
+  assert.equal(snapshot.officialTypeChecks,1);assert.equal(snapshot.officialTypeRequests,0);
+});
+test('TEST_ONLY official NON_COMMON is excluded without losing source order or cutoff proof',async()=>{
+  const kospi=testOnlyMarket('KOSPI',400);kospi[0]={...kospi[0],itemCode:'12345K'};
+  const data=pages(kospi),snapshot=await createRecommendationUniverse({fetchPage:data.fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load();
+  assert.equal(snapshot.count,500);assert.equal(snapshot.excludedCount,1);
+  assert.equal(new Set(snapshot.stocks.map(x=>x.symbol)).size,500);
+  assert.equal(snapshot.stocks.some(x=>x.symbol==='12345K'),false);
+  assert.equal(snapshot.excludedSecurities[0].securityType,'NON_COMMON');
+  assert.equal(snapshot.excludedSecurities[0].codeSyntax,'VALID');
+  assert.equal(snapshot.excludedSecurities[0].exclusionReason,'OFFICIAL_NON_COMMON_SECURITY');
+  assert.equal(snapshot.excludedSecurities[0].securityTypeEvidence.testOnly,true);
+  assert.equal(snapshot.requestCount,6);assert.equal(snapshot.officialTypeChecks,1);
+  assert.equal(snapshot.officialTypeRequests,0);
+  const duplicate=kospi.map(x=>({...x}));duplicate[1].itemCode='12345K';
+  await assert.rejects(createRecommendationUniverse({fetchPage:pages(duplicate).fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load(),
+    {code:'UNIVERSE_DUPLICATE_SYMBOL'});
+  const reversed=kospi.map(x=>({...x}));reversed[0].marketValueRaw='900';
+  await assert.rejects(createRecommendationUniverse({fetchPage:pages(reversed).fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load(),
+    {code:'UNIVERSE_ORDER_INVALID'});
+});
+test('TEST_ONLY unknown final-letter type blocks proof rather than rejecting syntax or inferring from name',async()=>{
+  for(const stockName of ['TEST_ONLY_ordinary_label','TEST_ONLY_우B_label']){
+    const kospi=testOnlyMarket('KOSPI',400);kospi[0]={...kospi[0],itemCode:'12345K',stockName};
+    const data=pages(kospi);
+    await assert.rejects(createRecommendationUniverse({fetchPage:data.fetchPage,testOnly:true,
+      officialSecurityTypeRecords:[]}).load(),error=>
+        error.code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'&&error.requestCount===1&&
+        error.officialTypeRequests===0&&error.officialTypeChecks===1);
+    assert.equal(data.requests.length,1);
+  }
+});
+test('TEST_ONLY numeric and fifth-position mixed rows do not trigger blanket official lookups',async()=>{
+  const kospi=testOnlyMarket('KOSPI',400);kospi[0].itemCode='1234A5';
+  const snapshot=await createRecommendationUniverse({fetchPage:pages(kospi).fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[]}).load();
+  assert.equal(snapshot.officialTypeChecks,0);assert.equal(snapshot.officialTypeRequests,0);
+  assert.ok(snapshot.stocks.every(x=>x.securityType==='UNKNOWN'));
 });

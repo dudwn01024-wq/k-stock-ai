@@ -1,5 +1,6 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
+const {normalizeOfficialStockTypeEvidence,hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 // No provider, worker, private evidence, approval or trading imports.
 const fs=require('node:fs'),path=require('node:path');
 const {createHash,randomUUID}=require('node:crypto');
@@ -53,16 +54,37 @@ function assertRecord(r,id){
 }
 const expandedNumber=v=>typeof v==='number'&&Number.isFinite(v)?v:null;
 const expandedCount=v=>Number.isInteger(v)&&v>=0?v:null;
+function officialExclusions(rows=[],{testOnly=false}={}){
+  if(!Array.isArray(rows)||rows.length>1000)throw error('HISTORY_UNIVERSE_INVALID');
+  const seen=new Set();
+  return rows.map(row=>{
+    const evidence=normalizeOfficialStockTypeEvidence(row?.securityTypeEvidence,
+      {symbol:row?.symbol,market:row?.market,testOnly});
+    const type=evidence?.securityType;
+    const reason=type==='NON_COMMON'?'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+type+'_SECURITY';
+    if(!evidence||!['NON_COMMON','ETF','ETN'].includes(type)||row.securityType!==type||
+      row.codeSyntax!=='VALID'||row.exclusionReason!==reason||seen.has(row.symbol))
+      throw error('HISTORY_UNIVERSE_INVALID');
+    seen.add(row.symbol);
+    return {symbol:row.symbol,market:row.market,codeSyntax:'VALID',securityType:type,
+      exclusionReason:reason,securityTypeEvidence:evidence};
+  });
+}
 function expandedSnapshot(result,{testOnly=false}={}){
   const id=result?.scanId,source=result?.universeSnapshot;
   if(!validId(id)||!Array.isArray(source?.stocks)||!source.stocks.length||source.stocks.length>500
     ||!Array.isArray(result.fastResults)||!Array.isArray(result.deepResults)||!Array.isArray(result.deepFailures))throw error('HISTORY_EXPANDED_INPUT_INVALID');
   const stocks=source.stocks.map(s=>({symbol:s?.symbol,name:scalar(s?.name),market:scalar(s?.market),marketValue:scalar(s?.marketValue),
     marketValueRaw:scalar(s?.marketValueRaw),marketValueUnit:scalar(s?.marketValueUnit),marketValueRank:expandedCount(s?.marketValueRank),
-    securityType:scalar(s?.securityType),provider:scalar(s?.provider),fetchedAt:scalar(s?.fetchedAt),
+    codeSyntax:scalar(s?.codeSyntax),securityType:scalar(s?.securityType),
+    securityTypeEvidence:normalizeOfficialStockTypeEvidence(s?.securityTypeEvidence,{symbol:s?.symbol,market:s?.market,testOnly}),
+    provider:scalar(s?.provider),fetchedAt:scalar(s?.fetchedAt),
     sourceBusinessDate:scalar(s?.sourceBusinessDate)}));
   const symbols=new Set(stocks.map(s=>s.symbol));
-  if(stocks.some(s=>!isNaverKrStockItemCode(s.symbol)||!s.name)||symbols.size!==stocks.length)throw error('HISTORY_UNIVERSE_INVALID');
+  const excludedSecurities=officialExclusions(source.excludedSecurities,{testOnly});
+  if(excludedSecurities.some(s=>symbols.has(s.symbol)))throw error('HISTORY_UNIVERSE_INVALID');
+  if(stocks.some(s=>!isNaverKrStockItemCode(s.symbol)||!s.name||
+    !hasRequiredOfficialStockType(s,{testOnly}))||symbols.size!==stocks.length)throw error('HISTORY_UNIVERSE_INVALID');
   const fingerprint=hash(stocks.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})));
   const symbolFingerprint=hash(stocks.map(x=>x.symbol).sort());
   if((source.fingerprint!=null&&source.fingerprint!==fingerprint)
@@ -97,7 +119,7 @@ function expandedSnapshot(result,{testOnly=false}={}){
     const value=expandedCount(result.stats?.[key]);if(value!==null)counts[key]=value;
   }
   const requestStats={};
-  for(const key of ['universeRequests','fastScreenRequests','deepReviewRequests','newsRequests','failedRequests']){
+  for(const key of ['universeRequests','officialTypeRequests','fastScreenRequests','deepReviewRequests','newsRequests','failedRequests']){
     const value=expandedCount(result.requestStats?.[key]);if(value!==null)requestStats[key]=value;
   }
   const timestamps=pick(result,['scanStartedAt','scanCompletedAt','scanStatus']);
@@ -110,6 +132,8 @@ function expandedSnapshot(result,{testOnly=false}={}){
     if(counts[key]!=null&&counts[key]!==expected)throw error('HISTORY_EXPANDED_INPUT_INVALID');
   return {
     universe:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,stocks,fingerprint,symbolFingerprint,
+      excludedSecurities,excludedCount:expandedCount(source.excludedCount),
+      officialTypeChecks:expandedCount(source.officialTypeChecks),officialTypeRequests:expandedCount(source.officialTypeRequests),
       provider:scalar(source.provider),fetchedAt:scalar(source.fetchedAt),sourceBusinessDate:scalar(source.sourceBusinessDate),
       snapshotConsistency:scalar(source.snapshotConsistency)},
     fast:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,results:fast},
@@ -262,8 +286,10 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     const fast=read(id,'v2-fast',false,EXPANDED_HISTORY_VERSION);
     const deep=read(id,'v2-deep',false,EXPANDED_HISTORY_VERSION);
     const r=manifest.payload,u=universe.payload,f=fast.payload,d=deep.payload;
+    const excludedSecurities=officialExclusions(u.excludedSecurities,{testOnly});
+    if(excludedSecurities.some(x=>u.stocks.some(s=>s.symbol===x.symbol)))throw error('HISTORY_RECORD_INVALID');
     if(r.testOnly!==testOnly||[u,f,d].some(x=>x.testOnly!==testOnly))throw error('HISTORY_TEST_DATA_MISMATCH');
-    if(u.stocks.some(x=>!isNaverKrStockItemCode(x.symbol))||
+    if(u.stocks.some(x=>!isNaverKrStockItemCode(x.symbol)||!hasRequiredOfficialStockType(x,{testOnly}))||
       [u,f,d].some(x=>x.scanId!==id)||r.phaseFingerprints?.universe!==universe.fingerprint
       ||r.phaseFingerprints?.fast!==fast.fingerprint||r.phaseFingerprints?.deep!==deep.fingerprint
       ||r.universeFingerprint!==u.fingerprint

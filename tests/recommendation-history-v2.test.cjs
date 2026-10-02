@@ -215,32 +215,36 @@ test('opt-in expanded runner links Gemini input and result to the saved V2 scan 
 
 test('TEST_ONLY V2 mixed suffixes survive fresh store/process reads and filters without changing V1 symbols',t=>{
   const {root,store}=fixture(t),run=expanded('mixed-suffix-500');
-  const codes=['1234A5','0000B1','4321Z9'];
+  const codes=['1234A5','0000B1','4321Z9','12345K'];
   for(let index=0;index<codes.length;index++){
     run.universeSnapshot.stocks[index].symbol=codes[index];
     run.fastResults[index].symbol=codes[index];run.deepResults[index].symbol=codes[index];
   }
-  run.universeSnapshot.fingerprint=hash(run.universeSnapshot.stocks);
+  Object.assign(run.universeSnapshot.stocks[3],{codeSyntax:'VALID',securityType:'COMMON',
+    securityTypeEvidence:require('./helpers/test-only-stock-type.cjs').testOnlyStockType('12345K','COMMON','KOSDAQ')});
+  run.universeSnapshot.fingerprint=hash(run.universeSnapshot.stocks.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})));
   run.universeSnapshot.universeFingerprint=hash(run.universeSnapshot.stocks.map(x=>x.symbol).sort());
   run.universeSnapshot.snapshotFingerprint=run.universeSnapshot.fingerprint;
   assert.equal(store.saveExpanded(run).status,'STORED');
   const old=legacy();store.saveCandidate(old.result,old.context);
   const reopened=createRecommendationHistory({root,testOnly:true});
   const detail=reopened.detail(run.scanId);
-  assert.deepEqual(detail.universe.slice(0,3).map(x=>x.symbol),codes);
-  assert.deepEqual(detail.fastResults.slice(0,3).map(x=>x.symbol),codes);
-  assert.deepEqual(detail.all.slice(0,3).map(x=>x.symbol),codes);
+  assert.deepEqual(detail.universe.slice(0,codes.length).map(x=>x.symbol),codes);
+  assert.deepEqual(detail.fastResults.slice(0,codes.length).map(x=>x.symbol),codes);
+  assert.deepEqual(detail.all.slice(0,codes.length).map(x=>x.symbol),codes);
   assert.equal(detail.universeSnapshot.symbolFingerprint,run.universeSnapshot.universeFingerprint);
   assert.equal(detail.universeSnapshot.fingerprint,run.universeSnapshot.snapshotFingerprint);
   assert.equal(store.saveExpanded(run).status,'ALREADY_STORED');
   assert.equal(reopened.list({symbol:'0000B1'}).total,1);
+  assert.equal(reopened.list({symbol:'12345K'}).total,1);
+  assert.equal(detail.universe[3].securityTypeEvidence.testOnly,true);
   assert.equal(reopened.list({symbol:'0000B1'}).items[0].schemaVersion,EXPANDED_HISTORY_VERSION);
   assert.equal(reopened.list({symbol:'000001'}).items[0].schemaVersion,'RECOMMENDATION_HISTORY_V1');
   assert.equal(reopened.compare(old.result.scanId,run.scanId).reason,'EXPANDED_HISTORY_COMPARISON_NOT_AVAILABLE');
   const inProcess=JSON.parse(execFileSync(process.execPath,['-r',require.resolve('./helpers/local-only.cjs'),'-e',
     'const {createRecommendationHistory}=require('+JSON.stringify(require.resolve('../services/recommendationHistory'))+');'+
     'const d=createRecommendationHistory({root:'+JSON.stringify(root)+',testOnly:true}).detail('+JSON.stringify(run.scanId)+');'+
-    'process.stdout.write(JSON.stringify({symbols:d.universe.slice(0,3).map(x=>x.symbol),fingerprint:d.universeSnapshot.symbolFingerprint}));'],{encoding:'utf8'}));
+    'process.stdout.write(JSON.stringify({symbols:d.universe.slice(0,4).map(x=>x.symbol),fingerprint:d.universeSnapshot.symbolFingerprint}));'],{encoding:'utf8'}));
   assert.deepEqual(inProcess,{symbols:codes,fingerprint:run.universeSnapshot.universeFingerprint});
   const badLegacy=legacy('mixed-v1-forbidden');
   badLegacy.context.universe[0].symbol='1234A5';badLegacy.result.all[0].symbol='1234A5';
@@ -249,10 +253,48 @@ test('TEST_ONLY V2 mixed suffixes survive fresh store/process reads and filters 
 
 test('TEST_ONLY V2 storage and filters reject forbidden mixed suffixes before publication',t=>{
   const {store}=fixture(t);
-  for(const symbol of ['1234I5','1234O5','1234U5','123A45','A12345','12345A','1234a5','1234-5','12345','1234567','1234A5 ']){
+  for(const symbol of ['1234I5','1234O5','1234U5','123A45','A12345','1234a5','1234-5','12345','1234567','1234A5 ']){
     const run=expanded('invalid-mixed-500');run.universeSnapshot.stocks[0].symbol=symbol;
     assert.throws(()=>store.saveExpanded(run),{code:'HISTORY_UNIVERSE_INVALID'});
     assert.throws(()=>store.list({symbol}),{code:'HISTORY_QUERY_INVALID'});
   }
   assert.equal(store.status().storedRuns,0);
+});
+
+test('TEST_ONLY final-letter V2 evidence must prove exact COMMON type before publication',t=>{
+  const {store}=fixture(t),{testOnlyStockType}=require('./helpers/test-only-stock-type.cjs');
+  for(const patch of [{},{securityType:'COMMON'},{securityType:'NON_COMMON',
+    securityTypeEvidence:testOnlyStockType('12345K','NON_COMMON')},{securityType:'COMMON',
+    securityTypeEvidence:testOnlyStockType('54321K')}]){
+    const run=expanded('unverified-final-letter');
+    Object.assign(run.universeSnapshot.stocks[0],{symbol:'12345K',...patch});
+    assert.throws(()=>store.saveExpanded(run),{code:'HISTORY_UNIVERSE_INVALID'});
+  }
+  assert.equal(store.status().storedRuns,0);
+  assert.equal(store.list({symbol:'12345K'}).total,0);
+  const old=legacy('final-letter-v1-forbidden');old.context.universe[0].symbol='12345K';
+  old.result.all[0].symbol='12345K';
+  assert.throws(()=>store.saveCandidate(old.result,old.context),{code:'HISTORY_UNIVERSE_INVALID'});
+});
+
+test('TEST_ONLY official exclusion provenance and separate type-request counts survive V2 reread',t=>{
+  const {root,store}=fixture(t),{testOnlyStockType}=require('./helpers/test-only-stock-type.cjs');
+  const run=expanded('official-exclusion-provenance');
+  run.universeSnapshot.excludedCount=1;run.universeSnapshot.officialTypeChecks=1;
+  run.universeSnapshot.officialTypeRequests=0;run.requestStats.officialTypeRequests=0;
+  run.universeSnapshot.excludedSecurities=[{symbol:'12345K',market:'KOSPI',codeSyntax:'VALID',
+    securityType:'NON_COMMON',exclusionReason:'OFFICIAL_NON_COMMON_SECURITY',
+    securityTypeEvidence:{...testOnlyStockType('12345K','NON_COMMON'),headers:'TEST_ONLY_NOT_TO_STORE'}}];
+  assert.equal(store.saveExpanded(run).status,'STORED');
+  const detail=createRecommendationHistory({root,testOnly:true}).detail(run.scanId);
+  assert.equal(detail.universeSnapshot.excludedSecurities.length,1);
+  assert.equal(detail.universeSnapshot.excludedSecurities[0].securityTypeEvidence.testOnly,true);
+  assert.equal(detail.universeSnapshot.excludedSecurities[0].exclusionReason,'OFFICIAL_NON_COMMON_SECURITY');
+  assert.equal(detail.universeSnapshot.officialTypeChecks,1);
+  assert.equal(detail.requestStats.officialTypeRequests,0);
+  assert.doesNotMatch(JSON.stringify(detail),/TEST_ONLY_NOT_TO_STORE/);
+  const bad=expanded('bad-exclusion-binding');
+  bad.universeSnapshot.excludedSecurities=[{...run.universeSnapshot.excludedSecurities[0],
+    securityTypeEvidence:testOnlyStockType('54321K','NON_COMMON')}];
+  assert.throws(()=>store.saveExpanded(bad),{code:'HISTORY_UNIVERSE_INVALID'});
 });

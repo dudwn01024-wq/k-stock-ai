@@ -143,3 +143,34 @@ test('TEST_ONLY expanded run rejects invalid suffix before fast or deep calls',a
   assert.equal(run.status,'FAILED');assert.equal(run.failureReason,'EXPANDED_UNIVERSE_INVALID');
   assert.equal(f.calls.fast,0);assert.equal(f.calls.deep,0);assert.equal(f.calls.ai,0);
 });
+
+const {testOnlyStockType}=require('./helpers/test-only-stock-type.cjs');
+test('TEST_ONLY final-letter syntax cannot bypass official COMMON eligibility in a supplied universe',async()=>{
+  for(const patch of [{},{securityType:'COMMON'},
+    {securityType:'NON_COMMON',securityTypeEvidence:testOnlyStockType('12345K','NON_COMMON')},
+    {securityType:'COMMON',securityTypeEvidence:testOnlyStockType('54321K')}]){
+    const f=fixture({loadUniverse:async()=>({stocks:stocks.map((stock,i)=>i?stock:{...stock,symbol:'12345K',...patch}),
+      universeFingerprint:fingerprint,snapshotFingerprint:fingerprint,testOnly:true,requestCount:2})});
+    const run=await f.store.wait(f.store.start().runId);
+    assert.equal(run.status,'FAILED');assert.equal(run.failureReason,'EXPANDED_UNIVERSE_INVALID');
+    assert.equal(f.calls.fast,0);assert.equal(f.calls.deep,0);assert.equal(f.calls.ai,0);
+  }
+});
+test('TEST_ONLY an exact official COMMON result reaches both stages with zero official HTTP',async()=>{
+  const universe=stocks.map((stock,i)=>i?stock:{...stock,symbol:'12345K',codeSyntax:'VALID',
+    securityType:'COMMON',securityTypeEvidence:testOnlyStockType()});
+  const f=fixture({loadUniverse:async()=>({stocks:universe,universeFingerprint:fingerprint,
+    snapshotFingerprint:fingerprint,testOnly:true,requestCount:6,officialTypeRequests:0})});
+  const run=await f.store.wait(f.store.start().runId);
+  assert.equal(run.status,'COMPLETED');assert.equal(f.calls.fast,500);assert.equal(f.calls.deep,40);
+  assert.equal(f.calls.ai,0);assert.equal(run.requestStats.officialTypeRequests,0);
+  assert.ok(run.recommendations.some(x=>x.symbol==='12345K'));
+});
+test('TEST_ONLY unverified official type remains an explicit run blocker with no later stages',async()=>{
+  const f=fixture({loadUniverse:async()=>{throw Object.assign(Error('TEST_ONLY'),
+    {code:'TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount:3,officialTypeRequests:0});}});
+  const run=await f.store.wait(f.store.start().runId);
+  assert.equal(run.failureReason,'TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE');
+  assert.equal(run.requestStats.universeRequests,3);assert.equal(run.requestStats.officialTypeRequests,0);
+  assert.equal(f.calls.fast,0);assert.equal(f.calls.deep,0);assert.equal(f.calls.ai,0);
+});

@@ -1,5 +1,6 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
+const {hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 const {randomUUID}=require('node:crypto');
 
 const RUN_PROTOCOL='RECOMMENDATION_EXPANDED_RUN_V1';
@@ -84,7 +85,7 @@ function createExpandedRecommendationRuns({
       scanStartedAt:timestamp(),scanCompletedAt:null,
       stats:{universeCount:0,fastCompleted:0,fastFailed:0,fastInsufficient:0,
         deepTargetCount:0,deepCompleted:0,deepFailed:0,finalCandidateCount:0},
-      requestStats:{universeRequests:0,fastScreenRequests:0,deepReviewRequests:0,newsRequests:0,failedRequests:0},
+      requestStats:{universeRequests:0,officialTypeRequests:0,fastScreenRequests:0,deepReviewRequests:0,newsRequests:0,failedRequests:0},
       universeSnapshot:null,fastResults:null,recommendations:null,deepFailures:null,
       aiStatus:aiEnabled?'NOT_REQUESTED':'DISABLED',history:{status:'NOT_CONFIGURED'},work:null};
     runs.set(runId,run);
@@ -96,12 +97,14 @@ function createExpandedRecommendationRuns({
         if(!Array.isArray(snapshot?.stocks)||snapshot.stocks.length!==500||
           new Set(snapshot.stocks.map(x=>x.symbol)).size!==500||
           snapshot.stocks.some(x=>!isNaverKrStockItemCode(x.symbol)||
+            !hasRequiredOfficialStockType(x,{testOnly:snapshot.testOnly===true})||
             typeof x.name!=='string'||!x.name.trim()||
             !['KOSPI','KOSDAQ'].includes(x.market))||
           !/^[0-9a-f]{64}$/.test(snapshot.universeFingerprint||'')||
           !/^[0-9a-f]{64}$/.test(snapshot.snapshotFingerprint||''))throw problem('EXPANDED_UNIVERSE_INVALID');
         run.universeSnapshot=snapshot;
         run.requestStats.universeRequests=snapshot.requestCount??0;
+        run.requestStats.officialTypeRequests=snapshot.officialTypeRequests??0;
         run.stats.universeCount=500;
         const screened=await mapBounded(snapshot.stocks,fastConcurrency,async(stock,index)=>{
           try{
@@ -217,7 +220,10 @@ function createExpandedRecommendationRuns({
       }catch(error){
         run.status='FAILED';
         run.scanCompletedAt=timestamp();
-        run.failureReason=error.code?.startsWith('EXPANDED_')?error.code:'EXPANDED_RUN_FAILED';
+        run.failureReason=error.code?.startsWith('EXPANDED_')||error.code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'?
+          error.code:'EXPANDED_RUN_FAILED';
+        if(Number.isInteger(error.officialTypeRequests))
+          run.requestStats.officialTypeRequests=error.officialTypeRequests;
         if(Number.isInteger(error.requestCount))
           run.requestStats.universeRequests=error.requestCount;
         if(Number.isInteger(error.failedRequests))

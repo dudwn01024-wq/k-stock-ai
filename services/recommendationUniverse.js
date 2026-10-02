@@ -1,5 +1,6 @@
 'use strict';
-const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
+const {isNaverKrStockItemCode,requiresOfficialStockType}=require('./naverKrStockItemCode');
+const {createKrxStockSecurityTypeClassifier}=require('./krxStockSecurityType');
 
 const {createHash}=require('node:crypto');
 
@@ -58,7 +59,7 @@ function normalizedRow(row,market,fetchedAt){
   const explicitlyExcluded=kind!=null&&knownExcluded.includes(kind);
   return {excluded:explicitlyExcluded,stock:{symbol,name:name.trim(),market,
     marketValue:value,marketValueRaw:row.marketValueRaw,marketValueUnit:'PROVIDER_RAW',
-    securityType:explicitlyExcluded?kind.toUpperCase():'UNKNOWN',provider:PROVIDER,
+    codeSyntax:'VALID',securityType:explicitlyExcluded?kind.toUpperCase():'UNKNOWN',provider:PROVIDER,
     fetchedAt,sourceBusinessDate}};
 }
 
@@ -83,11 +84,14 @@ async function fetchNaverUniversePage({market,page,pageSize=PAGE_SIZE,fetchImpl=
 }
 
 function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,headers={},clock=()=>new Date(),
-  onRequest=()=>{},testOnly=false}={}){
+  onRequest=()=>{},testOnly=false,officialSecurityTypeRecords}={}){
   const readPage=fetchPage??(args=>fetchNaverUniversePage({...args,fetchImpl,headers}));
   if(typeof readPage!=='function'||typeof clock!=='function'||typeof onRequest!=='function')
     throw failure('UNIVERSE_CONFIG_INVALID');
   async function load(){
+    const typeClassifier=createKrxStockSecurityTypeClassifier({testOnly,
+      ...(officialSecurityTypeRecords===undefined?{}:{records:officialSecurityTypeRecords})});
+    const excludedSecurities=[];
     const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,lastValue:Infinity,rows:[]}]));
     const seen=new Set();
     let requestCount=0,excludedCount=0;
@@ -114,8 +118,25 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
         seen.add(item.stock.symbol);
         if(item.stock.marketValue>last)throw failure('UNIVERSE_ORDER_INVALID',requestCount);
         last=item.stock.marketValue;
-        if(item.excluded)excludedCount++;
-        else entry.rows.push(item.stock);
+        if(requiresOfficialStockType(item.stock.symbol)){
+          const classification=typeClassifier.classify(item.stock);
+          Object.assign(item.stock,classification);
+          if(classification.securityType==='UNVERIFIED'){
+            const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount);
+            error.officialTypeRequests=typeClassifier.requestCount();
+            error.officialTypeChecks=typeClassifier.checkCount();
+            throw error;
+          }
+          item.excluded=classification.securityType!=='COMMON';
+          item.exclusionReason=classification.securityType==='NON_COMMON'?
+            'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
+        }
+        if(item.excluded){
+          excludedCount++;
+          if(item.stock.securityTypeEvidence)excludedSecurities.push({symbol:item.stock.symbol,
+            market:item.stock.market,codeSyntax:item.stock.codeSyntax,securityType:item.stock.securityType,
+            exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
+        }else entry.rows.push(item.stock);
       }
       entry.lastValue=last;
       entry.page=page;
@@ -133,7 +154,8 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       if(complete){
         const stocks=all.slice(0,TARGET_COUNT).map((stock,index)=>({...stock,marketValueRank:index+1}));
         const dates=[...new Set(stocks.map(stock=>stock.sourceBusinessDate))];
-        return {stocks,count:stocks.length,provider:PROVIDER,requestCount,excludedCount,testOnly,
+        return {stocks,count:stocks.length,provider:PROVIDER,requestCount,excludedCount,excludedSecurities,testOnly,
+          officialTypeRequests:typeClassifier.requestCount(),officialTypeChecks:typeClassifier.checkCount(),
           sourceBusinessDate:dates.length===1?dates[0]:null,
           fetchedAt:clock().toISOString(),snapshotConsistency:'NOT_PROVEN',
           universeFingerprint:hash(stocks.map(stock=>stock.symbol).sort()),
