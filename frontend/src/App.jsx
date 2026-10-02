@@ -3,6 +3,7 @@ import PaperAccess from './PaperAccess.jsx';
 import ObservationPanel from './ObservationPanel.jsx';
 import CandidateOverview from './CandidateOverview.jsx';
 import RecommendationHistory from './RecommendationHistory.jsx';
+import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
@@ -430,6 +431,27 @@ recentLow20:
     if (!response.ok) throw new Error(`추천 종목 API 오류 (${response.status})`);
     return response.json();
   }
+  async getRecommendationMode() {
+    const response=await fetch(this.baseUrl+'/stock/recommendation-mode');
+    if(response.status===404)return {universeMode:'legacy50'};
+    if(!response.ok)throw Error('추천 실행 모드를 확인하지 못했습니다.');
+    const body=await response.json();
+    if(!['legacy50','expanded500'].includes(body.universeMode))throw Error('추천 실행 모드가 올바르지 않습니다.');
+    return body;
+  }
+  async startExpandedRun() {
+    const response=await fetch(this.baseUrl+'/stock/recommendation-runs',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.message||'500종목 분석을 시작하지 못했습니다.');
+    return body;
+  }
+  async getExpandedRun(runId) {
+    if(!/^[A-Za-z0-9-]{1,80}$/.test(runId))throw Error('실행 번호가 올바르지 않습니다.');
+    const response=await fetch(this.baseUrl+'/stock/recommendation-runs/'+encodeURIComponent(runId));
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.message||'진행 상태를 읽지 못했습니다.');
+    return body;
+  }
 
   async getRecommendationAI(scanId) {
     const response = await fetch(`${this.baseUrl}/stock/recommendations-ai?scanId=${encodeURIComponent(scanId)}`);
@@ -466,6 +488,9 @@ export default function App() {
   const {data:recommendationData,loading:recommendationLoading,error:recommendationError,
     ai:recommendationAIData,aiLoading:recommendationAILoading,aiError:recommendationAIError}=recommendationRun;
   const [historyOpen,setHistoryOpen]=useState(false);
+  const [recommendationMode,setRecommendationMode]=useState(null);
+  const [expandedAiEnabled,setExpandedAiEnabled]=useState(false);
+  const [recommendationModeError,setRecommendationModeError]=useState(null);
   const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -482,6 +507,16 @@ export default function App() {
   }, [showDetail, loading, activeTab]);
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
+  useEffect(()=>{
+    let active=true;
+    backendService.getRecommendationMode().then(result=>{
+      if(active){
+        setExpandedAiEnabled(result.settings?.aiEnabled===true);
+        setRecommendationMode(result.universeMode);
+      }
+    }).catch(error=>{if(active)setRecommendationModeError(error.message);});
+    return()=>{active=false;};
+  },[backendService]);
 
   const loadRealStockData = useCallback(
     async (symbol, name, timeframe = '1M', refresh = false) => {
@@ -532,13 +567,16 @@ export default function App() {
   );
 
   useEffect(() => {
-    loadRealStockData('005930', '삼성전자', '1M');
-  }, [loadRealStockData]);
+    if(recommendationMode==='legacy50')loadRealStockData('005930', '삼성전자', '1M');
+  }, [loadRealStockData,recommendationMode]);
 
   const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
     patch=>setRecommendationRun(previous=>({...previous,...patch}))),[backendService]);
   const loadRecommendations=useCallback(()=>recommendationLoader.load(),[recommendationLoader]);
-  useEffect(()=>{loadRecommendations();return ()=>recommendationLoader.cancel();},[loadRecommendations,recommendationLoader]);
+  useEffect(()=>{
+    if(recommendationMode==='legacy50')loadRecommendations();
+    return ()=>recommendationLoader.cancel();
+  },[loadRecommendations,recommendationLoader,recommendationMode]);
 
   const handleSearch = async (event) => {
     event.preventDefault();
@@ -709,8 +747,10 @@ export default function App() {
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
         {activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
-        {activeTab !== 'paper' && !historyOpen && <CandidateOverview data={recommendationData} loading={recommendationLoading}
+        {activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
           error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
         {!historyOpen && <>
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">

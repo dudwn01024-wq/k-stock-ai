@@ -1,6 +1,7 @@
 const { dataFreshness, dateConsistency, sourceDate } = require('./services/dataFreshness');
 const express = require('express');
 const dotenv = require('dotenv');
+const {AsyncLocalStorage}=require('node:async_hooks');
 
 dotenv.config();
 
@@ -17,6 +18,23 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const recommendationRequestContext=new AsyncLocalStorage();
+const recommendationFetch=async (...args)=>{
+  const context=recommendationRequestContext.getStore();
+  if(context){
+    const url=String(args[0]);
+    const category=url.includes('/api/news/stock/')?'news':'deep';
+    context.recordRequest(category);
+    try{
+      // Expanded-only provider calls have one bounded attempt per existing request.
+      const options={...(args[1]||{}),redirect:'error',signal:AbortSignal.timeout(15000)};
+      const response=await fetch(args[0],options);
+      if(!response.ok)context.recordFailure();
+      return response;
+    }catch(error){context.recordFailure();throw error;}
+  }
+  return fetch(...args);
+};
 const {resolveExecutionMode,installExecutionMode}=require('./services/executionMode');
 const executionMode=resolveExecutionMode(process.env.KSTOCK_EXECUTION_MODE,process.env.NODE_ENV);
 
@@ -504,7 +522,7 @@ const mapWithConcurrency =
 // STOCK QUOTE DATA
 // ========================================
 
-const {fetchStockQuoteData,fetchStockNewsBySymbol}=require('./services/naverMarketData').createNaverMarketData({fetchImpl:(...args)=>fetch(...args)});
+const {fetchStockQuoteData,fetchStockNewsBySymbol}=require('./services/naverMarketData').createNaverMarketData({fetchImpl:recommendationFetch});
 
 // ========================================
 // STOCK NEWS DATA
@@ -590,7 +608,7 @@ const calculateStrategy =
       integrationResponse
     ] =
       await Promise.all([
-        fetch(
+        recommendationFetch(
           `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
           {
             headers:
@@ -598,7 +616,7 @@ const calculateStrategy =
           }
         ),
 
-        fetch(
+        recommendationFetch(
           `https://m.stock.naver.com/api/stock/${symbol}/integration`,
           {
             headers:
@@ -3847,6 +3865,8 @@ app.get(
       recommendationProtocol: 'RECOMMENDATION_SCAN_V1',
       recommendationHistoryProtocol:'RECOMMENDATION_HISTORY_V1',
       recommendationHistory:recommendationHistory.status(),
+      recommendationUniverseMode,
+      expandedRecommendationProtocol:'RECOMMENDATION_EXPANDED_RUN_V1',
       buildCommit: process.env.RENDER_GIT_COMMIT || null,
       geminiConfigured:
         Boolean(GEMINI_API_KEY),
@@ -4411,7 +4431,11 @@ app.get(
 
 const {createRecommendationScans,registerRecommendationRoutes}=require('./services/recommendationScans');
 const {historyFromEnvironment,registerHistoryRoutes,hash}=require('./services/recommendationHistory');
+const {createRecommendationUniverse}=require('./services/recommendationUniverse');
+const {createRecommendationFastScreen}=require('./services/recommendationFastScreen');
+const {createExpandedRecommendationRuns,registerExpandedRecommendationRoutes,settings:expandedSettings}=require('./services/expandedRecommendationRuns');
 const recommendationHistory=historyFromEnvironment();
+const recommendationUniverseMode=process.env.RECOMMENDATION_UNIVERSE_MODE==='expanded500'?'expanded500':'legacy50';
 const recommendationScans=createRecommendationScans({
   history:recommendationHistory,universe:RECOMMENDATION_WATCHLIST,
   codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,calculateRiskReward,assessLatestNews,getRecommendationScore,getFinalRecommendationGrade,rankRecommendationResults,buildRecommendationGeminiPrompt].map(fn=>fn.toString()).join('\n'))),
@@ -4420,7 +4444,27 @@ const recommendationScans=createRecommendationScans({
   aiConfigured:()=>Boolean(GEMINI_API_KEY)
 });
 registerRecommendationRoutes(app,recommendationScans);
-registerHistoryRoutes(app,recommendationHistory,recommendationScans.pendingIds);
+const expandedConfig=expandedSettings(process.env);
+const expandedUniverse=createRecommendationUniverse({headers:NAVER_HEADERS});
+let currentFastScreen=null;
+const expandedRuns=createExpandedRecommendationRuns({
+  loadUniverse:async()=>{
+    currentFastScreen=createRecommendationFastScreen({headers:NAVER_HEADERS});
+    return expandedUniverse.load();
+  },
+  fastScreen:stock=>currentFastScreen.screen(stock),
+  deepReview:(stock,{recordRequest,recordFailure})=>
+    recommendationRequestContext.run({recordRequest,recordFailure},()=>buildRecommendationResult(stock)),
+  rank:rankRecommendationResults,history:recommendationHistory,
+  codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,rankRecommendationResults].map(fn=>fn.toString()).join('\n'))),
+  analyze:analyzeRecommendationsWithGemini,deepLimit:expandedConfig.deepLimit,
+  fastConcurrency:expandedConfig.fastConcurrency,deepConcurrency:expandedConfig.deepConcurrency,
+  aiEnabled:expandedConfig.aiEnabled
+});
+registerExpandedRecommendationRoutes(app,expandedRuns,{mode:recommendationUniverseMode,history:recommendationHistory});
+registerHistoryRoutes(app,recommendationHistory,()=>[
+  ...recommendationScans.pendingIds(),...expandedRuns.pendingIds()
+]);
 
 // ========================================
 // KIS OHLCV TEST API
