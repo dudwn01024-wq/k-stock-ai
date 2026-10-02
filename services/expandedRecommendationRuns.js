@@ -1,4 +1,5 @@
 'use strict';
+const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {randomUUID}=require('node:crypto');
 
 const RUN_PROTOCOL='RECOMMENDATION_EXPANDED_RUN_V1';
@@ -94,7 +95,7 @@ function createExpandedRecommendationRuns({
         const snapshot=await loadUniverse();
         if(!Array.isArray(snapshot?.stocks)||snapshot.stocks.length!==500||
           new Set(snapshot.stocks.map(x=>x.symbol)).size!==500||
-          snapshot.stocks.some(x=>!/^\d{6}$/.test(x.symbol)||
+          snapshot.stocks.some(x=>!isNaverKrStockItemCode(x.symbol)||
             typeof x.name!=='string'||!x.name.trim()||
             !['KOSPI','KOSDAQ'].includes(x.market))||
           !/^[0-9a-f]{64}$/.test(snapshot.universeFingerprint||'')||

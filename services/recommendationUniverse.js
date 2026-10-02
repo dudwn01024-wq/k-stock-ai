@@ -1,4 +1,5 @@
 'use strict';
+const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 
 const {createHash}=require('node:crypto');
 
@@ -40,7 +41,7 @@ function normalizedRow(row,market,fetchedAt){
   const symbol=row.itemCode;
   const name=row.stockName;
   const value=marketValue(row.marketValueRaw);
-  if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol)||typeof name!=='string'||!name.trim()||
+  if(!isNaverKrStockItemCode(symbol)||typeof name!=='string'||!name.trim()||
      name.length>120||value===null)throw failure('UNIVERSE_ROW_INVALID');
   if(row.stockType!=null&&row.stockType!=='domestic')throw failure('UNIVERSE_MARKET_MISMATCH');
   const expectedExchange=market==='KOSPI'?'KS':'KQ';

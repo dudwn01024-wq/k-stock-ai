@@ -174,3 +174,58 @@ test('HTTP failure is a per-symbol lookup failure with one attempted request',as
   assert.equal(count,1);
   assert.equal(fast.requestCount(),1);
 });
+
+
+test('TEST_ONLY mixed stock suffixes survive universe ordering, duplicate checks, and fingerprints',async()=>{
+  const kospi=testOnlyMarket('KOSPI',400);
+  const codes=['1234A5','0000B1','4321Z9'];
+  codes.forEach((symbol,index)=>{kospi[index]={...kospi[index],itemCode:symbol};});
+  const fixture=pages(kospi);
+  const snapshot=await createRecommendationUniverse({fetchPage:fixture.fetchPage,testOnly:true,
+    clock:()=>new Date('2026-10-02T09:45:00Z')}).load();
+  assert.equal(snapshot.count,500);assert.equal(snapshot.testOnly,true);
+  codes.forEach(code=>assert.ok(snapshot.stocks.some(x=>x.symbol===code)));
+  const again=await createRecommendationUniverse({fetchPage:pages(kospi).fetchPage,testOnly:true,
+    clock:()=>new Date('2026-10-02T09:45:00Z')}).load();
+  assert.equal(snapshot.universeFingerprint,again.universeFingerprint);
+  assert.equal(snapshot.snapshotFingerprint,again.snapshotFingerprint);
+  const duplicate=kospi.map(row=>({...row}));duplicate[1].itemCode=codes[0];
+  await assert.rejects(createRecommendationUniverse({fetchPage:pages(duplicate).fetchPage,testOnly:true}).load(),
+    {code:'UNIVERSE_DUPLICATE_SYMBOL'});
+});
+
+test('TEST_ONLY invalid mixed patterns still fail closed in universe normalization',async()=>{
+  for(const itemCode of ['1234I5','1234O5','1234U5','123A45','A12345','12345A','1234a5','1234-5','12345','1234567',null,123456,'1234A5 ']){
+    const rows=testOnlyMarket('KOSPI',400);rows[0]={...rows[0],itemCode};
+    await assert.rejects(createRecommendationUniverse({fetchPage:pages(rows).fetchPage,testOnly:true}).load(),
+      {code:'UNIVERSE_ROW_INVALID'});
+  }
+});
+
+test('TEST_ONLY fast calculator and bounded price adapter retain exact mixed stock suffixes',async()=>{
+  const calls=[];
+  const fast=createRecommendationFastScreen({testOnly:true,fetchImpl:async(url,options)=>{
+    calls.push({url,options});return {ok:true,json:async()=>dailyRows(21)};
+  }});
+  for(const symbol of ['005930','1234A5','0000B1','4321Z9']){
+    const result=await fast.screen({symbol});
+    assert.equal(result.symbol,symbol);assert.equal(result.status,'READY');assert.equal(result.testOnly,true);
+    assert.equal(result.preScreenScore,2);
+    assert.equal(calls.at(-1).url,'https://m.stock.naver.com/api/stock/'+symbol+'/price?pageSize=30&page=1');
+    assert.equal(calls.at(-1).options.redirect,'error');
+    assert.deepEqual(await fast.screen({symbol}),result);
+    assert.equal(calculateFastScreen({symbol},dailyRows(21)).symbol,symbol);
+  }
+  assert.equal(calls.length,4);assert.equal(fast.requestCount(),4);
+});
+
+test('TEST_ONLY invalid mixed stock suffixes are blocked before any price transport',async()=>{
+  let calls=0;const fetchImpl=async()=>{calls++;throw Error('TEST_ONLY_UNEXPECTED_TRANSPORT');};
+  const fast=createRecommendationFastScreen({fetchImpl,testOnly:true});
+  for(const symbol of ['1234I5','1234a5','A12345','1234A5 ',123456]){
+    await assert.rejects(fetchNaverDailyPrice(symbol,{fetchImpl}),{code:'FAST_SCREEN_SYMBOL_INVALID'});
+    await assert.rejects(fast.screen({symbol}),{code:'FAST_SCREEN_SYMBOL_INVALID'});
+    assert.throws(()=>calculateFastScreen({symbol},dailyRows(21)),{code:'FAST_SCREEN_SYMBOL_INVALID'});
+  }
+  assert.equal(calls,0);assert.equal(fast.requestCount(),0);
+});

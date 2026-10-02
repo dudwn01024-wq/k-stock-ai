@@ -116,3 +116,30 @@ test('bounded process memory evicts only completed runs without starting a read 
   assert.equal(f.store.get(second.runId).status,'COMPLETED');
   assert.equal(f.calls.universe,2);
 });
+
+
+test('TEST_ONLY expanded 500-run retains mixed stock suffixes through both stages',async()=>{
+  const mixed=['1234A5','0000B1','4321Z9'];
+  const universe=stocks.map((stock,index)=>index<mixed.length?{...stock,symbol:mixed[index]}:{...stock});
+  const symbolHash=createHash('sha256').update(JSON.stringify(universe.map(x=>x.symbol).sort())).digest('hex');
+  const snapshotHash=createHash('sha256').update(JSON.stringify(universe.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})))).digest('hex');
+  const f=fixture({loadUniverse:async()=>({stocks:universe,universeFingerprint:symbolHash,
+    snapshotFingerprint:snapshotHash,provider:'TEST_ONLY',testOnly:true,requestCount:6})});
+  const run=await f.store.wait(f.store.start().runId);
+  assert.equal(run.status,'COMPLETED');
+  assert.equal(f.calls.fast,500);assert.equal(f.calls.deep,40);assert.equal(f.calls.ai,0);
+  for(const code of mixed){
+    assert.equal(run.fastResults.find(x=>x.symbol===code).deepReviewSelected,true);
+    assert.ok(run.recommendations.some(x=>x.symbol===code));
+  }
+  assert.equal(run.universeSnapshot.universeFingerprint,symbolHash);
+  assert.equal(run.universeSnapshot.snapshotFingerprint,snapshotHash);
+});
+
+test('TEST_ONLY expanded run rejects invalid suffix before fast or deep calls',async()=>{
+  const f=fixture({loadUniverse:async()=>({stocks:stocks.map((stock,index)=>index?stock:{...stock,symbol:'1234I5'}),
+    universeFingerprint:fingerprint,snapshotFingerprint:fingerprint,testOnly:true,requestCount:2})});
+  const run=await f.store.wait(f.store.start().runId);
+  assert.equal(run.status,'FAILED');assert.equal(run.failureReason,'EXPANDED_UNIVERSE_INVALID');
+  assert.equal(f.calls.fast,0);assert.equal(f.calls.deep,0);assert.equal(f.calls.ai,0);
+});

@@ -1,4 +1,5 @@
 'use strict';
+const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 // No provider, worker, private evidence, approval or trading imports.
 const fs=require('node:fs'),path=require('node:path');
 const {createHash,randomUUID}=require('node:crypto');
@@ -61,7 +62,7 @@ function expandedSnapshot(result,{testOnly=false}={}){
     securityType:scalar(s?.securityType),provider:scalar(s?.provider),fetchedAt:scalar(s?.fetchedAt),
     sourceBusinessDate:scalar(s?.sourceBusinessDate)}));
   const symbols=new Set(stocks.map(s=>s.symbol));
-  if(stocks.some(s=>typeof s.symbol!=='string'||!/^\d{6}$/.test(s.symbol)||!s.name)||symbols.size!==stocks.length)throw error('HISTORY_UNIVERSE_INVALID');
+  if(stocks.some(s=>!isNaverKrStockItemCode(s.symbol)||!s.name)||symbols.size!==stocks.length)throw error('HISTORY_UNIVERSE_INVALID');
   const fingerprint=hash(stocks.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})));
   const symbolFingerprint=hash(stocks.map(x=>x.symbol).sort());
   if((source.fingerprint!=null&&source.fingerprint!==fingerprint)
@@ -262,7 +263,8 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     const deep=read(id,'v2-deep',false,EXPANDED_HISTORY_VERSION);
     const r=manifest.payload,u=universe.payload,f=fast.payload,d=deep.payload;
     if(r.testOnly!==testOnly||[u,f,d].some(x=>x.testOnly!==testOnly))throw error('HISTORY_TEST_DATA_MISMATCH');
-    if([u,f,d].some(x=>x.scanId!==id)||r.phaseFingerprints?.universe!==universe.fingerprint
+    if(u.stocks.some(x=>!isNaverKrStockItemCode(x.symbol))||
+      [u,f,d].some(x=>x.scanId!==id)||r.phaseFingerprints?.universe!==universe.fingerprint
       ||r.phaseFingerprints?.fast!==fast.fingerprint||r.phaseFingerprints?.deep!==deep.fingerprint
       ||r.universeFingerprint!==u.fingerprint
       ||u.fingerprint!==hash(u.stocks.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})))
@@ -301,12 +303,18 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
       aiInput:input?input.payload:null,aiStartedAt:start?.payload.startedAt??null,storage:{status:finish&&['COMPLETED','PARTIAL'].includes(aiStatus)&&!input?'INCOMPLETE':'STORED',storageKind},recordFingerprint:c.fingerprint};
   }
   function list({page=1,symbol=null,pendingIds=[]}={}){
-    if(!Number.isInteger(page)||page<1||page>1000||(symbol!==null&&!/^\d{6}$/.test(symbol)))throw error('HISTORY_QUERY_INVALID',400);
+    const numericSymbol=symbol!==null&&/^\d{6}$/.test(symbol);
+    if(!Number.isInteger(page)||page<1||page>1000||
+      (symbol!==null&&!numericSymbol&&!isNaverKrStockItemCode(symbol)))throw error('HISTORY_QUERY_INVALID',400);
+    // Mixed stock suffixes filter V2 only. V1's numeric symbol rules stay intact.
+    const expandedSymbolOnly=symbol!==null&&!numericSymbol;
     if(!configured||!fs.existsSync(resolved))return {...status(),items:[],page,total:0,heldCount:0};
     ensureRoot();const items=[];let heldCount=0;
     for(const name of fs.readdirSync(resolved).filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json'))){
       const suffix=name.endsWith('.v2-manifest.json')?'.v2-manifest.json':'.candidate.json';
-      try{const r=detail(name.slice(0,-suffix.length),{pendingIds});if(symbol&&!r.universe.some(x=>x.symbol===symbol))continue;
+      try{const r=detail(name.slice(0,-suffix.length),{pendingIds});
+        if(expandedSymbolOnly&&r.schemaVersion!==EXPANDED_HISTORY_VERSION)continue;
+        if(symbol&&!r.universe.some(x=>x.symbol===symbol))continue;
         items.push({...pick(r,['scanId','scanStartedAt','scanCompletedAt','scannedCount','validCount','failedCount','candidateCount','aiStatus','policyVersion','universeFingerprint','testOnly','schemaVersion','universeMode','fastCount','deepTargetCount','deepCompleted','deepFailed']),storageStatus:r.storage.status});
       }catch{heldCount++;}
     }

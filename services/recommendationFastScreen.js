@@ -1,4 +1,5 @@
 'use strict';
+const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 
@@ -30,7 +31,7 @@ function empty(symbol,reason,receivedAt=null){
 
 function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
   const symbol=stock?.symbol;
-  if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
+  if(!isNaverKrStockItemCode(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
   if(!Array.isArray(rawRows)||rawRows.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt);
   const rows=[];
   const seen=new Set();
@@ -67,7 +68,7 @@ function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
 
 /** One request per symbol; no retries, redirects, quote, supply, or news calls. */
 async function fetchNaverDailyPrice(symbol,{fetchImpl=globalThis.fetch,headers={},signal}={}){
-  if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
+  if(!isNaverKrStockItemCode(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
   let response;
   try{response=await fetchImpl(`https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=${PRICE_PAGE_SIZE}&page=1`,
     {method:'GET',headers,redirect:'error',signal:signal??AbortSignal.timeout(12000)});}
@@ -85,7 +86,7 @@ function createRecommendationFastScreen({fetchDaily,fetchImpl=globalThis.fetch,h
   const bySymbol=new Map();
   function screen(stock){
     const symbol=stock?.symbol;
-    if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))
+    if(!isNaverKrStockItemCode(symbol))
       return Promise.reject(failure('FAST_SCREEN_SYMBOL_INVALID'));
     if(bySymbol.has(symbol))return bySymbol.get(symbol);
     const result=(async()=>{
