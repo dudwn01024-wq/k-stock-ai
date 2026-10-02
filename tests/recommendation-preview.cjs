@@ -4,11 +4,11 @@ require('./helpers/local-only.cjs');
 const express=require('express'),fs=require('node:fs'),path=require('node:path');
 const {createRecommendationScans,registerRecommendationRoutes}=require('../services/recommendationScans');
 const app=express(),routers=new Map(),counts={scan:0,ai:0,requests:[]};
-const fixture=[['000001','합성 반도체','PRIORITY_CANDIDATE',4],['000002','합성 모빌리티','CHASE_CAUTION',4],['000003','합성 소재','WATCH_CANDIDATE',2]].map(([symbol,stockName,grade,score])=>({
+const fixture=[['000001','합성 반도체','PRIORITY_CANDIDATE',4,true],['000002','합성 모빌리티','WATCH_CANDIDATE',3,false],['000003','합성 소재','WATCH_CANDIDATE',2,null]].map(([symbol,stockName,grade,score,newsPassed])=>({
   testData:true,symbol,stockName,grade,score,maxScore:4,currentPrice:10000,changeRate:0,
-  strategy:{trendPassed:true,volumePassed:true,supplyPassed:grade!=='WATCH_CANDIDATE',newsPassed:grade!=='WATCH_CANDIDATE'},
-  newsAssessment:{newsPassed:true},riskReward:{available:false,reason:'합성 자료의 손익비는 확인하지 않습니다.'},
-  dataMetadata:{price:{source:'TEST_ONLY',sourceTimestamp:null,sourceBusinessDate:null,freshnessStatus:'UNKNOWN'}},news:[]
+  strategy:{trendPassed:true,volumePassed:true,supplyPassed:score!==2},
+  newsAssessment:{newsPassed},riskReward:{available:false,reason:'합성 자료의 손익비는 확인하지 않습니다.'},
+  dataMetadata:{dateConsistency:'MISMATCH',price:{source:'TEST_ONLY',sourceTimestamp:null,sourceBusinessDate:null,freshnessStatus:'UNKNOWN'}},news:[]
 }));
 app.use((req,res,next)=>{
   res.set('Content-Security-Policy',"default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; frame-src 'none'; form-action 'self'; base-uri 'self'");
