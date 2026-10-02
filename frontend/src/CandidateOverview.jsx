@@ -3,9 +3,10 @@ import { toNullableNumber } from './utils/numbers.js';
 
 const conditions = [['trendPassed', '추세'], ['volumePassed', '거래량'], ['supplyPassed', '수급'], ['newsPassed', '뉴스']];
 export function candidateSummary(item) {
-  const passed = conditions.filter(([key]) => item.strategy?.[key] === true).map(([, label]) => label);
-  const failed = conditions.filter(([key]) => item.strategy?.[key] === false).map(([, label]) => label);
-  const unknown = conditions.filter(([key]) => typeof item.strategy?.[key] !== 'boolean').map(([, label]) => label);
+  const conditionValues = { ...item.strategy, newsPassed: item.newsAssessment?.newsPassed };
+  const passed = conditions.filter(([key]) => conditionValues[key] === true).map(([, label]) => label);
+  const failed = conditions.filter(([key]) => conditionValues[key] === false).map(([, label]) => label);
+  const unknown = conditions.filter(([key]) => typeof conditionValues[key] !== 'boolean').map(([, label]) => label);
   return {
     reason: passed.length ? `${passed.join(' · ')} 조건 통과` : '선정 근거 데이터 없음',
     risk: [item.grade === 'CHASE_CAUTION' ? '추격 주의' : null,
