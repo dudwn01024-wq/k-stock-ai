@@ -8,6 +8,16 @@ const clock=value=>value&&Number.isFinite(Date.parse(value))
 const grade={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보',EXCLUDED:'후보 제외'};
 const number=value=>Number.isFinite(value)?value.toLocaleString('ko-KR'):'미확인';
 
+export function expandedRunStatusLabel(run){
+  if(run.status!=='PARTIAL')return ({QUEUED:'대기',FAST_SCREENING:'1단계 빠른 분석',DEEP_REVIEWING:'2단계 정밀 분석',AI_EXPLAINING:'Gemini 설명 중',COMPLETED:'완료',FAILED:'실패',INTERRUPTED_UNKNOWN:'중단 여부 미확인'})[run.status]||run.status;
+  const {fastInsufficient,fastFailed,deepFailed}=run.stats??{};
+  if(![fastInsufficient,fastFailed,deepFailed].every(value=>Number.isSafeInteger(value)&&value>=0))return '일부 결과 미완료';
+  const failureCount=fastFailed+deepFailed;
+  if(!Number.isSafeInteger(failureCount))return '일부 결과 미완료';
+  if(fastInsufficient>0)return failureCount>0?'일부 자료 부족·조회 실패':'일부 자료 부족';
+  return failureCount>0?'일부 조회 실패':'일부 결과 미완료';
+}
+
 export default function ExpandedRecommendation({service,onHistory,aiEnabled=false}){
   const [run,setRun]=useState(null);
   const [saved,setSaved]=useState(null);
@@ -76,7 +86,7 @@ export default function ExpandedRecommendation({service,onHistory,aiEnabled=fals
     {error&&<p role="alert" className="home-warning">{error}</p>}
     {run?.reused===true&&<p className="home-notice" role="status">최근 분석 결과 재사용 · 외부 데이터 재조회 없음<br/>원래 분석 완료 {clock(run.scanCompletedAt)} · 재사용 기한 {clock(run.reuseUntil)}</p>}
     {run&&<div className="expanded-progress" role="status" aria-live="polite">
-      <strong>실행 상태: {({QUEUED:'대기',FAST_SCREENING:'1단계 빠른 분석',DEEP_REVIEWING:'2단계 정밀 분석',AI_EXPLAINING:'Gemini 설명 중',COMPLETED:'완료',PARTIAL:'일부 자료 부족·실패',FAILED:'실패',INTERRUPTED_UNKNOWN:'중단 여부 미확인'})[run.status]||run.status}</strong>
+      <strong>실행 상태: {expandedRunStatusLabel(run)}</strong>
       <span>1단계 처리 {number((run.stats?.fastCompleted??0)+(run.stats?.fastFailed??0))} / {number(run.stats?.universeCount)} · 조회 실패 {number(run.stats?.fastFailed)} · 자료 부족 {number(run.stats?.fastInsufficient)}</span>
       <span>2단계 {number(run.stats?.deepCompleted)} / {number(run.stats?.deepTargetCount)} · 조회 실패 {number(run.stats?.deepFailed)}</span>
       <span>Gemini: {({DISABLED:'미실행',NOT_REQUESTED:'미요청',IN_PROGRESS:'설명 중',COMPLETED:'완료',FAILED:'실패',NOT_REQUIRED:'대상 없음'})[run.aiStatus]||'상태 미확인'}</span>
