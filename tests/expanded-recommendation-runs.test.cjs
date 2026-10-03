@@ -108,8 +108,10 @@ test('optional Gemini path limits input to three and distinguishes partial expla
 });
 
 test('bounded process memory evicts only completed runs without starting a read request',async()=>{
-  const f=fixture({maxEntries:1});
+  let time=Date.parse('2026-10-03T00:00:00Z');
+  const f=fixture({maxEntries:1,now:()=>time});
   const first=await f.store.wait(f.store.start().runId);
+  time+=10*60*1000;
   const second=await f.store.wait(f.store.start().runId);
   assert.notEqual(first.runId,second.runId);
   assert.throws(()=>f.store.get(first.runId),{code:'EXPANDED_RUN_NOT_AVAILABLE'});

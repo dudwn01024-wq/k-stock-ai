@@ -1,5 +1,6 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
+const {reuseMetadata}=require('./expandedRecommendationReuse');
 const {normalizeOfficialStockTypeEvidence,hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 // No provider, worker, private evidence, approval or trading imports.
 const fs=require('node:fs'),path=require('node:path');
@@ -126,6 +127,11 @@ function expandedSnapshot(result,{testOnly=false}={}){
   if(!Number.isFinite(Date.parse(timestamps.scanStartedAt))||!Number.isFinite(Date.parse(timestamps.scanCompletedAt))
     ||!['COMPLETED','PARTIAL','FAILED'].includes(timestamps.scanStatus)
     ||(result.aiEnabled!=null&&typeof result.aiEnabled!=='boolean'))throw error('HISTORY_EXPANDED_INPUT_INVALID');
+  let reuse={};
+  try{reuse=reuseMetadata({...result,policyVersion:result.policyVersion??EXPANDED_POLICY_VERSION});}
+  catch{throw error('HISTORY_EXPANDED_INPUT_INVALID');}
+  if(reuse.runConfig&&(reuse.runConfig.aiEnabled!==(result.aiEnabled===true)||chosen.size>reuse.runConfig.deepLimit))
+    throw error('HISTORY_EXPANDED_INPUT_INVALID');
   const selectedCount=deep.filter(selected).length;
   for(const [key,expected] of Object.entries({universeCount:stocks.length,deepTargetCount:chosen.size,
     deepCompleted:deep.length,deepFailed:failures.length,finalCandidateCount:selectedCount}))
@@ -138,7 +144,7 @@ function expandedSnapshot(result,{testOnly=false}={}){
       snapshotConsistency:scalar(source.snapshotConsistency)},
     fast:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,results:fast},
     deep:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,all:deep,failures},
-    manifest:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,...timestamps,
+    manifest:{schemaVersion:EXPANDED_HISTORY_VERSION,testOnly,scanId:id,...timestamps,...reuse,
       universeFingerprint:fingerprint,policyVersion:scalar(result.policyVersion??EXPANDED_POLICY_VERSION),codeVersion:scalar(result.codeVersion),
       scannedCount:stocks.length,fastCount:fast.length,deepTargetCount:chosen.size,deepCompleted:deep.length,
       deepFailed:failures.length,candidateCount:selectedCount,stats:counts,requestStats,
@@ -286,6 +292,8 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     const fast=read(id,'v2-fast',false,EXPANDED_HISTORY_VERSION);
     const deep=read(id,'v2-deep',false,EXPANDED_HISTORY_VERSION);
     const r=manifest.payload,u=universe.payload,f=fast.payload,d=deep.payload;
+    try{reuseMetadata(r);if(r.runConfig&&(r.runConfig.aiEnabled!==(r.aiInitialStatus!=='DISABLED')||r.deepTargetCount>r.runConfig.deepLimit))throw Error();}
+    catch{throw error('HISTORY_RECORD_INVALID');}
     const excludedSecurities=officialExclusions(u.excludedSecurities,{testOnly});
     if(excludedSecurities.some(x=>u.stocks.some(s=>s.symbol===x.symbol)))throw error('HISTORY_RECORD_INVALID');
     if(r.testOnly!==testOnly||[u,f,d].some(x=>x.testOnly!==testOnly))throw error('HISTORY_TEST_DATA_MISMATCH');
@@ -328,24 +336,30 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     return {...r,all:r.all.map(candidate),ai:finish?aiResult(finish.payload.result):null,aiStatus,
       aiInput:input?input.payload:null,aiStartedAt:start?.payload.startedAt??null,storage:{status:finish&&['COMPLETED','PARTIAL'].includes(aiStatus)&&!input?'INCOMPLETE':'STORED',storageKind},recordFingerprint:c.fingerprint};
   }
-  function list({page=1,symbol=null,pendingIds=[]}={}){
+  function list({page=1,symbol=null,pendingIds=[],schemaVersion=null}={}){
     const numericSymbol=symbol!==null&&/^\d{6}$/.test(symbol);
+    if(schemaVersion!==null&&![HISTORY_VERSION,EXPANDED_HISTORY_VERSION].includes(schemaVersion))throw error('HISTORY_QUERY_INVALID',400);
     if(!Number.isInteger(page)||page<1||page>1000||
       (symbol!==null&&!numericSymbol&&!isNaverKrStockItemCode(symbol)))throw error('HISTORY_QUERY_INVALID',400);
     // Mixed stock suffixes filter V2 only. V1's numeric symbol rules stay intact.
     const expandedSymbolOnly=symbol!==null&&!numericSymbol;
-    if(!configured||!fs.existsSync(resolved))return {...status(),items:[],page,total:0,heldCount:0};
+    if(!configured||!fs.existsSync(resolved))return {...status(),items:[],page,total:0,heldCount:0,incompleteExpandedCount:0};
     ensureRoot();const items=[];let heldCount=0;
-    for(const name of fs.readdirSync(resolved).filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json'))){
+    const names=fs.readdirSync(resolved);
+    const manifestIds=new Set(names.filter(n=>n.endsWith('.v2-manifest.json')).map(n=>n.slice(0,-'.v2-manifest.json'.length)));
+    const incompleteExpandedCount=new Set(names.filter(n=>/\.v2-(universe|fast|deep)\.json$/.test(n))
+      .map(n=>n.replace(/\.v2-(universe|fast|deep)\.json$/,'')).filter(id=>!manifestIds.has(id))).size;
+    for(const name of names.filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json'))){
       const suffix=name.endsWith('.v2-manifest.json')?'.v2-manifest.json':'.candidate.json';
       try{const r=detail(name.slice(0,-suffix.length),{pendingIds});
+        if(schemaVersion&&r.schemaVersion!==schemaVersion)continue;
         if(expandedSymbolOnly&&r.schemaVersion!==EXPANDED_HISTORY_VERSION)continue;
         if(symbol&&!r.universe.some(x=>x.symbol===symbol))continue;
         items.push({...pick(r,['scanId','scanStartedAt','scanCompletedAt','scannedCount','validCount','failedCount','candidateCount','aiStatus','policyVersion','universeFingerprint','testOnly','schemaVersion','universeMode','fastCount','deepTargetCount','deepCompleted','deepFailed']),storageStatus:r.storage.status});
       }catch{heldCount++;}
     }
     items.sort((a,b)=>b.scanCompletedAt.localeCompare(a.scanCompletedAt)||a.scanId.localeCompare(b.scanId));
-    return {...status(),items:items.slice((page-1)*20,page*20),page,total:items.length,heldCount};
+    return {...status(),items:items.slice((page-1)*20,page*20),page,total:items.length,heldCount,incompleteExpandedCount};
   }
   return {status,saveCandidate,saveExpanded,startAI,saveInput,finishAI,startExpandedAI,saveExpandedAIInput,finishExpandedAI,
     detail,list,compare:(before,after,options)=>compareRuns(detail(before,options),detail(after,options))};

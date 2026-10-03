@@ -2,6 +2,8 @@
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 const {randomUUID}=require('node:crypto');
+const {EXPANDED_HISTORY_VERSION,EXPANDED_POLICY_VERSION}=require('./recommendationHistory');
+const {EXPANDED_REUSE_TTL_MS,reuseKeyFor}=require('./expandedRecommendationReuse');
 
 const RUN_PROTOCOL='RECOMMENDATION_EXPANDED_RUN_V1';
 const DEFAULT_DEEP_LIMIT=40;
@@ -44,6 +46,9 @@ function createExpandedRecommendationRuns({
     !Number.isInteger(fastConcurrency)||fastConcurrency<1||fastConcurrency>MAX_FAST_CONCURRENCY||
     !Number.isInteger(deepConcurrency)||deepConcurrency<1||deepConcurrency>MAX_DEEP_CONCURRENCY||
     !Number.isInteger(maxEntries)||maxEntries<1)throw problem('EXPANDED_RUN_CONFIG_INVALID');
+  const runConfig=Object.freeze({deepLimit,aiEnabled});
+  const compatibility={schemaVersion:EXPANDED_HISTORY_VERSION,policyVersion:EXPANDED_POLICY_VERSION,codeVersion,runConfig};
+  const reuseKey=reuseKeyFor(compatibility);
   const runs=new Map();
   let activeId=null;
   const timestamp=()=>new Date(now()).toISOString();
@@ -59,18 +64,56 @@ function createExpandedRecommendationRuns({
     try{
       if(history?.status().status==='CONFIGURED'){
         const saved=history.detail(runId);
-        if(saved?.schemaVersion==='RECOMMENDATION_HISTORY_V2')
-          return {runId,scanId:runId,status:saved.scanStatus,history:{status:'STORED'},
-            scanStartedAt:saved.scanStartedAt,scanCompletedAt:saved.scanCompletedAt,
-            stats:saved.stats,requestStats:saved.requestStats,recommendations:saved.all,
-            fastResults:saved.fastResults,universeSnapshot:saved.universeSnapshot,
-            aiStatus:saved.aiStatus};
+        if(saved?.schemaVersion===EXPANDED_HISTORY_VERSION)return savedRun(saved);
       }
     }catch{}
     throw problem('EXPANDED_RUN_NOT_AVAILABLE',410);
   }
+  function savedRun(saved){
+    return {runId:saved.scanId,scanId:saved.scanId,protocolVersion:RUN_PROTOCOL,
+      schemaVersion:saved.schemaVersion,policyVersion:saved.policyVersion,codeVersion:saved.codeVersion,
+      runConfig:saved.runConfig,reuseKey:saved.reuseKey,status:saved.scanStatus,
+      history:{status:saved.storage.status},scanStartedAt:saved.scanStartedAt,scanCompletedAt:saved.scanCompletedAt,
+      stats:saved.stats,requestStats:saved.requestStats,recommendations:saved.all,deepFailures:saved.failures,
+      fastResults:saved.fastResults,universeSnapshot:saved.universeSnapshot,aiStatus:saved.aiStatus,ai:saved.ai};
+  }
+  function reusable(run){
+    const completed=Date.parse(run.scanCompletedAt),age=now()-completed;
+    return ['COMPLETED','PARTIAL'].includes(run.status)&&Number.isFinite(completed)&&age>=0&&age<EXPANDED_REUSE_TTL_MS&&
+      run.stats?.universeCount===500&&run.fastResults?.length===500&&run.universeSnapshot?.stocks?.length===500&&
+      run.schemaVersion===compatibility.schemaVersion&&run.policyVersion===compatibility.policyVersion&&
+      run.codeVersion===codeVersion&&run.reuseKey===reuseKey&&
+      run.runConfig?.deepLimit===deepLimit&&run.runConfig?.aiEnabled===aiEnabled&&
+      !['PENDING','IN_PROGRESS','INTERRUPTED_UNKNOWN'].includes(run.aiStatus)&&
+      (!aiEnabled||run.aiStatus!=='NOT_REQUESTED')&&run.history?.status!=='INCOMPLETE';
+  }
+  function reuseResponse(run){
+    return {...run,alreadyRunning:false,reused:true,reuseReason:'RECENT_COMPLETED_RUN',
+      reuseTtlMs:EXPANDED_REUSE_TTL_MS,reuseUntil:new Date(Date.parse(run.scanCompletedAt)+EXPANDED_REUSE_TTL_MS).toISOString(),
+      externalCallsStarted:false};
+  }
+  function recentCompleted(){
+    const local=[...runs.values()].filter(reusable).sort((a,b)=>Date.parse(b.scanCompletedAt)-Date.parse(a.scanCompletedAt))[0];
+    if(local)return reuseResponse(publicRun(local));
+    try{
+      const state=history?.status();
+      if(!state||state.status==='NOT_CONFIGURED')return null;
+      if(state.status!=='CONFIGURED'||state.capacityStatus==='UNKNOWN')throw Error('HISTORY_GUARD_STATE_INVALID');
+      const list=history.list({page:1,schemaVersion:EXPANDED_HISTORY_VERSION});
+      if(list.status!=='CONFIGURED'||!Array.isArray(list.items)||!Number.isInteger(list.heldCount)||
+        list.heldCount>0||(list.incompleteExpandedCount??0)>0||list.capacityStatus==='UNKNOWN')throw Error('HISTORY_GUARD_LIST_INVALID');
+      const latest=list.items.find(item=>item.schemaVersion===EXPANDED_HISTORY_VERSION);
+      if(!latest)return null;
+      const saved=history.detail(latest.scanId);
+      if(saved.storage?.status!=='STORED')throw Error('HISTORY_GUARD_DETAIL_INCOMPLETE');
+      const run=savedRun(saved);
+      return reusable(run)?reuseResponse(run):null;
+    }catch{throw problem('EXPANDED_REUSE_GUARD_UNAVAILABLE',503);}
+  }
   function start(){
-    if(activeId)return {...get(activeId),alreadyRunning:true};
+    if(activeId)return {...get(activeId),alreadyRunning:true,externalCallsStarted:false};
+    const reused=recentCompleted();
+    if(reused)return reused;
     // Only completed process-local snapshots are evicted; persisted history remains readable.
     while(runs.size>=maxEntries){
       const oldest=[...runs.entries()].find(([,run])=>
@@ -81,7 +124,8 @@ function createExpandedRecommendationRuns({
     if(runs.size>=maxEntries)throw problem('EXPANDED_RUN_CAPACITY',503);
     const runId=makeId();
     if(!validId(runId)||runs.has(runId))throw problem('EXPANDED_RUN_ID_INVALID');
-    const run={runId,scanId:runId,protocolVersion:RUN_PROTOCOL,status:'QUEUED',
+    const run={...compatibility,reuseKey,runId,scanId:runId,protocolVersion:RUN_PROTOCOL,status:'QUEUED',
+      reused:false,reuseTtlMs:EXPANDED_REUSE_TTL_MS,
       scanStartedAt:timestamp(),scanCompletedAt:null,
       stats:{universeCount:0,fastCompleted:0,fastFailed:0,fastInsufficient:0,
         deepTargetCount:0,deepCompleted:0,deepFailed:0,finalCandidateCount:0},
@@ -177,7 +221,7 @@ function createExpandedRecommendationRuns({
               scanCompletedAt:run.scanCompletedAt,scanStatus:run.status,
               universeSnapshot:snapshot,fastResults:run.fastResults,
               deepResults:ranked,deepFailures:run.deepFailures,
-              stats:run.stats,requestStats:run.requestStats,codeVersion,aiEnabled});
+              stats:run.stats,requestStats:run.requestStats,codeVersion,aiEnabled,runConfig,reuseKey});
           }catch(error){run.history={status:'FAILED',reason:error.code?.startsWith('HISTORY_')?error.code:'HISTORY_WRITE_FAILED'};}
         }
         if(aiEnabled&&typeof analyze==='function'){
@@ -255,7 +299,7 @@ function registerExpandedRecommendationRoutes(app,store,{mode='legacy50',history
   };
   app.get('/api/stock/recommendation-mode',wrap(()=>({
     universeMode:mode,expandedEnabled:mode==='expanded500',settings:store.settings,
-    history:history?.status().status??'NOT_CONFIGURED'
+    history:history?.status().status??'NOT_CONFIGURED',reuseTtlMs:EXPANDED_REUSE_TTL_MS
   })));
   app.post('/api/stock/recommendation-runs',wrap(req=>{
     if(mode!=='expanded500')throw problem('EXPANDED_MODE_NOT_ENABLED',403);
@@ -268,4 +312,4 @@ function registerExpandedRecommendationRoutes(app,store,{mode='legacy50',history
   }));
 }
 module.exports={createExpandedRecommendationRuns,registerExpandedRecommendationRoutes,
-  settings,mapBounded,RUN_PROTOCOL,MAX_FAST_CONCURRENCY,MAX_DEEP_CONCURRENCY};
+  settings,mapBounded,RUN_PROTOCOL,MAX_FAST_CONCURRENCY,MAX_DEEP_CONCURRENCY,EXPANDED_REUSE_TTL_MS};

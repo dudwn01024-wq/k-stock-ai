@@ -21,3 +21,9 @@ expanded 전용 식별자 문법은 숫자 6자리, 숫자4·허용영문·숫�
 공식 분류 모듈은 검토한 예외 근거만 사용하고 실행 중 새 KRX HTTP를 생성하지 않는다. 실행별 예외 확인 캐시와 officialTypeRequests를 Naver 요청 수와 분리한다. 추가 종목에 관한 공식 자료가 없으면 자동 검색·추측·전체 종목 개별 조회를 하지 않는다. 숫자형 및 5번째 혼용형의 기존 UNKNOWN 정책과 legacy50/V1/KIS/수동 검색 규칙은 유지한다.
 
 현재 등록한 공식 사례는 KIND의 [코드 표기](https://kind.krx.co.kr/external/2026/03/17/001312/20260317004832/99413.htm)와 별도 [주식종류 명시](https://kind.krx.co.kr/external/2026/02/27/001588/20260227003379/00683.htm)를 연결했다. 이전 Naver page3 실패 행과 동일하다는 근거는 없으며, 공식 사례 확인을 Naver universe 검증 완료나 price endpoint 지원 확인으로 표현하지 않는다.
+
+## 완료 실행 10분 재사용
+
+`EXPANDED_REUSE_TTL_MS=600000`은 환경변수로 줄이지 않는다. POST는 active run을 먼저 공유하고, 이후 최근 COMPLETED/PARTIAL의 V2 결과를 같은 코드·정책·deepLimit·AI 설정에 한해 재사용한다. 완료 후 정확히 10분이면 새 실행을 요청할 수 있다. 재사용은 새 시세/뉴스 확인이 아니며 원래 시작·완료 시각과 reuseUntil을 돌려준다.
+
+새 V2 manifest의 optional runConfig/reuseKey는 기존 V1/V2 읽기와 분리한다. 키 없는 기존 V2는 읽을 수 있으나 서버 재시작 후 재사용에는 쓰지 않는다. 재시작 시 기존 이력 저장소에서 최근 V2를 검증한다. 저장소 손상·미완성 기록·조회 오류로 보호 확인이 불가능하면 EXPANDED_REUSE_GUARD_UNAVAILABLE로 요청을 차단하고 금융 조회를 시작하지 않는다. 자동 삭제·예산 환급·재스캔은 없다.
