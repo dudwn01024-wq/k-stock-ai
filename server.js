@@ -3865,6 +3865,7 @@ app.get(
       recommendationProtocol: 'RECOMMENDATION_SCAN_V1',
       recommendationHistoryProtocol:'RECOMMENDATION_HISTORY_V1',
       recommendationHistory:recommendationHistory.status(),
+      recommendationOutcomes:recommendationOutcomes.status(),
       recommendationUniverseMode,
       expandedRecommendationProtocol:'RECOMMENDATION_EXPANDED_RUN_V1',
       buildCommit: process.env.RENDER_GIT_COMMIT || null,
@@ -4435,6 +4436,9 @@ const {createRecommendationUniverse}=require('./services/recommendationUniverse'
 const {createRecommendationFastScreen}=require('./services/recommendationFastScreen');
 const {createExpandedRecommendationRuns,registerExpandedRecommendationRoutes,settings:expandedSettings}=require('./services/expandedRecommendationRuns');
 const recommendationHistory=historyFromEnvironment();
+const {outcomesFromEnvironment,registerOutcomeRoutes}=require('./services/recommendationOutcomes');
+const recommendationOutcomes=outcomesFromEnvironment({history:recommendationHistory});
+registerOutcomeRoutes(app,recommendationOutcomes);
 const recommendationUniverseMode=process.env.RECOMMENDATION_UNIVERSE_MODE==='expanded500'?'expanded500':'legacy50';
 const recommendationScans=createRecommendationScans({
   history:recommendationHistory,universe:RECOMMENDATION_WATCHLIST,

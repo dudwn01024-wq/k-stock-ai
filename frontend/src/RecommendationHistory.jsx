@@ -1,5 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import CandidateOverview from './CandidateOverview.jsx';
+import RecommendationOutcomes from './RecommendationOutcomes.jsx';
 import {normalizeCandidates} from './utils/recommendationRun.js';
 import {createHistoryLoader,historyAIStatus,historyChangeStatus} from './utils/recommendationHistory.js';
 import './recommendation-history.css';
@@ -29,7 +30,7 @@ export function HistoryEvidence({item,rank,input}){
     </details>
   </article>;
 }
-function ExpandedHistoryRecord({detail}){
+function ExpandedHistoryRecord({detail,service}){
   const stats=detail.stats||{};
   const selected=detail.all.filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
   return <div className="history-detail">
@@ -54,6 +55,7 @@ function ExpandedHistoryRecord({detail}){
       <p>목록 {number(detail.requestStats?.universeRequests)}회 · 일봉 {number(detail.requestStats?.fastScreenRequests)}회 · 정밀 분석 {number(detail.requestStats?.deepReviewRequests)}회 · 뉴스 {number(detail.requestStats?.newsRequests)}회 · 실패 요청 {number(detail.requestStats?.failedRequests)}회</p>
       <p>저장된 근거는 정규화된 목록·기술값·상세 계산 결과입니다. 제공처 원본 응답 전체는 저장하지 않았습니다.</p>
     </details>
+    <RecommendationOutcomes key={detail.scanId} scanId={detail.scanId} service={service}/>
     <h3>당시 최종 후보 {selected.length}종목</h3>
     {Array.isArray(detail.ai?.ai)&&detail.ai.ai.length>0&&<details><summary>당시 Gemini 설명 펼쳐보기</summary><ul>
       {detail.ai.ai.map(item=><li key={item.symbol}><strong>{item.stockName||item.symbol} · {item.symbol}</strong><p>{item.summary||'설명 없음'}</p></li>)}
@@ -92,7 +94,7 @@ export default function RecommendationHistory({service,onBack}){
       {!list.items.length&&!loading&&<p>저장된 실행이 없습니다. 과거 자료를 새로 만들거나 재조회하지 않습니다.</p>}
       <div className="history-controls"><button className="home-secondary" disabled={list.page<=1||loading} onClick={()=>{loader.list(list.page-1,filter);}}>이전 페이지</button><span>{list.page}페이지 / 총 {list.total}회</span><button className="home-secondary" disabled={list.page*20>=list.total||loading} onClick={()=>{loader.list(list.page+1,filter);}}>다음 페이지</button></div>
     </>}
-    {detail?.schemaVersion==='RECOMMENDATION_HISTORY_V2'?<ExpandedHistoryRecord detail={detail}/>:detail&&<div className="history-detail">
+    {detail?.schemaVersion==='RECOMMENDATION_HISTORY_V2'?<ExpandedHistoryRecord detail={detail} service={service}/>:detail&&<div className="history-detail">
       <h2>과거 실행 결과</h2>{detail.storage.status==='INCOMPLETE'&&<p className="home-warning">AI 입력 연결 기록이 불완전합니다. 입력 근거 전체를 확인한 이력으로 해석하지 마세요.</p>}<p className="home-notice">당시 저장된 결과이며 현재 시세가 아닙니다. 설명을 다시 생성하거나 당시 판정을 재평가하지 않습니다.</p>
       <p>실행 시작 {time(detail.scanStartedAt)} → 완료 {time(detail.scanCompletedAt)} KST · {historyAIStatus[detail.aiStatus]||'AI 상태 미확인'}</p>
       <details><summary>실행·Gemini 입력 연결 근거</summary><p>scanId: {detail.scanId}</p><p>정책: {detail.policyVersion}</p><p>코드: {detail.codeVersion||'미확인'}</p><p>종목군 지문: {detail.universeFingerprint}</p><p>AI 프롬프트: {detail.aiInput?.promptVersion||'입력 기록 없음'}</p><p>입력 지문: {detail.aiInput?.inputFingerprint||'없음'}</p><p>Gemini 입력 종목: {detail.aiInput?.candidates?.map(x=>x.symbol).join(', ')||'입력 기록 없음'}</p><p>입력 목록은 제공처에 보낼 프롬프트 작성 근거입니다. 모델의 실제 기사 열람 여부까지 증명하지 않습니다.</p><p>AI 완료 시각: {time(detail.ai?.aiCompletedAt)} KST</p></details>

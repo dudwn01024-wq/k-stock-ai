@@ -426,6 +426,13 @@ recentLow20:
   getHistory({page=1,symbol=''}) {return this.historyRead('?page='+page+(symbol?'&symbol='+encodeURIComponent(symbol):''));}
   getHistoryDetail(id) {return this.historyRead('/'+encodeURIComponent(id));}
   compareHistory(before,after) {return this.historyRead('/compare?before='+encodeURIComponent(before)+'&after='+encodeURIComponent(after));}
+  async getRecommendationOutcomes(scanId) {
+    if(!/^[A-Za-z0-9-]{1,80}$/.test(scanId))throw Error('성과 실행 번호가 올바르지 않습니다.');
+    const response=await fetch(this.baseUrl+'/stock/recommendation-outcomes/'+encodeURIComponent(scanId));
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(body.message||'저장된 가격 변화 자료를 읽지 못했습니다. 자동 수집하지 않습니다.');
+    return body;
+  }
   async getRecommendations() {
     const response = await fetch(`${this.baseUrl}/stock/recommendations`);
     if (!response.ok) throw new Error(`추천 종목 API 오류 (${response.status})`);

@@ -154,10 +154,18 @@ function expandedSnapshot(result,{testOnly=false}={}){
 }
 function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',maxRuns=MAX_RUNS,maxTotalBytes=MAX_TOTAL_BYTES,testOnly=false}={}){
   const configured=Boolean(root),resolved=root?path.resolve(root):null;
+  // Outcomes have their own bounded store and must not alter recommendation counts/bytes.
+  function historyNames(){return fs.readdirSync(resolved).filter(name=>{
+    if(name!=='outcomes')return true;
+    const stat=fs.lstatSync(path.join(resolved,name));
+    if(!stat.isDirectory()||stat.isSymbolicLink())throw error('HISTORY_PATH_INVALID');
+    return false;
+  });}
+
   const status=()=>{
     let storedRuns=0,estimatedBytes=0,capacityStatus=configured?'AVAILABLE':'NOT_CONFIGURED';
     if(configured&&fs.existsSync(resolved))try{
-      ensureRoot();const names=fs.readdirSync(resolved);
+      ensureRoot();const names=historyNames();
       storedRuns=names.filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json')).length;
       estimatedBytes=names.reduce((sum,n)=>{
         const stat=fs.lstatSync(path.join(resolved,n));if(!stat.isFile()||stat.isSymbolicLink())throw error('HISTORY_PATH_INVALID');
@@ -190,7 +198,7 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     try{
       const old=read(id,kind,true,version);if(old){if(old.fingerprint===hash(payload))return {status:'ALREADY_STORED'};throw error('HISTORY_DUPLICATE_CONFLICT');}
       if(kind==='candidate'&&read(id,'v2-manifest',true,EXPANDED_HISTORY_VERSION))throw error('HISTORY_DUPLICATE_CONFLICT');
-      const names=fs.readdirSync(resolved);
+      const names=historyNames();
       if(kind==='candidate'&&names.filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json')).length>=maxRuns)throw error('HISTORY_CAPACITY');
       const bytes=Buffer.from(JSON.stringify({schemaVersion:version,kind,scanId:id,fingerprint:hash(payload),payload}));
       const total=names.reduce((sum,n)=>{const s=fs.lstatSync(path.join(resolved,n));if(s.isSymbolicLink()||!s.isFile())throw error('HISTORY_PATH_INVALID');return sum+s.size;},0);
@@ -222,7 +230,7 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
         return {kind,bytes,old};
       });
       if(entries[3].old)return {status:'ALREADY_STORED'};
-      const names=fs.readdirSync(resolved);
+      const names=historyNames();
       if(names.filter(n=>n.endsWith('.candidate.json')||n.endsWith('.v2-manifest.json')).length>=maxRuns)throw error('HISTORY_CAPACITY');
       const existingBytes=names.reduce((sum,n)=>{
         const stat=fs.lstatSync(path.join(resolved,n));if(!stat.isFile()||stat.isSymbolicLink())throw error('HISTORY_PATH_INVALID');
@@ -345,7 +353,7 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
     const expandedSymbolOnly=symbol!==null&&!numericSymbol;
     if(!configured||!fs.existsSync(resolved))return {...status(),items:[],page,total:0,heldCount:0,incompleteExpandedCount:0};
     ensureRoot();const items=[];let heldCount=0;
-    const names=fs.readdirSync(resolved);
+    const names=historyNames();
     const manifestIds=new Set(names.filter(n=>n.endsWith('.v2-manifest.json')).map(n=>n.slice(0,-'.v2-manifest.json'.length)));
     const incompleteExpandedCount=new Set(names.filter(n=>/\.v2-(universe|fast|deep)\.json$/.test(n))
       .map(n=>n.replace(/\.v2-(universe|fast|deep)\.json$/,'')).filter(id=>!manifestIds.has(id))).size;
