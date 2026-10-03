@@ -1,6 +1,7 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {reuseMetadata}=require('./expandedRecommendationReuse');
+const {fastBaseline,verifyCandidateBaseline}=require('./recommendationOutcomeBaseline');
 const {normalizeOfficialStockTypeEvidence,hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 // No provider, worker, private evidence, approval or trading imports.
 const fs=require('node:fs'),path=require('node:path');
@@ -93,11 +94,15 @@ function expandedSnapshot(result,{testOnly=false}={}){
     ||(source.universeFingerprint!=null&&source.universeFingerprint!==symbolFingerprint))throw error('HISTORY_UNIVERSE_INVALID');
   const fast=result.fastResults.map(x=>{
     const technical=x?.technical??x;
+    if(technical!==x&&Object.hasOwn(x,'outcomeBaseline'))throw error('HISTORY_EXPANDED_INPUT_INVALID');
     if(!symbols.has(x?.symbol)||typeof x.status!=='string'||!(/^[A-Z_]{2,40}$/.test(x.status))
       ||typeof x.deepReviewSelected!=='boolean')throw error('HISTORY_EXPANDED_INPUT_INVALID');
     const score=expandedNumber(x.preScreenScore??technical.preScreenScore);
+    if(technical.symbol!=null&&technical.symbol!==x.symbol)throw error('EXPANDED_BASELINE_SOURCE_MISMATCH');
+    const baseline=fastBaseline({...technical,symbol:x.symbol});
     if(score!==null&&(score<0||score>2))throw error('HISTORY_EXPANDED_INPUT_INVALID');
-    return {symbol:x.symbol,status:x.status,fastStatus:scalar(x.fastStatus),reason:scalar(x.reason),
+    return {...(Object.hasOwn(technical,'outcomeBaseline')?{outcomeBaseline:baseline}:{}),
+      symbol:x.symbol,status:x.status,fastStatus:scalar(x.fastStatus),reason:scalar(x.reason),
       deepReviewSelected:x.deepReviewSelected,universeRank:expandedCount(x.universeRank),
       currentPrice:expandedNumber(technical.currentPrice),ma5:expandedNumber(technical.ma5),ma20:expandedNumber(technical.ma20),
       currentVolume:expandedNumber(technical.currentVolume),averageVolume20:expandedNumber(technical.averageVolume20),
@@ -110,7 +115,11 @@ function expandedSnapshot(result,{testOnly=false}={}){
       sourceTimestamp:scalar(technical.sourceTimestamp)};
   });
   if(fast.length!==stocks.length||new Set(fast.map(x=>x.symbol)).size!==fast.length)throw error('HISTORY_INCOMPLETE_UNIVERSE');
-  const deep=result.deepResults.map(candidate),failures=result.deepFailures.map(x=>({symbol:x?.symbol,stockName:scalar(x?.stockName),reason:'LOOKUP_FAILED'}));
+  const fastBySymbol=new Map(fast.map(x=>[x.symbol,x]));
+  const deep=result.deepResults.map(x=>{
+    const baseline=verifyCandidateBaseline(x,fastBySymbol.get(x.symbol));
+    return {...candidate(x),...(Object.hasOwn(x,'outcomeBaseline')?{outcomeBaseline:baseline}:{})};
+  }),failures=result.deepFailures.map(x=>({symbol:x?.symbol,stockName:scalar(x?.stockName),reason:'LOOKUP_FAILED'}));
   const chosen=new Set(fast.filter(x=>x.deepReviewSelected).map(x=>x.symbol)),reviewed=[...deep,...failures].map(x=>x.symbol);
   if(reviewed.length!==chosen.size||new Set(reviewed).size!==reviewed.length||reviewed.some(symbol=>!chosen.has(symbol))
     ||fast.some(x=>x.deepReviewSelected&&x.fastStatus!=null&&x.fastStatus!=='READY'))throw error('HISTORY_EXPANDED_INPUT_INVALID');
@@ -318,6 +327,10 @@ function createRecommendationHistory({root=null,storageKind='NOT_CONFIGURED',max
       ||r.candidateCount!==d.all.filter(selected).length
       ||new Set(f.results.map(x=>x.symbol)).size!==u.stocks.length
       ||f.results.some(x=>!u.stocks.some(s=>s.symbol===x.symbol)))throw error('HISTORY_RECORD_INVALID');
+    // Validate optional new provenance without changing older V2 interpretation/output.
+    for(const row of f.results)fastBaseline(row);
+    const fastBySymbol=new Map(f.results.map(x=>[x.symbol,x]));
+    for(const row of d.all)verifyCandidateBaseline(row,fastBySymbol.get(row.symbol));
     const start=read(id,'v2-ai-start',true,EXPANDED_HISTORY_VERSION);
     const input=read(id,'v2-ai-input',true,EXPANDED_HISTORY_VERSION);
     const finish=read(id,'v2-ai-result',true,EXPANDED_HISTORY_VERSION);

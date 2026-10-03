@@ -30,7 +30,7 @@ export function HistoryEvidence({item,rank,input}){
     </details>
   </article>;
 }
-function ExpandedHistoryRecord({detail,service}){
+export function ExpandedHistoryRecord({detail,service}){
   const stats=detail.stats||{};
   const selected=detail.all.filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
   return <div className="history-detail">
@@ -65,6 +65,7 @@ function ExpandedHistoryRecord({detail,service}){
       <span>점수 {number(x.score)}/4 · {grade(x.grade)}</span>
       <span>통과 {x.passedConditions?.join(' · ')||'없음'} · 미충족 {x.failedConditions?.join(' · ')||'없음'} · 미확인 {x.unknownConditions?.join(' · ')||'없음'}</span>
       <p>당시 조회가 {number(x.currentPrice)} · 자료 기준일 {x.dataMetadata?.price?.sourceBusinessDate||'미확인'}</p>
+      <p>성과 추적 기준: {x.outcomeBaseline?x.outcomeBaseline.businessDate+' 종가 '+number(x.outcomeBaseline.price):'저장된 기준 자료 없음'}</p>
     </li>)}</ol>:<p>당시 저장된 최종 후보가 없습니다.</p>}
     {detail.failures?.length>0&&<p className="home-warning">2단계 조회 실패: {detail.failures.map(x=>x.symbol).join(', ')}. 정책상 탈락으로 해석하지 않습니다.</p>}
     <details><summary>1단계 전체 상태 펼쳐보기</summary><ul className="history-runs">

@@ -13,7 +13,8 @@ export function OutcomeResults({data}){
     {data.storage?.outcomeCapacityStatus==='UNKNOWN'&&<p className="home-warning">성과 저장 상태 미확인 · 손상 기록을 정상 결과로 해석하지 마세요.</p>}
     <ul className="outcome-candidates">{data.candidates.map(item=><li key={item.symbol}>
       <h4>{item.stockName||item.symbol} <small>{item.symbol}</small></h4>
-      <p>{grade(item.originalGrade)} · 당시 조회가 {number(item.baselinePrice)} · 가격 기준일 {item.baselineBusinessDate||'미확인'}</p>
+      <p>{grade(item.originalGrade)} · 당시 조회가 {number(item.currentPrice)}</p>
+      <p>성과 추적 기준: {item.baselinePrice!=null&&item.baselineBusinessDate?item.baselineBusinessDate+' 종가 '+number(item.baselinePrice):'저장된 기준 자료 없음'}</p>
       <div className="outcome-horizons">{item.horizons.map(value=><article key={value.horizon}>
         <strong>{horizon(value.horizon)} · {outcomeStatusLabel(value.status)}</strong>
         {value.status==='READY'?<>

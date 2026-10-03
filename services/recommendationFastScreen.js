@@ -2,6 +2,7 @@
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 
 const {sourceDate,dataFreshness}=require('./dataFreshness');
+const {baselineFromDailyRow}=require('./recommendationOutcomeBaseline');
 
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
 const PRICE_PAGE_SIZE=30; // Existing detailed strategy requests 30 daily rows; at least 21 are required here.
@@ -26,7 +27,7 @@ function empty(symbol,reason,receivedAt=null){
   return {symbol,status:'INSUFFICIENT_DATA',reason,provider:PROVIDER,receivedAt,
     sourceBusinessDate:null,currentPrice:null,ma5:null,ma20:null,currentVolume:null,
     previous20AverageVolume:null,averageVolume20:null,volumeRatio:null,recentHigh20:null,
-    recentLow20:null,trendPassed:null,volumePassed:null,preScreenScore:null,dataPoints:0};
+    recentLow20:null,trendPassed:null,volumePassed:null,preScreenScore:null,dataPoints:0,outcomeBaseline:null};
 }
 
 function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
@@ -44,7 +45,8 @@ function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
       volume===null||close<=0||low<=0||high<low||close<low||close>high||volume<0||!Number.isSafeInteger(volume))
       return empty(symbol,'INVALID_DAILY_HISTORY',receivedAt);
     seen.add(businessDate);
-    rows.push({date:businessDate,close,high,low,volume});
+    rows.push({date:businessDate,close,high,low,volume,
+      sourceTimestamp:dataFreshness({timestamp:item?.localTradedAt}).sourceTimestamp});
   }
   rows.sort((a,b)=>b.date.localeCompare(a.date));
   const selected=rows.slice(0,21);
@@ -59,7 +61,8 @@ function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
   const trendPassed=currentPrice>=ma5&&ma5>=ma20;
   const volumePassed=currentVolume>=previous20AverageVolume;
   return {symbol,status:'READY',reason:null,provider:PROVIDER,receivedAt,
-    sourceBusinessDate:selected[0].date,currentPrice,ma5,ma20,currentVolume,
+    sourceBusinessDate:selected[0].date,sourceTimestamp:selected[0].sourceTimestamp,
+    outcomeBaseline:baselineFromDailyRow(symbol,selected[0],receivedAt),currentPrice,ma5,ma20,currentVolume,
     previous20AverageVolume,averageVolume20:previous20AverageVolume,volumeRatio,
     recentHigh20:Math.max(...selected.slice(0,20).map(row=>row.high)),
     recentLow20:Math.min(...selected.slice(0,20).map(row=>row.low)),

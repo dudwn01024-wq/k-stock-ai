@@ -1,6 +1,7 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {hasRequiredOfficialStockType}=require('./krxStockSecurityType');
+const {attachOutcomeBaseline}=require('./recommendationOutcomeBaseline');
 const {randomUUID}=require('node:crypto');
 const {EXPANDED_HISTORY_VERSION,EXPANDED_POLICY_VERSION}=require('./recommendationHistory');
 const {EXPANDED_REUSE_TTL_MS,reuseKeyFor}=require('./expandedRecommendationReuse');
@@ -154,6 +155,7 @@ function createExpandedRecommendationRuns({
           try{
             const item=await fastScreen(stock);
             run.requestStats.fastScreenRequests+=item.requestCount??0;
+            if(item.symbol!=null&&item.symbol!==stock.symbol)throw problem('EXPANDED_BASELINE_SOURCE_MISMATCH');
             const result={...item,symbol:stock.symbol,stockName:stock.name,universeRank:index+1};
             if(item.status==='LOOKUP_FAILED'){
               run.stats.fastFailed++;
@@ -195,10 +197,11 @@ function createExpandedRecommendationRuns({
           const recordFailure=()=>{observed.failedRequests++;};
           try{
             const item=await deepReview(stock,{recordRequest,recordFailure});
-            if(!item||item.symbol!==stock.symbol||!Number.isFinite(item.score))
+            if(!item||!Number.isFinite(item.score))
               throw problem('EXPANDED_DEEP_RESULT_INVALID');
+            const linked=attachOutcomeBaseline(item,stock);
             run.stats.deepCompleted++;
-            return {item};
+            return {item:linked};
           }catch{
             run.stats.deepFailed++;
             return {failure:{symbol:stock.symbol,stockName:stock.stockName,reason:'LOOKUP_FAILED'}};

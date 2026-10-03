@@ -2,7 +2,7 @@
 
 Only immutable V2 final candidates in PRIORITY_CANDIDATE, CHASE_CAUTION or WATCH_CANDIDATE are tracked. The original recommendation files, score, grade, news, price and timestamps are never rewritten.
 
-The baseline is the saved candidate currentPrice and its price dataMetadata.sourceBusinessDate. Missing/nonpositive/non-numeric prices, invalid dates or mismatched price dates block tracking. Provider daily rows must contain the baseline itself: otherwise a 30-row response cannot establish the first trading day and reports BACKFILL_WINDOW_UNAVAILABLE.
+The baseline is the saved candidate outcomeBaseline, separate from quote currentPrice. Fast screening creates symbol, price and businessDate from the same latest validated daily row, with provider, receivedAt and optional actual sourceTimestamp. Deep linking and V2 save/read validate this exact fast-source chain. Missing baseline blocks tracking even if a legacy quote price/date exists; invalid explicit baselines fail closed. No older V2 record is modified or backfilled. V1 is unchanged. Provider daily rows must contain the baseline itself: otherwise a 30-row response cannot establish the first trading day and reports BACKFILL_WINDOW_UNAVAILABLE.
 
 T1/T5/T20 are positions 1/5/20 after the baseline in ascending observed daily dates. No weekend/holiday calendar is invented. Current KST-day and future rows are not finalized as outcomes; collect after that provider day has passed. Missing horizons remain PENDING. Return is ((close-baseline)/baseline)*100 without early rounding. It is a simple price change, excluding dividend, fees, tax, slippage and execution.
 

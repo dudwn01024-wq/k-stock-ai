@@ -13,10 +13,14 @@ const daily=(count=21)=>dates.slice(0,count).map((date,i)=>({localTradedAt:date,
 function input(id='TEST-ONLY-RUN',items=[{}]){
   const stocks=items.map((x,i)=>({symbol:x.symbol??String(i+1).padStart(6,'0'),name:'TEST_ONLY_'+i,market:'KOSPI',marketValue:100-i}));
   const all=stocks.map((s,i)=>({symbol:s.symbol,stockName:s.name,grade:'WATCH_CANDIDATE',score:2,currentPrice:100,testData:true,
-    dataMetadata:{price:{source:'TEST_ONLY',sourceBusinessDate:dates[0]}},...items[i]}));
+    dataMetadata:{price:{source:'TEST_ONLY',sourceBusinessDate:dates[0]}},
+    outcomeBaseline:{kind:'DAILY_CLOSE',symbol:s.symbol,price:100,businessDate:dates[0],provider:'NAVER_MOBILE_DAILY_PRICE',receivedAt:'2026-10-02T00:00:00Z',sourceTimestamp:null},...items[i]}));
   return {scanId:id,scanStartedAt:'2026-10-02T00:00:00Z',scanCompletedAt:'2026-10-02T00:01:00Z',scanStatus:'COMPLETED',
     universeSnapshot:{stocks,fingerprint:hash(stocks),provider:'TEST_ONLY',testOnly:true},
-    fastResults:stocks.map(s=>({symbol:s.symbol,status:'READY',fastStatus:'READY',deepReviewSelected:true,testData:true})),
+    fastResults:stocks.map((s,i)=>({symbol:s.symbol,status:'READY',fastStatus:'READY',deepReviewSelected:true,testData:true,
+      currentPrice:all[i].outcomeBaseline?.price??null,sourceBusinessDate:all[i].outcomeBaseline?.businessDate??null,
+      provider:all[i].outcomeBaseline?.provider??null,receivedAt:all[i].outcomeBaseline?.receivedAt??null,sourceTimestamp:null,
+      outcomeBaseline:all[i].outcomeBaseline})),
     deepResults:all,deepFailures:[],codeVersion:'TEST_ONLY',aiEnabled:false};
 }
 function fixture(t,items=[{}],options={}){
@@ -55,7 +59,7 @@ for(const [name,patch] of [
   ['invalid date',{dataMetadata:{price:{sourceBusinessDate:'2026-02-30'}}}],
   ['mismatched price date',{dataMetadata:{price:{sourceBusinessDate:dates[0],dateConsistency:'MISMATCH'}}}]
 ])test('TEST_ONLY '+name+' blocks tracking without invented baseline',async t=>{
-  const f=fixture(t,[patch]);assert.equal(f.source.baselineReady,false);
+  const f=fixture(t,[{...patch,outcomeBaseline:null}]);assert.equal(f.source.baselineReady,false);
   assert.ok(ready(f).every(x=>x.status==='TRACKING_BLOCKED_NO_BASELINE'&&x.returnPct===null));
   let calls=0;await collectRecommendationOutcomes({...f,execute:true,clock,fetchDaily:async()=>{calls++;return daily();}});
   assert.equal(calls,0);assert.equal(f.outcomes.status().storedOutcomeRecords,0);

@@ -4,17 +4,20 @@ require('./helpers/local-only.cjs');
 const express=require('express'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {createRecommendationHistory,registerHistoryRoutes,hash}=require('../services/recommendationHistory');
 const {createRecommendationOutcomes,registerOutcomeRoutes,sourceCandidates,calculateOutcomes}=require('../services/recommendationOutcomes');
+const {calculateFastScreen}=require('../services/recommendationFastScreen');
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'outcomes-preview-test-only-'));
 const history=createRecommendationHistory({root,testOnly:true,storageKind:'LOCAL_FILE'});
 const stocks=[0,1].map(i=>({symbol:String(i+1).padStart(6,'0'),name:'TEST_ONLY 합성 후보 '+(i+1),market:'KOSPI',marketValue:10-i}));
-history.saveExpanded({scanId:'TEST-ONLY-OUTCOMES',scanStartedAt:'2026-10-02T00:00:00Z',scanCompletedAt:'2026-10-02T00:01:00Z',scanStatus:'PARTIAL',
+const rows=Array.from({length:21},(_,i)=>({localTradedAt:new Date(Date.UTC(2026,9,3-i)).toISOString().slice(0,10),closePrice:'100',highPrice:'101',lowPrice:'99',volume:'10'}));
+const fast=stocks.map((s,i)=>({...i===0?calculateFastScreen(s,rows,{receivedAt:'2026-10-03T00:00:00Z'}):{},symbol:s.symbol,status:'READY',fastStatus:'READY',deepReviewSelected:true,testData:true}));
+history.saveExpanded({scanId:'TEST-ONLY-OUTCOMES',scanStartedAt:'2026-10-03T00:00:00Z',scanCompletedAt:'2026-10-03T00:01:00Z',scanStatus:'PARTIAL',
   universeSnapshot:{stocks,fingerprint:hash(stocks),provider:'TEST_ONLY',testOnly:true},
-  fastResults:stocks.map(x=>({symbol:x.symbol,status:'READY',fastStatus:'READY',deepReviewSelected:true,testData:true})),
-  deepResults:stocks.map((x,i)=>({symbol:x.symbol,stockName:x.name,currentPrice:i===0?100:null,score:2,grade:'WATCH_CANDIDATE',testData:true,
+  fastResults:fast,stats:{universeCount:2,fastCompleted:2,fastInsufficient:0,fastFailed:0,deepTargetCount:2,deepCompleted:2,deepFailed:0,finalCandidateCount:2},
+  deepResults:stocks.map((x,i)=>({symbol:x.symbol,stockName:x.name,currentPrice:i===0?105:null,...i===0?{outcomeBaseline:fast[i].outcomeBaseline}:{},score:2,grade:'WATCH_CANDIDATE',testData:true,
     dataMetadata:{price:{source:'TEST_ONLY',sourceBusinessDate:'2026-10-02'}}})),deepFailures:[],codeVersion:'TEST_ONLY',aiEnabled:false});
 const outcomes=createRecommendationOutcomes({history,root:path.join(root,'outcomes'),testOnly:true,storageKind:'LOCAL_FILE'});
 const first=sourceCandidates(history.detail('TEST-ONLY-OUTCOMES'))[0];
-outcomes.save(calculateOutcomes(first,[{localTradedAt:'2026-10-02',closePrice:'100'},{localTradedAt:'2026-10-06',closePrice:'100'}],
+outcomes.save(calculateOutcomes(first,[{localTradedAt:'2026-10-03',closePrice:'100'},{localTradedAt:'2026-10-06',closePrice:'100'}],
   {collectedAt:'2026-10-07T00:00:00Z'})[0]);
 const app=express();let postAttempts=0,unexpected=0;
 app.use((req,res,next)=>{

@@ -5,6 +5,7 @@ const {randomUUID}=require('node:crypto');
 const {hash,EXPANDED_HISTORY_VERSION}=require('./recommendationHistory');
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {sourceDate,dataFreshness}=require('./dataFreshness');
+const {normalizeOutcomeBaseline}=require('./recommendationOutcomeBaseline');
 const VERSION='RECOMMENDATION_OUTCOME_V1';
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
 const GRADES=Object.freeze(['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE']);
@@ -18,10 +19,12 @@ function sourceCandidates(record){
   if(record?.schemaVersion!==EXPANDED_HISTORY_VERSION||!validId(record.scanId)||!Array.isArray(record.all)||!record.recordFingerprint)
     throw error('OUTCOME_V2_SOURCE_REQUIRED',400);
   return record.all.filter(x=>GRADES.includes(x.grade)).map(x=>{
-    const date=sourceDate(x.dataMetadata?.price?.sourceBusinessDate);
+    const baseline=normalizeOutcomeBaseline(x.outcomeBaseline,x.symbol);
     return {scanId:record.scanId,symbol:x.symbol,stockName:x.stockName,originalGrade:x.grade,
-      baselinePrice:typeof x.currentPrice==='number'&&Number.isFinite(x.currentPrice)?x.currentPrice:null,baselineBusinessDate:date,
-      baselineReady:positive(x.currentPrice)&&Boolean(date)&&x.dataMetadata?.price?.dateConsistency!=='MISMATCH',
+      currentPrice:typeof x.currentPrice==='number'&&Number.isFinite(x.currentPrice)?x.currentPrice:null,
+      baselinePrice:baseline?.price??null,baselineBusinessDate:baseline?.businessDate??null,
+      baselineProvider:baseline?.provider??null,baselineReceivedAt:baseline?.receivedAt??null,
+      baselineSourceTimestamp:baseline?.sourceTimestamp??null,baselineReady:Boolean(baseline),
       sourceRecordFingerprint:record.recordFingerprint,testOnly:record.testOnly===true};
   });
 }
@@ -115,7 +118,7 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
   }
   function normalize(value,current){
     if(!current.baselineReady||value?.status!=='READY'||!HORIZONS[value.horizon])throw error('OUTCOME_RECORD_INVALID');
-    for(const key of ['scanId','symbol','stockName','originalGrade','baselinePrice','baselineBusinessDate','sourceRecordFingerprint'])
+    for(const key of ['scanId','symbol','stockName','originalGrade','baselinePrice','baselineBusinessDate','baselineProvider','baselineReceivedAt','baselineSourceTimestamp','currentPrice','sourceRecordFingerprint'])
       if(value[key]!==current[key])throw error('OUTCOME_SOURCE_MISMATCH',400);
     const dates=value.observedTradingDates,n=HORIZONS[value.horizon];
     if(value.testOnly!==testOnly||value.provider!==PROVIDER||!positive(value.closePrice)||!sourceDate(value.targetBusinessDate)
@@ -176,7 +179,8 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
     const record=history.detail(scanId),sources=sourceCandidates(record);
     const candidates=sources.map(current=>({
       symbol:current.symbol,stockName:current.stockName,originalGrade:current.originalGrade,
-      baselinePrice:current.baselinePrice,baselineBusinessDate:current.baselineBusinessDate,
+      currentPrice:current.currentPrice,baselinePrice:current.baselinePrice,baselineBusinessDate:current.baselineBusinessDate,
+      baselineProvider:current.baselineProvider,baselineReceivedAt:current.baselineReceivedAt,
       horizons:Object.keys(HORIZONS).map(horizon=>{
         let value=null,reason=null;try{value=read(scanId,current.symbol,horizon,current);}catch(e){reason=e.code;}
         return value??{horizon,status:reason?'LOOKUP_RETRY_REQUIRED':current.baselineReady?'NOT_COLLECTED':'TRACKING_BLOCKED_NO_BASELINE',
