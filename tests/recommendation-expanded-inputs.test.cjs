@@ -282,3 +282,26 @@ test('TEST_ONLY numeric and fifth-position mixed rows do not trigger blanket off
   assert.equal(snapshot.officialTypeChecks,0);assert.equal(snapshot.officialTypeRequests,0);
   assert.ok(snapshot.stocks.every(x=>x.securityType==='UNKNOWN'));
 });
+
+test('TEST_ONLY universe excludes both newly reviewed codes with exact source provenance',async()=>{
+  const kospi=testOnlyMarket('KOSPI',400);
+  ['00088K','00104K','00680K'].forEach((itemCode,index)=>{kospi[index]={...kospi[index],itemCode};});
+  const data=pages(kospi),snapshot=await createRecommendationUniverse({fetchPage:data.fetchPage,testOnly:true}).load();
+  assert.equal(snapshot.testOnly,true);assert.equal(snapshot.count,500);
+  assert.equal(snapshot.excludedCount,3);assert.equal(snapshot.excludedSecurities.length,3);
+  assert.equal(snapshot.officialTypeChecks,3);assert.equal(snapshot.officialTypeRequests,0);
+  assert.equal(new Set(snapshot.stocks.map(x=>x.symbol)).size,500);
+  for(const symbol of ['00088K','00104K','00680K']){
+    assert.equal(snapshot.stocks.some(x=>x.symbol===symbol),false);
+    const excluded=snapshot.excludedSecurities.find(x=>x.symbol===symbol);
+    assert.equal(excluded.securityType,'NON_COMMON');assert.equal(excluded.codeSyntax,'VALID');
+    assert.equal(excluded.exclusionReason,'OFFICIAL_NON_COMMON_SECURITY');
+    assert.equal(excluded.securityTypeEvidence.symbol,symbol);
+  }
+  assert.equal(snapshot.excludedSecurities[0].securityTypeEvidence.codeSourceProvider,'ISSUER_OFFICIAL');
+  kospi[3]={...kospi[3],itemCode:'54321K',stockName:'TEST_ONLY_ordinary_label'};
+  const unknown=pages(kospi);
+  await assert.rejects(createRecommendationUniverse({fetchPage:unknown.fetchPage,testOnly:true}).load(),
+    error=>error.code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'&&error.officialTypeChecks===4);
+  assert.equal(unknown.requests.length,1);
+});

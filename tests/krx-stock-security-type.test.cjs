@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const {isNaverKrStockItemCode}=require('../services/naverKrStockItemCode');
-const {createKrxStockSecurityTypeClassifier,hasRequiredOfficialStockType}=require('../services/krxStockSecurityType');
+const {createKrxStockSecurityTypeClassifier,hasRequiredOfficialStockType,normalizeOfficialStockTypeEvidence}=require('../services/krxStockSecurityType');
 const {testOnlyStockType}=require('./helpers/test-only-stock-type.cjs');
 const classifier=records=>createKrxStockSecurityTypeClassifier({records,testOnly:true});
 
@@ -57,4 +57,52 @@ test('TEST_ONLY classifications cannot be installed in production or relabeled a
   assert.throws(()=>classifier([{...testOnlyStockType(),testOnly:false}]),{code:'OFFICIAL_SECURITY_TYPE_RECORD_INVALID'});
   assert.throws(()=>classifier([testOnlyStockType(),testOnlyStockType('12345K','NON_COMMON')]),
     {code:'OFFICIAL_SECURITY_TYPE_RECORD_CONFLICT'});
+});
+
+// These tests read public reviewed classification metadata only, never a market snapshot.
+test('reviewed 00680K, 00088K and 00104K classifications are exact and keep unknown codes blocked',()=>{
+  const types=createKrxStockSecurityTypeClassifier();
+  for(const symbol of ['00680K','00088K','00104K']){
+    const result=types.classify({symbol,market:'KOSPI'});
+    assert.equal(result.codeSyntax,'VALID');assert.equal(result.securityType,'NON_COMMON');
+    assert.equal(result.securityTypeEvidence.symbol,symbol);
+    assert.equal(result.securityTypeEvidence.provider,'KRX_KIND');
+    assert.equal(result.securityTypeEvidence.testOnly,false);
+    assert.equal(types.classify({symbol,market:'KOSDAQ'}).securityType,'UNVERIFIED');
+  }
+  assert.equal(types.classify({symbol:'54321K',market:'KOSPI'}).securityType,'UNVERIFIED');
+  assert.equal(types.requestCount(),0);
+  const cj=types.classify({symbol:'00104K',market:'KOSPI'}).securityTypeEvidence;
+  assert.equal(cj.codeSourceUrl,cj.typeSourceUrl);
+  const old=types.classify({symbol:'00680K',market:'KOSPI'}).securityTypeEvidence;
+  assert.equal(Object.hasOwn(old,'codeSourceProvider'),false);
+});
+
+test('TEST_ONLY issuer code proof is exact-bound and cannot replace KIND share-type proof',()=>{
+  const source=createKrxStockSecurityTypeClassifier().classify({symbol:'00088K',market:'KOSPI'}).securityTypeEvidence;
+  const evidence={...source,testOnly:true};
+  assert.equal(classifier([evidence]).classify({symbol:'00088K',market:'KOSPI'}).securityType,'NON_COMMON');
+  assert.equal(evidence.codeSourceProvider,'ISSUER_OFFICIAL');
+  assert.equal(evidence.typeSourceProvider,'KRX_KIND');
+  const rejected=[
+    {codeSourceUrl:'https://example.test/issuer.pdf'},
+    {codeSourceUrl:evidence.codeSourceUrl.replace('www.hanwhacorp.co.kr','www.hanwhacorp.co.kr.example.test')},
+    {codeSourceUrl:evidence.codeSourceUrl.replace('https:','http:')},
+    {codeSourceUrl:evidence.codeSourceUrl+'?redirect=1'},
+    {codeSourceUrl:evidence.codeSourceUrl+'#fragment'},
+    {codeSourceUrl:'https://www.hanwhacorp.co.kr/unreviewed.pdf'},
+    {symbol:'54321K',krxCode:'A54321K'},
+    {market:'KOSDAQ'},
+    {typeSourceProvider:'ISSUER_OFFICIAL',typeSourceUrl:evidence.codeSourceUrl},
+    {typeSourceUrl:evidence.codeSourceUrl},
+    {codeSourceProvider:'OTHER'},
+    {codeSourceProvider:null},
+    {typeSourceProvider:undefined},
+    {codeSourceProvider:undefined}
+  ];
+  for(const patch of rejected)
+    assert.throws(()=>classifier([{...evidence,...patch}]),{code:'OFFICIAL_SECURITY_TYPE_RECORD_INVALID'});
+  const old=testOnlyStockType(),normalized=normalizeOfficialStockTypeEvidence(old,
+    {symbol:old.symbol,market:old.market,testOnly:true});
+  assert.deepEqual(normalized,old);
 });
