@@ -184,3 +184,28 @@ test('TEST_ONLY presentation mapper recognizes expiry code, HTTP 410 and the spe
     assert.notEqual(aiAnalysisError(error).message,'뉴스 정보가 만료되었습니다.');
   }
 });
+
+test('TEST_ONLY detail pending UI retains observed numbers, distinguishes status and performs no extra requests',async()=>{
+  const d=detail('005930');d.marketContext={...d.marketContext,volume:200000,averageVolume20:1000000,volumeRatio:.2,
+    volumeAssessment:{status:'INTRADAY_PENDING',partial:true,currentVolume:200000,averageVolume20:1000000,volumePassed:null}};
+  d.strategy.marketAssessment={available:true,cautionCount:0,pendingRequired:['volume'],missingRequired:[],
+    conditions:{volume:{status:'PENDING',label:'장중 확인 중',detail:'TEST_ONLY 실제 0.2배'}}};
+  const h=harness({detailResponse:async()=>d});await h.select('005930');const mapped=h.state('strategyData');
+  assert.equal(mapped.volumePassed,null);assert.equal(mapped.volumeConditionStatus,'PENDING');
+  assert.equal(mapped.volumeAssessment.status,'INTRADAY_PENDING');assert.equal(mapped.currentVolume,200000);
+  assert.equal(mapped.averageVolume20,1000000);assert.equal(mapped.volumeRatio,.2);
+  const tree=h.render();assert.ok(visit(tree,n=>n.type==='span'&&n.props.children==='장중 확인 중'));
+  assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='당일 누적 거래량은 장 마감 전 낮음으로 확정하지 않습니다.'));
+  const text=n=>n==null?'':typeof n!=='object'?String(n):React.Children.toArray(n.props?.children).map(text).join('');
+  assert.match(text(tree),/20일 평균 100.0만주 · 비율.*0.20배/);assert.match(text(tree),/20.0만주/);
+  assert.ok(visit(tree,n=>n.type==='div'&&n.props.className==='grid grid-cols-1 sm:grid-cols-3 gap-3'));
+  h.render();assert.equal(h.calls.length,3);assert.equal(h.calls.filter(x=>x.pathname.includes('/ai-analysis')).length,0);
+  const holder=visit(tree,n=>n.type?.name==='HoldingGuidance');assert.strictEqual(holder.props.strategy,mapped);
+});
+test('TEST_ONLY detail mapper keeps FAVORABLE/CAUTION booleans and PENDING/NEUTRAL/unavailable null',async()=>{
+  for(const [status,passed] of [['FAVORABLE',true],['CAUTION',false],['PENDING',null],['NEUTRAL',null],['UNAVAILABLE',null]]){
+    const d=detail('005930');d.strategy.marketAssessment.conditions.volume={status,label:status==='PENDING'?'장중 확인 중':status};
+    const h=harness({detailResponse:async()=>d});await h.select('005930');assert.equal(h.state('strategyData').volumePassed,passed);
+    assert.equal(h.state('strategyData').volumeConditionStatus,status);assert.equal(h.calls.length,3);
+  }
+});

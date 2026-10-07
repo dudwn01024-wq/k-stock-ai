@@ -2739,6 +2739,14 @@ app.get(
         parseNumber(
           latestRow?.volume
         );
+      // Use the actual latest KIS daily date and one observation time per request.
+      const observedAt = new Date().toISOString();
+      const volumeAssessment = assessRecommendationVolume({
+        sourceBusinessDate: sourceDate(latestRow?.dataMetadata?.sourceBusinessDate ?? latestRow?.date),
+        observedAt,
+        currentVolume,
+        averageVolume20
+      });
 
 
       // ==================================
@@ -2896,6 +2904,7 @@ app.get(
 
 
       const rawMarketContext = {
+        volumeAssessment,
         volume:
           currentVolume,
 
@@ -4903,6 +4912,14 @@ const recentLow20 =
         safeNumber(
           latestRow?.volume
         );
+      // Use the actual latest KIS daily date and one observation time per request.
+      const observedAt = new Date().toISOString();
+      const volumeAssessment = assessRecommendationVolume({
+        sourceBusinessDate: sourceDate(latestRow?.dataMetadata?.sourceBusinessDate ?? latestRow?.date),
+        observedAt,
+        currentVolume,
+        averageVolume20
+      });
 
 
       // ==================================
@@ -4996,6 +5013,7 @@ const recentLow20 =
       // ==================================
 
       const rawMarketContext = {
+        volumeAssessment,
 
         volume:
           currentVolume,
@@ -5119,6 +5137,8 @@ recentHigh20,
 
 recentLow20,
         marketContext: {
+
+          volumeAssessment,
 
           complete:
             marketContextComplete,

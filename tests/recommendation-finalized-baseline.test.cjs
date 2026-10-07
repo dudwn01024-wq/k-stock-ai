@@ -185,7 +185,7 @@ test('TEST_ONLY score/ranking/volume outputs exactly match previous code; only b
     assert.deepEqual(without(a),without(b));current.push({...a,universeRank:i+1});prior.push({...b,universeRank:i+1});
   }
   assert.deepEqual(rankFastScreenResults(current).map(x=>x.symbol),Array.from(old.rankFastScreenResults(prior),x=>x.symbol));
-  for(const file of ['server.js','services/tradingStrategy.js','services/recommendationVolumePolicy.js','services/expandedRecommendationRuns.js',
+  for(const file of ['services/recommendationVolumePolicy.js','services/expandedRecommendationRuns.js',
     'services/chartAnalysis.js','frontend/src/ExpandedCandidateCard.jsx']){
     const before=execFileSync('git',['show',previous+':'+file],{encoding:'utf8'});
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),before.replaceAll('\r\n','\n'),file);

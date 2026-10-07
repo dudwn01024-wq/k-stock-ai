@@ -5,21 +5,27 @@ const fs=require('node:fs'),vm=require('node:vm'),express=require('express');
 const {createStockDetailNews,DETAIL_NEWS_TTL_MS,MAX_DETAIL_NEWS_SNAPSHOTS}=require('../services/stockDetailNews');
 const {assessLatestNews}=require('../services/naverMarketData');
 const {calculateTradingStrategy}=require('../services/tradingStrategy');
-const {dateConsistency}=require('../services/dataFreshness');
+const {dateConsistency,sourceDate}=require('../services/dataFreshness');
+const {assessRecommendationVolume}=require('../services/recommendationVolumePolicy');
 const {pathToFileURL}=require('node:url');
 const source=fs.readFileSync(require.resolve('../server.js'),'utf8').replace(/\r\n/g,'\n');
 const section=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));
 const article=title=>({testOnly:true,title,summary:'TEST_ONLY',url:'https://example.com/test-only',date:null});
 const chart={ma5:100,ma20:99,ma60:98,rsi14:50,macd:{macd:2,signal:1,histogram:1},
   bollingerBands:{position:50},atr14:10,supportResistance:{nearestSupport:{price:100},nearestResistance:{price:120}}};
-async function fixture(t,{fetchNews,now=Date.now,ttlMs}={}){
+async function fixture(t,{fetchNews,now=Date.now,ttlMs,currentVolume=150,averageVolume20=150,
+  sourceBusinessDate='2026-10-06',observedAt='2026-10-07T09:30:00+09:00',metadata=true}={}){
+  const clock=Date.parse(observedAt);
+  class FixedDate extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
   const calls={news:0,quote:0,daily:0,ai:0},seen=[];
   const fetchStockNewsBySymbol=async symbol=>{calls.news++;return fetchNews?fetchNews(symbol):[article(calls.news===1?'TEST_ONLY 계약 해지':'TEST_ONLY 수주')];};
   const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol,now,ttlMs});
   const app=express();
-  const context={app,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,
+  const context={app,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
     fetchStockQuoteData:async symbol=>{calls.quote++;return {symbol,stockName:'TEST_ONLY',currentPrice:100,foreignerNet:1,institutionNet:1};},
-    fetchKisDailyOHLCV:async()=>{calls.daily++;return Array.from({length:30},()=>({testOnly:true,high:120,low:90,close:100,volume:150}));},
+    fetchKisDailyOHLCV:async()=>{calls.daily++;return Array.from({length:30},(_,i)=>({testOnly:true,high:120,low:90,close:100,
+      date:i===29?sourceBusinessDate:'2026-10-01',volume:i===29?currentVolume:averageVolume20,
+      ...(metadata?{dataMetadata:{sourceBusinessDate:i===29?sourceBusinessDate:'2026-10-01'}}:{})}));},
     analyzeMovingAverages:()=>chart,calculateTradingStrategy,validateSymbol:s=>/^\d{6}$/.test(s),
     GEMINI_API_KEY:true,parseNumber:value=>value==null?null:Number(value),round2:value=>Math.round(value*100)/100,
     analyzeStockWithGemini:async input=>{calls.ai++;seen.push(input);return {analysis:{summary:'TEST_ONLY 해설'},modelUsed:'TEST_ONLY',riskReward:{}};},
@@ -121,4 +127,33 @@ test('TEST_ONLY watchlist and recommendation news reader contract are preserved'
   assert.match(source,/app\.get\(\s*'\/api\/stock\/news'/);
   const builder=section('const buildRecommendationResult =','const rankRecommendationResults =');
   assert.equal((builder.match(/fetchStockNewsBySymbol\(/g)||[]).length,1);
+});
+
+for(const [label,settings,condition,policy] of [
+  ['morning pending',{currentVolume:200000},'PENDING','INTRADAY_PENDING'],
+  ['morning 1.2',{currentVolume:1200000},'NEUTRAL','INTRADAY_CONFIRMED_STRONG'],
+  ['morning 1.6',{currentVolume:1600000},'FAVORABLE','INTRADAY_CONFIRMED_STRONG'],
+  ['after close low',{currentVolume:600000,observedAt:'2026-10-07T15:45:00+09:00'},'CAUTION','COMPLETED_FAIL'],
+  ['previous day',{currentVolume:600000,sourceBusinessDate:'2026-10-06'},'CAUTION','COMPLETED_FAIL'],
+  ['missing volume',{currentVolume:null},'UNAVAILABLE','UNAVAILABLE'],
+  ['missing average',{averageVolume20:null},'UNAVAILABLE','UNAVAILABLE'],
+  ['missing date',{sourceBusinessDate:null},'UNAVAILABLE','UNAVAILABLE'],
+  ['actual date fallback',{currentVolume:200000,metadata:false},'PENDING','INTRADAY_PENDING']
+])test('TEST_ONLY detail and explicit AI share KIS volume completion: '+label,async t=>{
+  const f=await fixture(t,{sourceBusinessDate:'2026-10-07',averageVolume20:1000000,fetchNews:async()=>[article('TEST_ONLY 수주')],...settings});
+  const {body:detail,status}=await f.get('/api/stock/detail-analysis?symbol=005930');assert.equal(status,200);
+  assert.deepEqual(f.calls,{news:1,quote:1,daily:1,ai:0});
+  const {body:ai,status:aiStatus}=await f.get('/api/stock/ai-analysis?symbol=005930&newsSnapshotId='+detail.newsSnapshotId);
+  assert.equal(aiStatus,200);assert.equal(detail.marketContext.volumeAssessment.status,policy);
+  assert.deepEqual(ai.marketContext.volumeAssessment,detail.marketContext.volumeAssessment);
+  assert.deepEqual(ai.strategy.marketAssessment,detail.strategy.marketAssessment);
+  assert.equal(detail.strategy.marketAssessment.conditions.volume.status,condition);
+  assert.equal(f.seen[0].strategy.marketContext.volumeAssessment.status,policy);
+  assert.equal(f.seen[0].strategy.marketAssessment.conditions.volume.status,condition);
+  assert.equal(f.seen[0].strategy.volumePassed,condition==='FAVORABLE'?true:condition==='CAUTION'?false:null);
+  assert.deepEqual(f.calls,{news:1,quote:2,daily:2,ai:1},'only the pre-existing explicit AI requests occur');
+  if(condition==='PENDING'){
+    assert.equal(ai.strategy.finalAssessment.status,'WAIT');assert.equal(detail.strategy.finalAssessment.label,'장중 거래량 확인 중');
+    assert.deepEqual(detail.strategy.marketAssessment.pendingRequired,['volume']);assert.deepEqual(detail.strategy.marketAssessment.missingRequired,[]);
+  }
 });

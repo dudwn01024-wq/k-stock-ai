@@ -15,6 +15,8 @@
 // 모든 판단 기준을 한 곳에서 관리
 // ========================================
 
+const { assessRecommendationVolume } = require('./recommendationVolumePolicy');
+
 const STRATEGY_RULES = {
   atrStopMultiplier: 0.5,
 
@@ -669,6 +671,20 @@ const evaluateTechnicalConditions = ({
 // UNAVAILABLE 처리
 // ========================================
 
+// An explicit assessment must match the shared policy and the measured inputs.
+// Missing metadata keeps the legacy caller contract; malformed metadata fails closed.
+const verifiedVolumeAssessment = (assessment, volume, averageVolume20) => {
+  if (!assessment || typeof assessment !== 'object' || Array.isArray(assessment)) return null;
+  const expected = assessRecommendationVolume({
+    sourceBusinessDate: assessment.sourceBusinessDate,
+    observedAt: assessment.observedAt,
+    currentVolume: volume,
+    averageVolume20
+  });
+  return Object.keys(expected).every(key => Object.hasOwn(assessment, key) && assessment[key] === expected[key])
+    ? expected : null;
+};
+
 const evaluateMarketContext = (
   marketContext = {}
 ) => {
@@ -708,7 +724,9 @@ const evaluateMarketContext = (
   let volumeCondition;
 
   let volumeRatio = null;
-
+  const hasVolumeAssessment = Object.hasOwn(marketContext ?? {}, 'volumeAssessment');
+  const volumeAssessment = hasVolumeAssessment
+    ? verifiedVolumeAssessment(marketContext.volumeAssessment, volume, averageVolume20) : null;
 
   if (
     Number.isFinite(volume) &&
@@ -721,7 +739,13 @@ const evaluateMarketContext = (
       volume /
       averageVolume20;
 
-    if (
+    if (hasVolumeAssessment && (!volumeAssessment || volumeAssessment.status === 'UNAVAILABLE')) {
+      volumeCondition = createCondition('UNAVAILABLE', '거래량',
+        '거래량의 기준일·관측시각 또는 완성 여부를 확인할 수 없습니다.');
+    } else if (volumeAssessment?.status === 'INTRADAY_PENDING') {
+      volumeCondition = createCondition('PENDING', '장중 확인 중',
+        `현재 누적 거래량은 20일 평균 대비 ${round2(volumeRatio)}배이며 장중이므로 최종 판정을 보류합니다.`);
+    } else if (
       volumeRatio >=
       STRATEGY_RULES
         .highVolumeRatio
@@ -920,6 +944,9 @@ const evaluateMarketContext = (
     favorableCount,
 
     cautionCount,
+
+    pendingCount: list.filter(condition => condition.status === 'PENDING').length,
+    pendingRequired: Object.entries(conditions).filter(([, condition]) => condition.status === 'PENDING').map(([key]) => key),
 
     volumeRatio:
       round2(volumeRatio),
@@ -1315,6 +1342,18 @@ const buildFinalAssessment = ({
 
       reason:
         '거래량·수급·뉴스 중 주의 조건이 확인되었습니다.'
+    };
+  }
+
+
+  // Preserve other WAIT reasons; this label applies when volume alone blocks entry.
+  if ((marketAssessment?.pendingRequired?.includes('volume') ||
+      marketAssessment?.conditions?.volume?.status === 'PENDING') &&
+      executionAssessment?.status === 'ENTRY_ZONE' && technicalAssessment?.status === 'FAVORABLE') {
+    return {
+      status: 'WAIT',
+      label: '장중 거래량 확인 중',
+      reason: '당일 거래량이 아직 확정되지 않아 진입 판단을 보류합니다.'
     };
   }
 
@@ -1809,6 +1848,9 @@ const isEntryAllowed = (result) => {
       execution?.status !== 'ENTRY_ZONE') return false;
   if ([technical, market, result.finalAssessment].some(a =>
     a.missingRequired != null && (!Array.isArray(a.missingRequired) || a.missingRequired.length > 0))) return false;
+  if (market.pendingRequired != null && (!Array.isArray(market.pendingRequired) ||
+      market.pendingRequired.includes('volume'))) return false;
+  if (market.conditions?.volume?.status === 'PENDING') return false;
   const known = ['FAVORABLE', 'NEUTRAL', 'CAUTION'];
   if (['trend', 'rsi', 'macd', 'bollinger'].some(key =>
     !known.includes(technical.conditions?.[key]?.status))) return false;

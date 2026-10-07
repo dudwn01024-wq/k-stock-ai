@@ -280,6 +280,9 @@ recentLow20:
       market?.volumeRatio ??
       null,
 
+    volumeAssessment: market?.volumeAssessment ?? null,
+    volumeConditionStatus: volumeStatus ?? null,
+
     foreignerNet,
 
     institutionNet,
@@ -1732,16 +1735,31 @@ export default function App() {
               ? 'text-emerald-400'
               : strategyData?.marketAssessment?.conditions?.volume?.status === 'CAUTION'
                 ? 'text-amber-400'
-                : 'text-slate-400'
+                : strategyData?.marketAssessment?.conditions?.volume?.status === 'PENDING'
+                  ? 'text-sky-300'
+                  : 'text-slate-400'
           }`}
         >
-          {strategyData?.marketAssessment?.conditions?.volume?.label || '상태 없음'}
+          {strategyData?.volumeConditionStatus === 'PENDING'
+            ? '장중 확인 중'
+            : strategyData?.marketAssessment?.conditions?.volume?.label || '상태 없음'}
         </span>
 
+        <p className="text-[11px] text-slate-400 mt-1 break-words">
+          20일 평균 {formatNumberWithUnit(strategyData?.averageVolume20, '주')} · 비율{' '}
+          {toNullableNumber(strategyData?.volumeRatio) === null
+            ? '미확인'
+            : `${toNullableNumber(strategyData.volumeRatio).toFixed(2)}배`}
+        </p>
         <p className="text-[11px] text-slate-500 mt-1">
           {strategyData?.marketAssessment?.conditions?.volume?.detail ||
             '데이터 없음'}
         </p>
+        {strategyData?.volumeConditionStatus === 'PENDING' && (
+          <p className="text-[11px] text-sky-300 mt-2 leading-relaxed">
+            당일 누적 거래량은 장 마감 전 낮음으로 확정하지 않습니다.
+          </p>
+        )}
       </div>
 
       <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">

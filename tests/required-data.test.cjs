@@ -15,7 +15,7 @@ const blocked=r=>{assert.equal(r.finalAssessment.status,'DATA_INSUFFICIENT');ass
 
 test('complete data retains baseline candidate and exact price formulas',()=>{
   const old={exports:{}};
-  vm.runInNewContext(execFileSync('git',['show','HEAD:services/tradingStrategy.js'],{encoding:'utf8'}),{module:old});
+  vm.runInNewContext(execFileSync('git',['show','HEAD:services/tradingStrategy.js'],{encoding:'utf8'}),{module:old,require:name=>{assert.equal(name,'./recommendationVolumePolicy');return require('../services/recommendationVolumePolicy');}});
   const before=old.exports.calculateTradingStrategy(input()),after=engine.calculateTradingStrategy(input());
   assert.equal(after.finalAssessment.status,'ENTRY_CANDIDATE');
   assert.deepEqual([after.entryPrice,after.takeProfitPrice,after.stopLossPrice,after.riskRewardRatio],[100,120,95,4]);

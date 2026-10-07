@@ -84,10 +84,10 @@ for(const [time,volume,passed,status] of [[at('10:30'),1200000,true,'INTRADAY_CO
     assert.equal(r.strategy.volumePassed,passed);assert.equal(fast.volumePassed,passed);
     assert.equal(r.strategy.volumeAssessment.status,status);assert.equal(fast.volumeAssessment.status,status);
   });
-test('TEST_ONLY legacy screening and individual ENTRY_GATE policy are unchanged',async()=>{
+test('TEST_ONLY legacy screening and chart calculation policy are unchanged',async()=>{
   const f=backend(),r=await f.api.buildRecommendationResult({symbol:'000001'});
   assert.equal(r.strategy.volumePassed,false);assert.equal(r.pendingConditions,undefined);assert.equal(r.strategy.volumeAssessment,undefined);
-  for(const file of ['services/tradingStrategy.js','services/chartAnalysis.js']){
+  for(const file of ['services/chartAnalysis.js']){
     const original=execFileSync('git',['show','12dbb24d7b9cb8f5ced10ca2f41a3fb538764ced:'+file],{encoding:'utf8'});
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),file);
   }
