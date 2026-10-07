@@ -4059,7 +4059,7 @@ app.get(
       const timeframe =
         String(
           req.query.timeframe ||
-            '1M'
+            '1D'
         )
           .trim()
           .toUpperCase();
@@ -4072,22 +4072,13 @@ app.get(
       }
 
       const timeframeMap = {
+        '1D': 30, // Daily candles, not intraday minutes.
         '1W': 7,
         '1M': 30,
         '3M': 90,
         '6M': 180,
         '1Y': 365
       };
-
-      if (
-        timeframe ===
-        '1D'
-      ) {
-        return res.status(400).json({
-          error:
-            '현재 차트 데이터는 일봉 기준이며 1D 분봉 차트는 아직 지원하지 않습니다.'
-        });
-      }
 
       const requestedDays =
         timeframeMap[
@@ -4109,7 +4100,7 @@ app.get(
             ? 150
             : timeframe === '3M'
               ? 80
-              : timeframe === '1M'
+              : timeframe === '1M' || timeframe === '1D'
                 ? 30
                 : 10;
 
@@ -4157,6 +4148,8 @@ app.get(
                   item.closePrice
                 ),
 
+              close: parseNumber(item.closePrice),
+
               open:
                 parseNumber(
                   item.openPrice
@@ -4174,18 +4167,17 @@ app.get(
 
               volume:
                 parseNumber(
-                  item.accumulatedTradingVolume ||
+                  item.accumulatedTradingVolume ??
                   item.volume
                 )
             })
           )
           .filter(
             (item) =>
-              item.date &&
-              Number.isFinite(
-                item.price
-              )
-          );
+              item.date && [item.open, item.high, item.low, item.close].every(value => Number.isFinite(value) && value > 0) &&
+              item.high >= Math.max(item.open, item.close) && item.low <= Math.min(item.open, item.close) && item.high >= item.low
+          )
+          .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
       // Naver 데이터는 최신 → 과거 순서이므로
       // MA 계산 후 차트 표시용으로 과거 → 최신 순서로 변경

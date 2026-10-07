@@ -76,6 +76,29 @@ test('TEST_ONLY search, render, news view and holder consume one detail response
   assert.equal(h.state('aiAnalysis'),null);assert.equal(h.state('aiLoading'),false);
 });
 
+test('TEST_ONLY first detail and changing stock both reset to daily candles with the daily button selected',async()=>{
+  const h=harness();await h.select('005930');assert.equal(h.state('chartTimeframe'),'1D');
+  assert.equal(h.calls.find(x=>x.pathname.endsWith('/chart')).searchParams.get('timeframe'),'1D');
+  const daily=visit(h.render(),n=>n.type==='button'&&n.props.children==='일봉');assert.equal(daily.props['aria-pressed'],true);
+  h.states[bindings.indexOf('chartTimeframe')]='6M';await h.select('000660');
+  assert.equal(h.state('chartTimeframe'),'1D');assert.equal(h.calls.filter(x=>x.pathname.endsWith('/chart')).at(-1).searchParams.get('timeframe'),'1D');
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/ai-analysis')).length,0);
+});
+
+test('TEST_ONLY chart range changes read only chart data and preserve the same KIS pattern results',async()=>{
+  const chartAnalysis={candlePatterns:{patterns:[{code:'TEST_ONLY',label:'TEST_ONLY 도지'}]},
+    chartPatterns:{patterns:[{code:'TEST_ONLY',label:'TEST_ONLY 쌍바닥 후보',status:'CANDIDATE'}]},
+    elliottWave:{detected:true,label:'TEST_ONLY 5파 후보',direction:'UP'}};
+  const h=harness({detailResponse:async symbol=>({...detail(symbol),chartAnalysis,dataPoints:130})});
+  await h.select('005930');const before=h.state('strategyData'),tree=h.render();
+  assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='KIS 일봉 기준 · 차트 표시 범위와 별개입니다.'));
+  await visit(tree,n=>n.type==='button'&&n.props.children==='1개월').props.onClick();
+  assert.strictEqual(h.state('strategyData'),before);
+  for(const key of ['candlePatterns','chartPatterns','elliottWave'])assert.deepEqual(JSON.parse(JSON.stringify(before[key])),chartAnalysis[key]);
+  assert.equal(h.calls.at(-1).pathname,'/api/stock/chart');assert.equal(h.calls.at(-1).searchParams.get('timeframe'),'1M');
+  assert.equal(h.calls.length,4);
+});
+
 test('TEST_ONLY AI explanation runs only on explicit click, sends opaque ID, and ignores duplicate pending clicks',async()=>{
   let resolve;const pending=new Promise(r=>resolve=r);
   const h=harness({ai:async url=>{await pending;return {symbol:url.searchParams.get('symbol'),newsSnapshotId:url.searchParams.get('newsSnapshotId'),analysis:{summary:'TEST_ONLY'}};}});

@@ -5,6 +5,7 @@ import CandidateOverview from './CandidateOverview.jsx';
 import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
+import CandlestickChart from './CandlestickChart.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import {aiAnalysisError} from './utils/aiAnalysisError.js';
 import './public-home.css';
@@ -27,16 +28,6 @@ import {
   Sparkles,
   Bot
 } from 'lucide-react';
-import {
-  ComposedChart,
-  Line,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ResponsiveContainer
-} from 'recharts';
 
 const API_BASE_URL = typeof window !== 'undefined' && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
   ? '/api' : 'https://k-stock-ai.onrender.com/api';
@@ -51,12 +42,12 @@ const POPULAR_STOCKS = [
   { name: '셀트리온', code: '068270' }
 ];
 const TIMEFRAMES = [
-  { label: '1일', code: '1D' },
+  { label: '일봉', code: '1D' },
   { label: '1주', code: '1W' },
   { label: '1개월', code: '1M' },
   { label: '3개월', code: '3M' },
-  { label: '1년', code: '1Y' },
-  { label: '5년', code: '5Y' }
+  { label: '6개월', code: '6M' },
+  { label: '1년', code: '1Y' }
 ];
 
 const formatKRW = (num) => {
@@ -133,7 +124,7 @@ class RealStockBackendService {
     if (!response.ok) throw new Error(`현재가 API 오류 (${response.status})`);
     return response.json();
   }
-  async getStockChart(symbol, timeframe = '1M') {
+  async getStockChart(symbol, timeframe = '1D') {
     const response = await fetch(
       `${this.baseUrl}/stock/chart?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`
     );
@@ -530,7 +521,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
-  const [chartTimeframe, setChartTimeframe] = useState('1M');
+  const [chartTimeframe, setChartTimeframe] = useState('1D');
   const [activeTab, setActiveTab] = useState('detail');
   const [showDetail, setShowDetail] = useState(false);
 
@@ -553,7 +544,7 @@ export default function App() {
   },[backendService]);
 
   const loadRealStockData = useCallback(
-    async (symbol, name, timeframe = '1M', refresh = false) => {
+    async (symbol, name, timeframe = '1D', refresh = false) => {
       if (refresh) setIsRefreshing(true);
       else setLoading(true);
 
@@ -580,6 +571,7 @@ export default function App() {
         setQuoteData(quote);
         setChartData(chartResult.items);
         setChartSupported(chartResult.supported);
+        setChartTimeframe(timeframe);
         setNewsList(detail.news);
         setStrategyData(detail.strategy);
 
@@ -615,7 +607,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if(recommendationMode==='legacy50')loadRealStockData('005930', '삼성전자', '1M');
+    if(recommendationMode==='legacy50')loadRealStockData('005930', '삼성전자', '1D');
   }, [loadRealStockData,recommendationMode]);
 
   const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
@@ -646,7 +638,7 @@ export default function App() {
         targetName = searchResult.name || trimmed;
       }
 
-      await loadRealStockData(targetSymbol, targetName, chartTimeframe);
+      await loadRealStockData(targetSymbol, targetName, '1D');
       setShowDetail(true);
       setActiveTab('detail');
     } catch (error) {
@@ -660,7 +652,7 @@ export default function App() {
     setShowDetail(true);
     setActiveTab('detail');
     setSearchQuery(stock.name);
-    loadRealStockData(stock.code, stock.name, chartTimeframe);
+    loadRealStockData(stock.code, stock.name, '1D');
   };
 
   const handleTimeframeChange = async (newTimeframe) => {
@@ -677,19 +669,6 @@ export default function App() {
       setErrorMsg(error?.message || '차트 데이터를 불러오지 못했습니다.');
     }
   };
-
-  const chartRows = useMemo(
-    () =>
-      chartData.map((item) => ({
-        date: item.date,
-        price: toNullableNumber(item.price),
-        open: item.open,
-        high: item.high,
-        low: item.low,
-        volume: item.volume
-      })),
-    [chartData]
-  );
 
   const changeRate = toNullableNumber(quoteData?.changeRate);
 
@@ -1838,6 +1817,7 @@ export default function App() {
     <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
       6. 패턴 분석
     </h4>
+    <p className="text-[11px] text-slate-300">KIS 일봉 기준 · 차트 표시 범위와 별개입니다.</p>
 
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
       {/* 캔들 패턴 */}
@@ -2228,7 +2208,8 @@ export default function App() {
                     <button
                       key={tf.code}
                       onClick={() => handleTimeframeChange(tf.code)}
-                      className={`px-3 py-1 rounded-lg shrink-0 ${
+                      aria-pressed={chartTimeframe === tf.code}
+                      className={`px-2 sm:px-3 py-1 rounded-lg shrink-0 ${
                         chartTimeframe === tf.code
                           ? 'bg-emerald-500 text-slate-950 font-bold'
                           : 'text-slate-400 hover:text-white'
@@ -2243,50 +2224,10 @@ export default function App() {
               {!chartSupported ? (
                 <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
                   <Info className="w-5 h-5" />
-                  <span>1일 장중 분봉 데이터는 현재 지원하지 않습니다.</span>
+                  <span>일봉 차트 자료를 확인하지 못했습니다.</span>
                 </div>
-              ) : chartRows.length > 0 ? (
-                <div className="h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartRows} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                      <XAxis dataKey="date" stroke="#64748b" fontSize={11} tickLine={false} />
-                      <YAxis
-                        yAxisId="left"
-                        domain={['auto', 'auto']}
-                        stroke="#94a3b8"
-                        fontSize={11}
-                        orientation="right"
-                        tickFormatter={(v) => Number(v).toLocaleString('ko-KR')}
-                      />
-                      <YAxis yAxisId="right" orientation="left" hide />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: '#0f172a',
-                          borderColor: '#334155',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                          color: '#f8fafc'
-                        }}
-                        formatter={(value, name) => [
-                          !hasNumber(value)
-                            ? '데이터 없음'
-                            : `${Number(value).toLocaleString('ko-KR')}${name === 'volume' ? '주' : '원'}`,
-                          name === 'price' ? '종가' : '거래량'
-                        ]}
-                      />
-                      <Bar yAxisId="right" dataKey="volume" fill="#334155" opacity={0.6} radius={[2, 2, 0, 0]} />
-                      <Line
-                        yAxisId="left"
-                        type="monotone"
-                        dataKey="price"
-                        stroke="#10b981"
-                        strokeWidth={2.5}
-                        dot={false}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+              ) : chartData.length > 0 ? (
+                <CandlestickChart rows={chartData}/>
               ) : (
                 <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
                   <Info className="w-5 h-5" />
