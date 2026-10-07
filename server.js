@@ -523,6 +523,8 @@ const mapWithConcurrency =
 // ========================================
 
 const {fetchStockQuoteData,fetchStockNewsBySymbol}=require('./services/naverMarketData').createNaverMarketData({fetchImpl:recommendationFetch});
+const {createStockDetailNews}=require('./services/stockDetailNews');
+const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol});
 
 // ========================================
 // STOCK NEWS DATA
@@ -2600,6 +2602,15 @@ app.get(
       }
 
 
+      // An opaque server ID is the only reusable news input. Missing IDs retain the legacy explicit API contract.
+      if(Object.keys(req.query).some(key=>!['symbol','newsSnapshotId'].includes(key)))
+        return res.status(400).json({error:'AI_QUERY_INVALID'});
+      let detailNewsSnapshot=null;
+      if(req.query.newsSnapshotId!==undefined){
+        try{detailNewsSnapshot=stockDetailNews.get(req.query.newsSnapshotId,symbol);}
+        catch(error){return res.status(error.status||400).json({error:error.code,message:error.message});}
+      }
+
       if (
         !GEMINI_API_KEY
       ) {
@@ -2634,9 +2645,9 @@ app.get(
             }
           ),
 
-          fetchStockNewsBySymbol(
-            symbol
-          ).catch(
+          (detailNewsSnapshot
+            ? Promise.resolve(detailNewsSnapshot.news)
+            : fetchStockNewsBySymbol(symbol)).catch(
             (error) => {
               console.warn(
                 `[K-Stock AI] AI analysis news fetch failed for ${symbol}:`,
@@ -2783,10 +2794,9 @@ app.get(
       // 실제 뉴스 평가
       // ==================================
 
-      const newsAssessment =
-        assessLatestNews(
-          news
-        );
+      const newsAssessment = detailNewsSnapshot
+        ? detailNewsSnapshot.newsAssessment
+        : assessLatestNews(news);
 
 
       let hasCautionSignal =
@@ -3099,6 +3109,8 @@ app.get(
 
       return res.json({
         symbol,
+        newsSnapshotId:detailNewsSnapshot?.id ?? null,
+        newsReceivedAt:detailNewsSnapshot?.receivedAt ?? null,
 
         stockName:
           quote
@@ -4620,9 +4632,10 @@ app.get(
 // → 종합 매매전략
 // ========================================
 
-app.get(
-  '/api/kis/trading-strategy-test',
+const handleStockDetailAnalysis = (includeNewsSnapshot=false) =>
   async (req, res) => {
+    if(includeNewsSnapshot && (Object.keys(req.query).some(key=>key!=='symbol') || typeof req.query.symbol!=='string'))
+      return res.status(400).json({error:'DETAIL_QUERY_INVALID'});
     const symbol =
       String(
         req.query.symbol ||
@@ -4724,13 +4737,14 @@ app.get(
             ),
 
           // 실제 최신 뉴스
-          fetchStockNewsBySymbol(
-            symbol
-          )
+          (includeNewsSnapshot
+            ? stockDetailNews.create(symbol).then(snapshot=>({snapshot}))
+            : fetchStockNewsBySymbol(symbol))
             .then(
               (data) => ({
-                ok: true,
-                data,
+                ok: data?.snapshot ? data.snapshot.status==='READY' : true,
+                data: data?.snapshot ? data.snapshot.news : data,
+                snapshot: data?.snapshot ?? null,
                 error: null
               })
             )
@@ -4927,6 +4941,7 @@ const recentLow20 =
 
 
       const rawNewsAssessment =
+        newsResult?.snapshot ? newsResult.snapshot.newsAssessment :
         newsResult?.ok
           ? assessLatestNews(
               news
@@ -5081,6 +5096,10 @@ const recentLow20 =
 
         symbol,
 
+        ...(includeNewsSnapshot ? {news,newsAssessment:rawNewsAssessment,
+          newsSnapshotId:newsResult.snapshot?.id ?? null,newsReceivedAt:newsResult.snapshot?.receivedAt ?? null,
+          newsStatus:newsResult.snapshot?.status ?? 'LOOKUP_FAILED'} : {}),
+
         dataPoints:
           rows.length,
 
@@ -5170,8 +5189,9 @@ recentLow20,
             error.message
         });
     }
-  }
-);
+  };
+app.get('/api/kis/trading-strategy-test',handleStockDetailAnalysis());
+app.get('/api/stock/detail-analysis',handleStockDetailAnalysis(true));
 // ========================================
 // ROOT
 // ========================================

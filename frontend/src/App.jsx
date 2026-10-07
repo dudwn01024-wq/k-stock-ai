@@ -8,7 +8,7 @@ import HoldingGuidance from './HoldingGuidance.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Search,
   RefreshCw,
@@ -170,6 +170,20 @@ class RealStockBackendService {
   const payload =
     await response.json();
 
+  return this.mapStockStrategy(symbol,payload);
+}
+
+  async getStockDetail(symbol) {
+    const response=await fetch(`${this.baseUrl}/stock/detail-analysis?symbol=${encodeURIComponent(symbol)}`);
+    if(!response.ok)throw Error(`상세 분석 API 오류 (${response.status}). 자동으로 다른 뉴스 경로를 조회하지 않습니다.`);
+    const payload=await response.json();
+    if(payload.symbol!==symbol || typeof payload.newsSnapshotId!=='string' || !Array.isArray(payload.news))
+      throw Error('상세 분석 응답의 종목·뉴스 묶음을 확인할 수 없습니다.');
+    return {news:payload.news,newsSnapshotId:payload.newsSnapshotId,newsReceivedAt:payload.newsReceivedAt,
+      newsStatus:payload.newsStatus,strategy:this.mapStockStrategy(symbol,payload)};
+  }
+
+  mapStockStrategy(symbol,payload) {
   const strategy =
     payload?.strategy || {};
 
@@ -217,6 +231,9 @@ class RealStockBackendService {
       ?.status;
 
   return {
+    newsSnapshotId:payload?.newsSnapshotId ?? null,
+    newsReceivedAt:payload?.newsReceivedAt ?? null,
+    newsStatus:payload?.newsStatus ?? null,
     decisionRole: strategy?.decisionRole ?? null,
     dataMetadata: payload?.dataMetadata ?? null,
     // 기존 App.jsx와 호환
@@ -410,12 +427,14 @@ recentLow20:
   };
 }
 
-  async getAIAnalysis(symbol) {
+  async getAIAnalysis(symbol,newsSnapshotId) {
     const response = await fetch(
-      `${this.baseUrl}/stock/ai-analysis?symbol=${encodeURIComponent(symbol)}`
+      `${this.baseUrl}/stock/ai-analysis?symbol=${encodeURIComponent(symbol)}&newsSnapshotId=${encodeURIComponent(newsSnapshotId)}`
     );
-    if (!response.ok) throw new Error(`AI 분석 API 오류 (${response.status})`);
-    return response.json();
+    const body=await response.json();
+    if (!response.ok) throw new Error(body.message||body.error||`AI 분석 API 오류 (${response.status})`);
+    if(body.symbol!==symbol || body.newsSnapshotId!==newsSnapshotId)throw Error('AI 해설의 종목·뉴스 묶음이 일치하지 않습니다.');
+    return body;
   }
 
   async historyRead(path) {
@@ -491,6 +510,10 @@ export default function App() {
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const detailRequestRef=useRef(0);
+  const aiRequestRef=useRef(0);
+  const detailSnapshotRef=useRef(null);
+  const aiPendingRef=useRef(false);
 
   const [recommendationRun,setRecommendationRun]=useState({data:null,loading:false,error:null,ai:null,aiLoading:false,aiError:null});
   const {data:recommendationData,loading:recommendationLoading,error:recommendationError,
@@ -531,48 +554,62 @@ export default function App() {
       if (refresh) setIsRefreshing(true);
       else setLoading(true);
 
+      const request=++detailRequestRef.current;
+      ++aiRequestRef.current;
+      aiPendingRef.current=false;
+      detailSnapshotRef.current=null;
+      setAiLoading(false);
+      setAiError(null);
+      setAiAnalysis(null);
+      setNewsList([]);
+      setStrategyData(null);
       setErrorMsg(null);
 
       try {
-        const [quote, chartResult, news, strategy] = await Promise.all([
+        const [quote, chartResult, detail] = await Promise.all([
           backendService.getStockQuote(symbol),
           backendService.getStockChart(symbol, timeframe),
-          backendService.getStockNews(name || symbol),
-          backendService.getStockStrategy(symbol)
+          backendService.getStockDetail(symbol)
         ]);
 
+        if(request!==detailRequestRef.current)return;
+        detailSnapshotRef.current={symbol,id:detail.newsSnapshotId};
         setQuoteData(quote);
         setChartData(chartResult.items);
         setChartSupported(chartResult.supported);
-        setNewsList(news);
-        setStrategyData(strategy);
+        setNewsList(detail.news);
+        setStrategyData(detail.strategy);
 
         setActiveSymbol(symbol);
         setActiveName(quote?.stockName || name || symbol);
         setSearchQuery(quote?.stockName || name || symbol);
       } catch (error) {
         console.error(error);
-        setErrorMsg(error?.message || '실제 데이터를 불러오지 못했습니다.');
+        if(request===detailRequestRef.current)setErrorMsg(error?.message || '실제 데이터를 불러오지 못했습니다.');
       } finally {
-        setLoading(false);
-        setIsRefreshing(false);
+        if(request===detailRequestRef.current){setLoading(false);setIsRefreshing(false);}
       }
 
-      setAiLoading(true);
-      setAiError(null);
-      setAiAnalysis(null);
-      try {
-        const aiResult = await backendService.getAIAnalysis(symbol);
-        setAiAnalysis(aiResult);
-      } catch (aiErr) {
-        console.error('AI Analysis Error:', aiErr);
-        setAiError(aiErr?.message || 'AI 분석을 일시적으로 사용할 수 없습니다.');
-      } finally {
-        setAiLoading(false);
-      }
     },
     [backendService]
   );
+
+  const requestAIAnalysis = async () => {
+    const snapshot=detailSnapshotRef.current;
+    if(!snapshot || snapshot.symbol!==activeSymbol || loading || aiPendingRef.current)return;
+    const request=++aiRequestRef.current;
+    aiPendingRef.current=true;
+    setAiLoading(true);
+    setAiError(null);
+    try{
+      const result=await backendService.getAIAnalysis(snapshot.symbol,snapshot.id);
+      if(request===aiRequestRef.current && detailSnapshotRef.current===snapshot)setAiAnalysis(result);
+    }catch(error){
+      if(request===aiRequestRef.current)setAiError(error.message||'AI 해설을 가져오지 못했습니다.');
+    }finally{
+      if(request===aiRequestRef.current){aiPendingRef.current=false;setAiLoading(false);}
+    }
+  };
 
   useEffect(() => {
     if(recommendationMode==='legacy50')loadRealStockData('005930', '삼성전자', '1M');
@@ -1978,6 +2015,11 @@ export default function App() {
                 )}
               </div>
 
+              <button type="button" onClick={requestAIAnalysis} disabled={aiLoading||!strategyData?.newsSnapshotId}
+                className="px-4 py-2 rounded-lg bg-emerald-700 text-white text-sm disabled:opacity-50">
+                {aiLoading?'AI 해설 요청 중…':'AI 해설 보기'}
+              </button>
+              <p className="text-xs text-slate-400">버튼을 누를 때만 Gemini 해설을 요청합니다. 상세 분석 시 조회한 뉴스 묶음을 사용하며, 만료 시 자동 재조회하지 않습니다.</p>
               {aiLoading ? (
                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-8 text-center space-y-3">
                   <div className="w-6 h-6 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin mx-auto" />
@@ -2131,7 +2173,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-6 text-center text-xs text-slate-500">
-                  AI 분석 데이터가 없습니다.
+                  AI 해설 미요청 · 종목 검색만으로 AI를 실행하지 않습니다.
                 </div>
               )}
             </section>
@@ -2260,7 +2302,7 @@ export default function App() {
                   <Newspaper className="w-4 h-4 text-emerald-400" />
                   {quoteData?.stockName || activeName} 최신 뉴스
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">백엔드에서 실제 조회된 기사만 표시합니다.</p>
+                <p className="text-xs text-slate-400 mt-0.5">현재 상세 분석 시 조회한 뉴스입니다. 제공처 표기 시각과 최신성·완전성은 구분합니다.</p>
               </div>
               <span className="text-xs text-slate-400 font-mono">총 {newsList.length}건</span>
             </div>
@@ -2302,7 +2344,7 @@ export default function App() {
               </div>
             ) : (
               <div className="bg-slate-950/50 border border-slate-800 rounded-xl p-8 text-center text-xs text-slate-500">
-                실제 수집된 최신 뉴스가 없습니다.
+                {strategyData?.newsStatus==='LOOKUP_FAILED'?'뉴스 조회 실패 · 뉴스 조건 미확인':'조회된 뉴스 없음 · 뉴스 조건 미확인'}
               </div>
             )}
           </section>

@@ -76,9 +76,9 @@ test('TEST_ONLY recommendation stock selection reuses exactly the existing expli
       return [states[index],value=>{states[index]=value;}];},useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn,useRef:()=>({current:0})};
   const fetch=async value=>{
     const url=new URL(value,'http://127.0.0.1');calls.push(url.pathname);
-    assert.ok(['/api/stock/quote','/api/stock/chart','/api/stock/news','/api/kis/trading-strategy-test','/api/stock/ai-analysis','/api/stock/recommendation-mode'].includes(url.pathname));
+    assert.ok(['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis','/api/stock/recommendation-mode'].includes(url.pathname));
     return {ok:true,json:async()=>url.pathname.endsWith('/quote')?{stockName:'TEST_ONLY',symbol:'000001',currentPrice:100}:
-      url.pathname.endsWith('/trading-strategy-test')?{strategy:strategy(),chart:{},dataPoints:30}:{chart:[],news:[],universeMode:'expanded500'}};
+      url.pathname.endsWith('/detail-analysis')?{symbol:'000001',newsSnapshotId:'TEST_ONLY_SNAPSHOT',news:[],strategy:strategy(),chart:{},dataPoints:30}:{chart:[],news:[],universeMode:'expanded500'}};
   };
   const tree=loader(react,{fetch})(appFile).default();
   const expanded=visit(tree,node=>node.type?.name==='ExpandedRecommendation');assert.ok(expanded,'expanded main mounted');
@@ -87,7 +87,7 @@ test('TEST_ONLY recommendation stock selection reuses exactly the existing expli
   effects.forEach(fn=>fn());await new Promise(setImmediate);
   assert.deepEqual(calls,['/api/stock/recommendation-mode']);calls.length=0;
   expanded.props.onSelect({code:'000001',name:'TEST_ONLY'});await new Promise(setImmediate);
-  assert.deepEqual(calls,['/api/stock/quote','/api/stock/chart','/api/stock/news','/api/kis/trading-strategy-test','/api/stock/ai-analysis']);
+  assert.deepEqual(calls,['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
   assert.equal(states[bindings.indexOf('activeSymbol')],'000001');
   assert.doesNotMatch(source,/HoldingGuidance[^\n]*(?:quoteData|entryPrice=)/);
   assert.match(source,/<HoldingGuidance key=\{activeSymbol\} symbol=\{activeSymbol\} strategy=\{strategyData\}/);
