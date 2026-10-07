@@ -68,7 +68,7 @@ test('TEST_ONLY history and outcome UI show quote and daily-close baseline separ
     scanCompletedAt:'2026-10-02T00:01:00Z',stats:{},all:[{symbol:'000001',stockName:'TEST_ONLY',grade:'WATCH_CANDIDATE',score:4,currentPrice:105,
       outcomeBaseline:{price:100,businessDate:'2026-10-02'}}],fastResults:[],failures:[]};
   const history=renderToStaticMarkup(React.createElement(ExpandedHistoryRecord,{detail,service}));
-  assert.match(history,/당시 조회가 105/);assert.match(history,/성과 추적 기준: 2026-10-02 종가 100/);
+  assert.match(history,/분석 당시 조회가<\/dt><dd>105원/);assert.match(history,/성과 추적 기준: 2026-10-02 종가 100/);
   const without={...detail,all:[{...detail.all[0],outcomeBaseline:undefined}]};
   assert.match(renderToStaticMarkup(React.createElement(ExpandedHistoryRecord,{detail:without,service})),/성과 추적 기준: 저장된 기준 자료 없음/);
 });

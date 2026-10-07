@@ -17,6 +17,15 @@ function renderStatus(status,stats){
   vm.runInNewContext(code,{module:component,exports:component.exports,require:name=>{
     if(name==='react')return stub;
     if(name==='./expanded-recommendation.css')return {};
+    if(name==='./ExpandedCandidateCard.jsx'){
+      const card={exports:{}};
+      vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/ExpandedCandidateCard.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code,
+        {module:card,exports:card.exports,URL,require:name=>{
+          if(name==='react')return React;if(name==='./expanded-recommendation.css')return {};
+          throw Error('TEST_ONLY_UNEXPECTED_IMPORT');
+        }});
+      return card.exports;
+    }
     throw Error('TEST_ONLY_UNEXPECTED_IMPORT');
   },Intl,Date,Set,Number});
   const service=new Proxy({},{get:()=>()=>{calls++;throw Error('TEST_ONLY_PROVIDER_FORBIDDEN');}});

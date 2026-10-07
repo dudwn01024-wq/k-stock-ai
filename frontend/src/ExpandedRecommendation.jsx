@@ -1,11 +1,11 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
+import ExpandedCandidateCard from './ExpandedCandidateCard.jsx';
 import './expanded-recommendation.css';
 
 const terminal=new Set(['COMPLETED','PARTIAL','FAILED','INTERRUPTED_UNKNOWN']);
 const clock=value=>value&&Number.isFinite(Date.parse(value))
   ?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value))
   :'미확인';
-const grade={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보',EXCLUDED:'후보 제외'};
 const number=value=>Number.isFinite(value)?value.toLocaleString('ko-KR'):'미확인';
 
 export function expandedRunStatusLabel(run){
@@ -105,9 +105,7 @@ export default function ExpandedRecommendation({service,onHistory,aiEnabled=fals
         <span>최종 후보 <strong>{number(stats?.finalCandidateCount??actual.length)}</strong></span>
       </div>
       {actual.length?<ol className="expanded-candidates">{actual.map(item=><li key={item.symbol}>
-        <strong>{item.stockName||item.symbol} <small>{item.symbol}</small></strong>
-        <span>{grade[item.grade]||item.grade} · 기존 추천 점수 {number(item.score)} / 4</span>
-        <span>통과 {item.passedConditions?.join(' · ')||'없음'} · 미확인 {item.unknownConditions?.join(' · ')||'없음'}</span>
+        <ExpandedCandidateCard item={item}/>
       </li>)}</ol>:<p className="home-state">저장된 최종 후보가 없습니다.</p>}
       <p className="home-warning">1단계에서 정밀분석 대상이 아닌 종목은 정책상 탈락으로 판정하지 않았습니다. 자료 부족·조회 실패와 조건 미충족은 별도 상태입니다.</p>
     </div>}

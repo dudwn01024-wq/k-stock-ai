@@ -1,5 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import CandidateOverview from './CandidateOverview.jsx';
+import ExpandedCandidateCard from './ExpandedCandidateCard.jsx';
 import RecommendationOutcomes from './RecommendationOutcomes.jsx';
 import {normalizeCandidates} from './utils/recommendationRun.js';
 import {createHistoryLoader,historyAIStatus,historyChangeStatus} from './utils/recommendationHistory.js';
@@ -61,11 +62,9 @@ export function ExpandedHistoryRecord({detail,service}){
       {detail.ai.ai.map(item=><li key={item.symbol}><strong>{item.stockName||item.symbol} · {item.symbol}</strong><p>{item.summary||'설명 없음'}</p></li>)}
     </ul></details>}
     {selected.length?<ol className="expanded-candidates">{selected.map(x=><li key={x.symbol}>
-      <strong>{x.stockName||x.symbol} · {x.symbol}</strong>
-      <span>점수 {number(x.score)}/4 · {grade(x.grade)}</span>
-      <span>통과 {x.passedConditions?.join(' · ')||'없음'} · 미충족 {x.failedConditions?.join(' · ')||'없음'} · 미확인 {x.unknownConditions?.join(' · ')||'없음'}</span>
-      <p>당시 조회가 {number(x.currentPrice)} · 자료 기준일 {x.dataMetadata?.price?.sourceBusinessDate||'미확인'}</p>
-      <p>성과 추적 기준: {x.outcomeBaseline?x.outcomeBaseline.businessDate+' 종가 '+number(x.outcomeBaseline.price):'저장된 기준 자료 없음'}</p>
+      <ExpandedCandidateCard item={x}>
+        <p>성과 추적 기준: {x.outcomeBaseline?x.outcomeBaseline.businessDate+' 종가 '+number(x.outcomeBaseline.price):'저장된 기준 자료 없음'}</p>
+      </ExpandedCandidateCard>
     </li>)}</ol>:<p>당시 저장된 최종 후보가 없습니다.</p>}
     {detail.failures?.length>0&&<p className="home-warning">2단계 조회 실패: {detail.failures.map(x=>x.symbol).join(', ')}. 정책상 탈락으로 해석하지 않습니다.</p>}
     <details><summary>1단계 전체 상태 펼쳐보기</summary><ul className="history-runs">
