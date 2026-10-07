@@ -107,8 +107,8 @@ test('TEST_ONLY dry run shares exact execute order, preserves plans and makes no
   const f=fixture(t),before=bytes(f.root),calls=[];
   const dry=await collectRecommendationOutcomes({...f,maxRequests:1,fetchDaily:()=>assert.fail('DRY_RUN_PROVIDER_CALL')});
   assert.equal(dry.mode,'DRY_RUN');assert.equal(dry.requests,0);assert.equal(dry.nextRequests.length,1);
-  assert.deepEqual(dry.plans,[{scanId:f.scanId,symbol:symbol(0),horizons:['T1','T5','T20']},
-    {scanId:f.scanId,symbol:symbol(1),horizons:['T1','T5','T20']}]);assert.deepEqual(bytes(f.root),before);
+  assert.deepEqual(dry.plans,[{scanId:f.scanId,symbol:symbol(0),horizons:['T1','T5','T20'],baselineStatus:'FINALIZED'},
+    {scanId:f.scanId,symbol:symbol(1),horizons:['T1','T5','T20'],baselineStatus:'FINALIZED'}]);assert.deepEqual(bytes(f.root),before);
   const actual=await collectRecommendationOutcomes({...f,execute:true,maxRequests:1,clock,fetchDaily:async s=>{calls.push(s);return daily();}});
   assert.deepEqual(actual.nextRequests,dry.nextRequests);assert.deepEqual(calls,dry.nextRequests.map(x=>x.symbol));
 });

@@ -310,5 +310,5 @@ test('TEST_ONLY prior expanded policy history stays readable and immutable after
   const newer=expanded('TEST-ONLY-NEW-VOLUME-POLICY');store.saveExpanded(newer);
   for(const [name,content] of before)assert.equal(fs.readFileSync(path.join(root,name),'utf8'),content);
   assert.equal(store.detail(old.scanId).policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V1');
-  assert.equal(store.detail(newer.scanId).policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V2');
+  assert.equal(store.detail(newer.scanId).policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V3');
 });

@@ -20,15 +20,16 @@ async function collectRecommendationOutcomes({history,outcomes,execute=false,max
   const plans=[],counts={},count=status=>{counts[status]=(counts[status]??0)+1;};
   for(const record of records){
     for(const source of sourceCandidates(record)){
-      const horizons=[];
+      const horizons=[];let resolvedBaseline=null;
       for(const horizon of Object.keys(HORIZONS)){
         try{
-          if(outcomes.read(source.scanId,source.symbol,horizon,source)){count('ALREADY_STORED');continue;}
-          if(!source.baselineReady){count('TRACKING_BLOCKED_NO_BASELINE');continue;}
+          const stored=outcomes.read(source.scanId,source.symbol,horizon,source);
+          if(stored){resolvedBaseline??=stored;count('ALREADY_STORED');continue;}
+          if(!source.baselineReady&&source.baselineStatus!=='PENDING_FINAL_CLOSE'){count('TRACKING_BLOCKED_NO_BASELINE');continue;}
           horizons.push(horizon);
         }catch{count('EXISTING_OUTCOME_HELD');}
       }
-      if(horizons.length)plans.push({source,horizons});
+      if(horizons.length)plans.push({source,horizons,resolvedBaseline});
     }
   }
   // Group before sorting: a symbol shared by several runs uses their earliest
@@ -43,7 +44,8 @@ async function collectRecommendationOutcomes({history,outcomes,execute=false,max
     .sort((a,b)=>HORIZONS[a.earliestMissingHorizon]-HORIZONS[b.earliestMissingHorizon]||a.order-b.order);
   const report={mode:execute?'EXECUTE':'DRY_RUN',status:'COMPLETED',scanCount:records.length,
     eligibleSymbols:requests.length,targetHorizons:plans.reduce((n,x)=>n+x.horizons.length,0),
-    maxRequests,requests:0,counts,plans:plans.map(x=>({scanId:x.source.scanId,symbol:x.source.symbol,horizons:x.horizons})),
+    maxRequests,requests:0,counts,plans:plans.map(x=>({scanId:x.source.scanId,symbol:x.source.symbol,horizons:x.horizons,
+      baselineStatus:x.resolvedBaseline?'FINALIZED':x.source.baselineStatus})),
     nextRequests:requests.slice(0,maxRequests).map(({symbol,earliestMissingHorizon})=>({symbol,earliestMissingHorizon}))};
   if(!execute)return report;
   if(outcomes.status().status!=='CONFIGURED'||outcomes.status().outcomeCapacityStatus==='UNKNOWN')throw problem('OUTCOME_STORAGE_UNAVAILABLE');
@@ -57,7 +59,7 @@ async function collectRecommendationOutcomes({history,outcomes,execute=false,max
     try{rows=await read(symbol);}catch{for(const plan of symbolPlans)for(const unused of plan.horizons)count('LOOKUP_RETRY_REQUIRED');report.status='PARTIAL';continue;}
     const collectedAt=clock().toISOString();
     for(const plan of symbolPlans){
-      for(const result of calculateOutcomes(plan.source,rows,{collectedAt}).filter(x=>plan.horizons.includes(x.horizon))){
+      for(const result of calculateOutcomes(plan.source,rows,{collectedAt,resolvedBaseline:plan.resolvedBaseline}).filter(x=>plan.horizons.includes(x.horizon))){
         if(result.status!=='READY'){count(result.status);if(result.status==='LOOKUP_RETRY_REQUIRED')report.status='PARTIAL';continue;}
         try{count(outcomes.save(result).status);}catch{count('STORAGE_WRITE_REQUIRED');report.status='PARTIAL';}
       }

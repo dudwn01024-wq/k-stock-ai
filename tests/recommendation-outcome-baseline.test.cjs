@@ -7,7 +7,8 @@ const {normalizeOutcomeBaseline,attachOutcomeBaseline}=require('../services/reco
 const {createRecommendationHistory,hash}=require('../services/recommendationHistory');
 const {createExpandedRecommendationRuns}=require('../services/expandedRecommendationRuns');
 const {sourceCandidates,calculateOutcomes,createRecommendationOutcomes,registerOutcomeRoutes}=require('../services/recommendationOutcomes');
-const receivedAt='2026-10-03T06:31:00.000Z';
+// Existing finalized-baseline tests observe the saved row on a later KST date.
+const receivedAt='2026-10-04T00:31:00.000Z';
 const daily=()=>Array.from({length:21},(_,i)=>({localTradedAt:new Date(Date.UTC(2026,9,3-i)).toISOString().slice(0,10),
   closePrice:String(100-i),highPrice:String(101-i),lowPrice:String(99-i),volume:'100'}));
 const fast=symbol=>calculateFastScreen({symbol},daily(),{receivedAt});

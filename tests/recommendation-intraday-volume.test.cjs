@@ -87,8 +87,7 @@ for(const [time,volume,passed,status] of [[at('10:30'),1200000,true,'INTRADAY_CO
 test('TEST_ONLY legacy screening and individual ENTRY_GATE policy are unchanged',async()=>{
   const f=backend(),r=await f.api.buildRecommendationResult({symbol:'000001'});
   assert.equal(r.strategy.volumePassed,false);assert.equal(r.pendingConditions,undefined);assert.equal(r.strategy.volumeAssessment,undefined);
-  for(const file of ['services/tradingStrategy.js','services/chartAnalysis.js','services/recommendationOutcomeBaseline.js',
-    'services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js']){
+  for(const file of ['services/tradingStrategy.js','services/chartAnalysis.js']){
     const original=execFileSync('git',['show','12dbb24d7b9cb8f5ced10ca2f41a3fb538764ced:'+file],{encoding:'utf8'});
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),file);
   }
@@ -124,11 +123,11 @@ test('TEST_ONLY 500 pending rows still select 40, persist pending metadata, and 
   assert.equal(run.status,'COMPLETED');assert.equal(run.stats.deepTargetCount,40);
   assert.deepEqual([fastCalls,deepCalls,aiCalls],[500,40,0]);assert.equal(run.fastResults.filter(x=>x.status==='NOT_DEEP_REVIEWED').length,460);
   assert.deepEqual(run.recommendations.map(x=>x.symbol),stocks.slice(0,40).map(x=>x.symbol));
-  assert.equal(run.history.status,'STORED');assert.equal(run.policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V2');
+  assert.equal(run.history.status,'STORED');assert.equal(run.policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V3');
   const saved=history.detail(run.runId);assert.deepEqual(saved.all[0].pendingConditions,['거래량']);
   assert.equal(saved.all[0].strategy.volumeAssessment.status,'INTRADAY_PENDING');assert.equal(saved.fastResults[0].volumeAssessment.status,'INTRADAY_PENDING');
   const before=fs.readdirSync(root).map(n=>[n,fs.readFileSync(path.join(root,n),'utf8')]);
   createRecommendationHistory({root,testOnly:true}).detail(run.runId);store.get(run.runId);
   assert.deepEqual(fs.readdirSync(root).map(n=>[n,fs.readFileSync(path.join(root,n),'utf8')]),before);
-  assert.equal(saved.schemaVersion,'RECOMMENDATION_HISTORY_V2');assert.equal(EXPANDED_POLICY_VERSION,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V2');
+  assert.equal(saved.schemaVersion,'RECOMMENDATION_HISTORY_V2');assert.equal(EXPANDED_POLICY_VERSION,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V3');
 });

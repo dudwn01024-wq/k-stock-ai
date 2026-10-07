@@ -5,7 +5,7 @@ const {randomUUID}=require('node:crypto');
 const {hash,EXPANDED_HISTORY_VERSION}=require('./recommendationHistory');
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {sourceDate,dataFreshness}=require('./dataFreshness');
-const {normalizeOutcomeBaseline}=require('./recommendationOutcomeBaseline');
+const {normalizeOutcomeBaseline,isoTime,observedKstDate}=require('./recommendationOutcomeBaseline');
 const VERSION='RECOMMENDATION_OUTCOME_V1';
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
 const GRADES=Object.freeze(['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE']);
@@ -13,7 +13,7 @@ const HORIZONS=Object.freeze({T1:1,T5:5,T20:20});
 const MAX_RECORDS=100*40*3,MAX_BYTES=64*1024*1024,MAX_FILE_BYTES=8192;
 const validId=v=>typeof v==='string'&&/^[A-Za-z0-9-]{1,80}$/.test(v);
 const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
-const dayAt=v=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(v));
+const dayAt=observedKstDate;
 const positive=v=>typeof v==='number'&&Number.isFinite(v)&&v>0;
 function sourceCandidates(record){
   if(record?.schemaVersion!==EXPANDED_HISTORY_VERSION||!validId(record.scanId)||!Array.isArray(record.all)||!record.recordFingerprint)
@@ -24,15 +24,17 @@ function sourceCandidates(record){
       currentPrice:typeof x.currentPrice==='number'&&Number.isFinite(x.currentPrice)?x.currentPrice:null,
       baselinePrice:baseline?.price??null,baselineBusinessDate:baseline?.businessDate??null,
       baselineProvider:baseline?.provider??null,baselineReceivedAt:baseline?.receivedAt??null,
-      baselineSourceTimestamp:baseline?.sourceTimestamp??null,baselineReady:Boolean(baseline),
+      baselineSourceTimestamp:baseline?.sourceTimestamp??null,baselineReady:baseline?.kind==='DAILY_CLOSE',
+      baselineStatus:baseline?.kind==='DAILY_CLOSE_PENDING'?'PENDING_FINAL_CLOSE':baseline?'FINALIZED':'UNAVAILABLE',
       sourceRecordFingerprint:record.recordFingerprint,testOnly:record.testOnly===true};
   });
 }
-function calculateOutcomes(source,rawRows,{collectedAt=new Date().toISOString()}={}){
+function calculateOutcomes(source,rawRows,{collectedAt=new Date().toISOString(),resolvedBaseline=null}={}){
   const pending=(status,reason)=>Object.keys(HORIZONS).map(horizon=>({...source,horizon,status,reason,
     targetBusinessDate:null,closePrice:null,returnPct:null,provider:null,collectedAt:null}));
-  if(!source.baselineReady)return pending('TRACKING_BLOCKED_NO_BASELINE','SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE');
-  if(!Number.isFinite(Date.parse(collectedAt))||!Array.isArray(rawRows)||!rawRows.length||rawRows.length>30)
+  const awaitingBaseline=source.baselineStatus==='PENDING_FINAL_CLOSE';
+  if(!source.baselineReady&&!awaitingBaseline)return pending('TRACKING_BLOCKED_NO_BASELINE','SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE');
+  if(!isoTime(collectedAt)||!Array.isArray(rawRows)||!rawRows.length||rawRows.length>30)
     return pending('LOOKUP_RETRY_REQUIRED','INVALID_DAILY_WINDOW');
   const rows=[],seen=new Set();
   for(const row of rawRows){
@@ -45,15 +47,32 @@ function calculateOutcomes(source,rawRows,{collectedAt=new Date().toISOString()}
     seen.add(date);rows.push({date,close});
   }
   rows.sort((a,b)=>a.date.localeCompare(b.date));
+  if(awaitingBaseline&&source.baselineBusinessDate>=dayAt(collectedAt))
+    return pending('BASELINE_PENDING_FINAL_CLOSE','BASELINE_DAY_NOT_FINALIZED');
   const index=rows.findIndex(x=>x.date===source.baselineBusinessDate);
   if(index<0)return pending('BACKFILL_WINDOW_UNAVAILABLE','BASELINE_ROW_NOT_IN_30_ROW_WINDOW');
+  let effective=source;
+  if(awaitingBaseline){
+    // A previously published horizon fixes the baseline for every later horizon.
+    // Never replace that identity with a revised provider close.
+    if(resolvedBaseline){
+      for(const key of ['scanId','symbol','baselineBusinessDate','baselineProvider','sourceRecordFingerprint'])
+        if(resolvedBaseline[key]!==source[key])throw error('OUTCOME_SOURCE_MISMATCH',400);
+      if(!positive(resolvedBaseline.baselinePrice)||resolvedBaseline.baselineFinality!=='PROVIDER_DAILY_CLOSE'
+        ||!isoTime(resolvedBaseline.baselineResolvedAt)||source.baselineBusinessDate>=dayAt(resolvedBaseline.baselineResolvedAt)
+        ||Date.parse(resolvedBaseline.baselineResolvedAt)>Date.parse(collectedAt))throw error('OUTCOME_SOURCE_MISMATCH',400);
+    }
+    effective={...source,baselineReady:true,baselineStatus:'FINALIZED',
+      baselinePrice:resolvedBaseline?.baselinePrice??rows[index].close,baselineFinality:'PROVIDER_DAILY_CLOSE',
+      baselineResolvedAt:resolvedBaseline?.baselineResolvedAt??collectedAt};
+  }
   // Never call a current-day/provisional or future daily row a finalized outcome.
   const completed=rows.slice(index).filter(x=>x.date<dayAt(collectedAt));
   return Object.entries(HORIZONS).map(([horizon,n])=>{
     const target=completed[n];
-    if(!target)return {...pending('PENDING','HORIZON_NOT_OBSERVED')[0],horizon};
-    return {...source,horizon,status:'READY',reason:null,targetBusinessDate:target.date,closePrice:target.close,
-      returnPct:((target.close-source.baselinePrice)/source.baselinePrice)*100,provider:PROVIDER,collectedAt,
+    if(!target)return {...pending('PENDING','HORIZON_NOT_OBSERVED')[0],...effective,horizon};
+    return {...effective,horizon,status:'READY',reason:null,targetBusinessDate:target.date,closePrice:target.close,
+      returnPct:((target.close-effective.baselinePrice)/effective.baselinePrice)*100,provider:PROVIDER,collectedAt,
       observedTradingDates:completed.slice(0,n+1).map(x=>x.date),priceFinality:'PROVIDER_DAILY_CLOSE'};
   });
 }
@@ -61,7 +80,7 @@ function summarize(candidates){
   return GRADES.flatMap(grade=>Object.keys(HORIZONS).map(horizon=>{
     const values=candidates.filter(x=>x.originalGrade===grade).map(x=>x.horizons.find(y=>y.horizon===horizon));
     const ready=values.filter(x=>x?.status==='READY').map(x=>x.returnPct).sort((a,b)=>a-b),n=ready.length;
-    return {grade,horizon,observedCount:n,pendingCount:values.filter(x=>['PENDING','NOT_COLLECTED'].includes(x?.status)).length,
+    return {grade,horizon,observedCount:n,pendingCount:values.filter(x=>['PENDING','NOT_COLLECTED','BASELINE_PENDING_FINAL_CLOSE'].includes(x?.status)).length,
       blockedCount:values.filter(x=>x?.status==='TRACKING_BLOCKED_NO_BASELINE').length,
       unavailableCount:values.filter(x=>['LOOKUP_RETRY_REQUIRED','BACKFILL_WINDOW_UNAVAILABLE'].includes(x?.status)).length,
       averageReturnPct:n?ready.reduce((a,b)=>a+b,0)/n:null,
@@ -117,17 +136,25 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
     return candidate;
   }
   function normalize(value,current){
-    if(!current.baselineReady||value?.status!=='READY'||!HORIZONS[value.horizon])throw error('OUTCOME_RECORD_INVALID');
-    for(const key of ['scanId','symbol','stockName','originalGrade','baselinePrice','baselineBusinessDate','baselineProvider','baselineReceivedAt','baselineSourceTimestamp','currentPrice','sourceRecordFingerprint'])
+    const pending=current.baselineStatus==='PENDING_FINAL_CLOSE';
+    if((!current.baselineReady&&!pending)||value?.status!=='READY'||!HORIZONS[value.horizon])throw error('OUTCOME_RECORD_INVALID');
+    for(const key of ['scanId','symbol','stockName','originalGrade','baselineBusinessDate','baselineProvider','baselineReceivedAt','baselineSourceTimestamp','currentPrice','sourceRecordFingerprint',...(pending?[]:['baselinePrice'])])
       if(value[key]!==current[key])throw error('OUTCOME_SOURCE_MISMATCH',400);
+    if(pending&&(!positive(value.baselinePrice)||value.baselineFinality!=='PROVIDER_DAILY_CLOSE'
+      ||!isoTime(value.baselineResolvedAt)||current.baselineBusinessDate>=dayAt(value.baselineResolvedAt)
+      ||!isoTime(value.collectedAt)||Date.parse(value.baselineResolvedAt)>Date.parse(value.collectedAt)))
+      throw error('OUTCOME_SOURCE_MISMATCH',400);
+    const baselinePrice=pending?value.baselinePrice:current.baselinePrice;
     const dates=value.observedTradingDates,n=HORIZONS[value.horizon];
     if(value.testOnly!==testOnly||value.provider!==PROVIDER||!positive(value.closePrice)||!sourceDate(value.targetBusinessDate)
-      ||!Number.isFinite(Date.parse(value.collectedAt))||value.targetBusinessDate>=dayAt(value.collectedAt)
+      ||!isoTime(value.collectedAt)||value.targetBusinessDate>=dayAt(value.collectedAt)
       ||!Array.isArray(dates)||dates.length!==n+1||dates[0]!==current.baselineBusinessDate||dates[n]!==value.targetBusinessDate
       ||dates.some((d,i)=>sourceDate(d)!==d||(i>0&&d<=dates[i-1]))
-      ||value.returnPct!==((value.closePrice-current.baselinePrice)/current.baselinePrice)*100||!Number.isFinite(value.returnPct))
+      ||value.returnPct!==((value.closePrice-baselinePrice)/baselinePrice)*100||!Number.isFinite(value.returnPct))
       throw error('OUTCOME_RECORD_INVALID');
-    return {...current,horizon:value.horizon,status:'READY',targetBusinessDate:value.targetBusinessDate,
+    return {...current,...(pending?{baselinePrice,baselineReady:true,baselineStatus:'FINALIZED',
+      baselineFinality:'PROVIDER_DAILY_CLOSE',baselineResolvedAt:value.baselineResolvedAt}:{}),
+      horizon:value.horizon,status:'READY',targetBusinessDate:value.targetBusinessDate,
       closePrice:value.closePrice,returnPct:value.returnPct,provider:PROVIDER,collectedAt:value.collectedAt,
       observedTradingDates:[...dates],priceFinality:'PROVIDER_DAILY_CLOSE'};
   }
@@ -135,7 +162,7 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
     if(!validId(scanId)||!isNaverKrStockItemCode(symbol)||!HORIZONS[horizon])throw error('OUTCOME_ID_INVALID',400);
     return path.join(resolved,scanId,symbol,horizon+'.json');
   }
-  function read(scanId,symbol,horizon,current=source(scanId,symbol)){
+  function readOne(scanId,symbol,horizon,current){
     if(!configured||!fs.existsSync(resolved))return null;
     ensure();const filename=file(scanId,symbol,horizon),runDir=path.dirname(path.dirname(filename)),symbolDir=path.dirname(filename);
     if(!fs.existsSync(runDir))return null;directory(runDir);
@@ -148,6 +175,21 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
       return value;
     }catch(e){if(e.code==='ENOENT')return null;throw error(e.code?.startsWith('OUTCOME_')?e.code:'OUTCOME_RECORD_INVALID');}
   }
+  function assertSameBaseline(a,b){
+    for(const key of ['baselinePrice','baselineBusinessDate','baselineProvider','sourceRecordFingerprint'])
+      if(a[key]!==b[key])throw error('OUTCOME_SOURCE_MISMATCH',400);
+  }
+  function checkPeers(value,current){
+    for(const horizon of Object.keys(HORIZONS)){
+      const peer=readOne(value.scanId,value.symbol,horizon,current);
+      if(peer)assertSameBaseline(value,peer);
+    }
+  }
+  function read(scanId,symbol,horizon,current=source(scanId,symbol)){
+    const value=readOne(scanId,symbol,horizon,current);
+    if(value)checkPeers(value,current);
+    return value;
+  }
   function save(value){
     const current=source(value?.scanId,value?.symbol),payload=normalize(value,current);
     ensure(true);const lock=path.join(resolved,'.write.lock');let fd;
@@ -155,10 +197,12 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
     let temp;
     try{
       // Revalidate the immutable source inside the exclusive capacity/publication lock.
-      normalize(payload,source(payload.scanId,payload.symbol));
-      const old=read(payload.scanId,payload.symbol,payload.horizon);
+      const freshSource=source(payload.scanId,payload.symbol);
+      normalize(payload,freshSource);
+      checkPeers(payload,freshSource);
+      const old=read(payload.scanId,payload.symbol,payload.horizon,freshSource);
       if(old){
-        const semantic=v=>{const {collectedAt,...rest}=v;return rest;};
+        const semantic=v=>{const {collectedAt,baselineResolvedAt,...rest}=v;return rest;};
         if(hash(semantic(old))===hash(semantic(payload)))return {status:'ALREADY_STORED'};
         throw error('OUTCOME_DUPLICATE_CONFLICT',409);
       }
@@ -177,17 +221,25 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
   }
   function detail(scanId){
     const record=history.detail(scanId),sources=sourceCandidates(record);
-    const candidates=sources.map(current=>({
-      symbol:current.symbol,stockName:current.stockName,originalGrade:current.originalGrade,
-      currentPrice:current.currentPrice,baselinePrice:current.baselinePrice,baselineBusinessDate:current.baselineBusinessDate,
-      baselineProvider:current.baselineProvider,baselineReceivedAt:current.baselineReceivedAt,
-      horizons:Object.keys(HORIZONS).map(horizon=>{
-        let value=null,reason=null;try{value=read(scanId,current.symbol,horizon,current);}catch(e){reason=e.code;}
-        return value??{horizon,status:reason?'LOOKUP_RETRY_REQUIRED':current.baselineReady?'NOT_COLLECTED':'TRACKING_BLOCKED_NO_BASELINE',
-          reason:reason??(current.baselineReady?'COLLECTOR_NOT_EXECUTED':'SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE'),
-          targetBusinessDate:null,closePrice:null,returnPct:null,provider:null,collectedAt:null};
-      })
-    }));
+    const candidates=sources.map(current=>{
+      const saved=Object.keys(HORIZONS).map(horizon=>{
+        try{return {horizon,value:read(scanId,current.symbol,horizon,current),reason:null};}
+        catch(e){return {horizon,value:null,reason:e.code};}
+      });
+      const resolved=saved.find(x=>x.value)?.value;
+      const baseline=resolved??current;
+      const baselineStatus=resolved?'FINALIZED':current.baselineStatus;
+      return {symbol:current.symbol,stockName:current.stockName,originalGrade:current.originalGrade,
+        currentPrice:current.currentPrice,baselinePrice:baseline.baselinePrice,baselineBusinessDate:current.baselineBusinessDate,
+        baselineProvider:current.baselineProvider,baselineReceivedAt:current.baselineReceivedAt,baselineStatus,
+        ...(resolved?.baselineResolvedAt?{baselineResolvedAt:resolved.baselineResolvedAt,baselineFinality:resolved.baselineFinality}:{}),
+        horizons:saved.map(({horizon,value,reason})=>value??{
+          horizon,status:reason?'LOOKUP_RETRY_REQUIRED':baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_PENDING_FINAL_CLOSE':
+            baselineStatus==='FINALIZED'?'NOT_COLLECTED':'TRACKING_BLOCKED_NO_BASELINE',
+          reason:reason??(baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_DAY_NOT_FINALIZED':
+            baselineStatus==='FINALIZED'?'COLLECTOR_NOT_EXECUTED':'SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE'),
+          targetBusinessDate:null,closePrice:null,returnPct:null,provider:null,collectedAt:null})};
+    });
     const states=candidates.flatMap(x=>x.horizons.map(x=>x.status));
     return {schemaVersion:VERSION,scanId,testOnly:record.testOnly===true,
       trackingStatus:!states.length?'NO_CANDIDATES':states.every(x=>x==='READY')?'READY':states.some(x=>x==='READY')?'PARTIAL':

@@ -7,7 +7,8 @@ const {normalizeOfficialStockTypeEvidence,hasRequiredOfficialStockType}=require(
 const fs=require('node:fs'),path=require('node:path');
 const {createHash,randomUUID}=require('node:crypto');
 const HISTORY_VERSION='RECOMMENDATION_HISTORY_V1',POLICY_VERSION='PUBLIC_SCREENING_4_CONDITIONS_V1',PROMPT_VERSION='PUBLIC_RECOMMENDATION_PROMPT_V1';
-const EXPANDED_HISTORY_VERSION='RECOMMENDATION_HISTORY_V2',EXPANDED_POLICY_VERSION='PUBLIC_SCREENING_EXPANDED_2_STAGE_V2';
+// V3 changes outcome baseline provenance, not recommendation scores/ranking. Prevent V2 cooldown reuse.
+const EXPANDED_HISTORY_VERSION='RECOMMENDATION_HISTORY_V2',EXPANDED_POLICY_VERSION='PUBLIC_SCREENING_EXPANDED_2_STAGE_V3';
 const MAX_RUNS=100,MAX_FILE_BYTES=1024*1024,MAX_TOTAL_BYTES=400*1024*1024;
 const hash=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
