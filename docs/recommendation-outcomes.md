@@ -29,6 +29,8 @@ A separately authorized real collection may use:
 
 The hard request cap is 40, configurable only downward. Failed attempts consume it; no retry or pagination. Each symbol is fetched once across all selected runs via the existing Naver 30-row page=1 adapter. Already stored horizons and blocked baselines require no requests. No raw provider responses, credentials or headers are retained. CLI output contains aggregate statuses and public IDs, not price/news dumps.
 
+Requests prioritize each symbol's earliest missing horizon across all selected runs: T1, then T5, then T20. Ties retain the existing first-seen candidate order. A single response still evaluates every missing horizon for that symbol. DRY_RUN and EXECUTE reports include nextRequests (at most maxRequests public symbols and their earliestMissingHorizon) without changing plans. Horizons not queried because of the cap count as REQUEST_CAP_REACHED only in that report; no outcome file is created and public GET remains NOT_COLLECTED. LOOKUP_RETRY_REQUIRED is reserved for an actual attempted lookup failure or invalid lookup result.
+
 Public V2 history detail displays stored prices/changes and sample n, including explicit zero versus unavailable values. Small samples are not generalized. This is not investment performance, order permission or trading P&L.
 
 ## Offline validation

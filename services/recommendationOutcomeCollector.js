@@ -31,21 +31,32 @@ async function collectRecommendationOutcomes({history,outcomes,execute=false,max
       if(horizons.length)plans.push({source,horizons});
     }
   }
-  const symbols=[...new Set(plans.map(x=>x.source.symbol))];
+  // Group before sorting: a symbol shared by several runs uses their earliest
+  // missing horizon, with first-seen plan order as the deterministic tie-break.
+  const bySymbol=new Map();
+  for(const plan of plans){
+    if(!bySymbol.has(plan.source.symbol))bySymbol.set(plan.source.symbol,[]);
+    bySymbol.get(plan.source.symbol).push(plan);
+  }
+  const requests=[...bySymbol].map(([symbol,symbolPlans],order)=>({symbol,order,
+    earliestMissingHorizon:symbolPlans.flatMap(x=>x.horizons).reduce((a,b)=>HORIZONS[a]<=HORIZONS[b]?a:b)}))
+    .sort((a,b)=>HORIZONS[a.earliestMissingHorizon]-HORIZONS[b.earliestMissingHorizon]||a.order-b.order);
   const report={mode:execute?'EXECUTE':'DRY_RUN',status:'COMPLETED',scanCount:records.length,
-    eligibleSymbols:symbols.length,targetHorizons:plans.reduce((n,x)=>n+x.horizons.length,0),
-    maxRequests,requests:0,counts,plans:plans.map(x=>({scanId:x.source.scanId,symbol:x.source.symbol,horizons:x.horizons}))};
+    eligibleSymbols:requests.length,targetHorizons:plans.reduce((n,x)=>n+x.horizons.length,0),
+    maxRequests,requests:0,counts,plans:plans.map(x=>({scanId:x.source.scanId,symbol:x.source.symbol,horizons:x.horizons})),
+    nextRequests:requests.slice(0,maxRequests).map(({symbol,earliestMissingHorizon})=>({symbol,earliestMissingHorizon}))};
   if(!execute)return report;
   if(outcomes.status().status!=='CONFIGURED'||outcomes.status().outcomeCapacityStatus==='UNKNOWN')throw problem('OUTCOME_STORAGE_UNAVAILABLE');
   if(outcomes.status().outcomeCapacityStatus==='FULL')throw problem('OUTCOME_CAPACITY');
   // Adapter import is lazy; dry-run never even selects a network provider.
   const read=fetchDaily??require('./recommendationFastScreen').fetchNaverDailyPrice;
-  for(const symbol of symbols){
-    if(report.requests>=maxRequests){for(const plan of plans.filter(x=>x.source.symbol===symbol))for(const unused of plan.horizons)count('LOOKUP_RETRY_REQUIRED');report.status='PARTIAL';continue;}
+  for(const {symbol} of requests){
+    const symbolPlans=bySymbol.get(symbol);
+    if(report.requests>=maxRequests){for(const plan of symbolPlans)for(const unused of plan.horizons)count('REQUEST_CAP_REACHED');report.status='PARTIAL';continue;}
     report.requests++;let rows;
-    try{rows=await read(symbol);}catch{for(const plan of plans.filter(x=>x.source.symbol===symbol))for(const unused of plan.horizons)count('LOOKUP_RETRY_REQUIRED');report.status='PARTIAL';continue;}
+    try{rows=await read(symbol);}catch{for(const plan of symbolPlans)for(const unused of plan.horizons)count('LOOKUP_RETRY_REQUIRED');report.status='PARTIAL';continue;}
     const collectedAt=clock().toISOString();
-    for(const plan of plans.filter(x=>x.source.symbol===symbol)){
+    for(const plan of symbolPlans){
       for(const result of calculateOutcomes(plan.source,rows,{collectedAt}).filter(x=>plan.horizons.includes(x.horizon))){
         if(result.status!=='READY'){count(result.status);if(result.status==='LOOKUP_RETRY_REQUIRED')report.status='PARTIAL';continue;}
         try{count(outcomes.save(result).status);}catch{count('STORAGE_WRITE_REQUIRED');report.status='PARTIAL';}

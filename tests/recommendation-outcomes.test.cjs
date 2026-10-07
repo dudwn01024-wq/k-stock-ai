@@ -91,7 +91,8 @@ test('TEST_ONLY same symbol across two runs uses one provider request; original 
 test('TEST_ONLY collector hard cap includes failed attempts and does not retry',async t=>{
   const f=fixture(t,[{},{}]);let calls=0;
   const r=await collectRecommendationOutcomes({...f,execute:true,maxRequests:1,clock,fetchDaily:async()=>{calls++;throw Error('HTTP_503');}});
-  assert.equal(calls,1);assert.equal(r.requests,1);assert.equal(r.counts.LOOKUP_RETRY_REQUIRED,6);
+  assert.equal(calls,1);assert.equal(r.requests,1);assert.equal(r.counts.LOOKUP_RETRY_REQUIRED,3);
+  assert.equal(r.counts.REQUEST_CAP_REACHED,3);
   assert.equal(f.outcomes.status().storedOutcomeRecords,0);
   const retry=await collectRecommendationOutcomes({...f,execute:true,maxRequests:1,clock,fetchDaily:async()=>daily()});
   assert.equal(retry.counts.STORED,3);
