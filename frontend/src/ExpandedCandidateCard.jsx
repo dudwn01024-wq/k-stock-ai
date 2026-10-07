@@ -22,6 +22,7 @@ const volumeFields=[['currentVolume','거래량'],['averageVolume20','20일 평�
 export default function ExpandedCandidateCard({item,children,screening=false,onSelect}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
+  const volumePending=strategy.volumePassed===null&&strategy.volumeAssessment?.status==='INTRADAY_PENDING';
   const news=Array.isArray(item.news)?item.news.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).slice(0,3):null;
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
@@ -36,12 +37,14 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     </dl>}
     <ul className="expanded-card-conditions" aria-label="추천 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
-        <span>{label}</span><strong>{condition(value)}</strong>
+        <span>{label}</span><strong>{label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
       </li>)}
     </ul>
+    {volumePending&&<p className="expanded-card-note">당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.</p>}
     {screening&&<div className="expanded-selection-reasons">
       <p><strong>추천 이유 · 통과 조건</strong> {words(item.passedConditions)}</p>
       <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>
+      {item.pendingConditions?.length>0&&<p><strong>장중 확인 중 조건</strong> {words(item.pendingConditions)}</p>}
       <p><strong>미확인 조건</strong> {words(item.unknownConditions)}</p>
       <p className="expanded-card-note">자료 기준일: {text(metadata?.sourceBusinessDate)} · 제공처: {text(metadata?.source)}</p>
     </div>}
@@ -79,6 +82,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {riskReward.reason}</p>}</>}
       <h4>당시 선정 조건</h4>
       <p>통과: {words(item.passedConditions)}</p><p>미충족: {words(item.failedConditions)}</p><p>미확인: {words(item.unknownConditions)}</p>
+      {item.pendingConditions?.length>0&&<p>장중 확인 중: {words(item.pendingConditions)}</p>}
       <h4>자료 기준</h4>
       <dl className="expanded-card-facts">
         <div><dt>자료 기준일</dt><dd>{text(metadata?.sourceBusinessDate)}</dd></div>

@@ -67,7 +67,7 @@ test('only the matching scan explanation is rendered and AI text cannot execute 
 
 // Reuse the server's actual condition-label function without loading its API/providers.
 const serverSource=fs.readFileSync(require.resolve('../server.js'),'utf8');
-const reasonContext={};
+const reasonContext={isIntradayVolumePending:require('../services/recommendationVolumePolicy').isIntradayVolumePending};
 vm.runInNewContext(serverSource.slice(serverSource.indexOf('const buildRecommendationReason ='),serverSource.indexOf('// FINAL RECOMMENDATION GRADE'))+'\nthis.buildReason=buildRecommendationReason;',reasonContext);
 const newsCases=[['true',{newsPassed:true}],['false',{newsPassed:false}],['null',{newsPassed:null}],['undefined',{}],['missing',undefined]];
 for(const [state,newsAssessment] of newsCases) test('news '+state+' matches server passed/failed/unknown conditions',()=>{

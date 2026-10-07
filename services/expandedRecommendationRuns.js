@@ -2,6 +2,7 @@
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 const {attachOutcomeBaseline}=require('./recommendationOutcomeBaseline');
+const {rankFastScreenResults}=require('./recommendationFastScreen');
 const {randomUUID}=require('node:crypto');
 const {EXPANDED_HISTORY_VERSION,EXPANDED_POLICY_VERSION}=require('./recommendationHistory');
 const {EXPANDED_REUSE_TTL_MS,reuseKeyFor}=require('./expandedRecommendationReuse');
@@ -175,10 +176,7 @@ function createExpandedRecommendationRuns({
               requestCount:error.requestCount??0};
           }
         });
-        const rankedFast=screened.filter(x=>x.status==='READY').sort((a,b)=>
-          b.preScreenScore-a.preScreenScore||
-          (b.volumeRatio??-Infinity)-(a.volumeRatio??-Infinity)||
-          a.universeRank-b.universeRank);
+        const rankedFast=rankFastScreenResults(screened.filter(x=>x.status==='READY'));
         const deepTargets=rankedFast.slice(0,deepLimit).map(x=>({...x,name:x.stockName}));
         const chosen=new Set(deepTargets.map(x=>x.symbol));
         run.fastResults=screened.map(x=>({

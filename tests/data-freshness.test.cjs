@@ -105,7 +105,7 @@ test('actual recommendation daily/supply path preserves metadata without changin
     getLatestDealTrend:data=>data.dealTrendInfos[0],
     average:values=>values.reduce((a,b)=>a+b,0)/values.length,
     round2:value=>Number(value.toFixed(2)),
-    fetch:async url=>({ok:true,json:async()=>url.includes('/price?') ?
+    recommendationFetch:async url=>({ok:true,json:async()=>url.includes('/price?') ?
       [{bizdate:'20260918',closePrice:70000,highPrice:71000,lowPrice:69000,volume:1000}] :
       {dealTrendInfos:[{bizdate:'20260917',foreignerPureBuyQuant:10,organPureBuyQuant:20}]}})});
   vm.runInContext(server.slice(server.indexOf('const parseNumber ='),server.indexOf('const validateSymbol ='))+

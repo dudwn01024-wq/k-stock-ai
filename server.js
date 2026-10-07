@@ -1,4 +1,5 @@
 const { dataFreshness, dateConsistency, sourceDate } = require('./services/dataFreshness');
+const {assessRecommendationVolume,isIntradayVolumePending}=require('./services/recommendationVolumePolicy');
 const express = require('express');
 const dotenv = require('dotenv');
 const {AsyncLocalStorage}=require('node:async_hooks');
@@ -535,7 +536,7 @@ const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol});
 // ========================================
 
 const calculateStrategy =
-  async (symbol) => {
+  async (symbol, {intradayVolume=false}={}) => {
     const emptyResult =
       () => ({
         decisionRole: 'SCREENING',
@@ -956,7 +957,7 @@ const calculateStrategy =
       ma5 >=
         ma20;
 
-    const volumePassed =
+    const completedVolumePassed =
       Number.isFinite(
         currentVolume
       ) &&
@@ -966,6 +967,12 @@ const calculateStrategy =
         ? currentVolume >=
           averageVolume20
         : null;
+
+    const volumeAssessment = intradayVolume ? assessRecommendationVolume({
+      sourceBusinessDate: rows[0]?.date, observedAt: receivedAt, currentVolume, averageVolume20
+    }) : null;
+    const volumePassed = intradayVolume ? volumeAssessment.volumePassed : completedVolumePassed;
+    const pendingConditions = intradayVolume && isIntradayVolumePending({volumePassed,volumeAssessment}) ? ['거래량'] : [];
 
     const supplyPassed =
       Number.isFinite(
@@ -980,7 +987,7 @@ const calculateStrategy =
       supplyPassed === true;
 
     let signal =
-      [trendPassed, volumePassed, supplyPassed].some(value => value === null) ? 'INSUFFICIENT_DATA' : 'WAIT';
+      (trendPassed === null || supplyPassed === null || (volumePassed === null && !pendingConditions.length)) ? 'INSUFFICIENT_DATA' : 'WAIT';
 
     let entryPrice =
       null;
@@ -1106,6 +1113,7 @@ return {
   netSupplyTotal,
   trendPassed,
   volumePassed,
+  ...(intradayVolume?{volumeAssessment,pendingConditions}:{}),
   supplyPassed,
   signal,
   tradeSignal,
@@ -1478,9 +1486,10 @@ const buildRecommendationReason =
   ) => {
     const passed = [];
     const failed = [];
+    const pending = isIntradayVolumePending(strategy) ? ['거래량'] : [];
     const unknown = [['추세', strategy.trendPassed], ['거래량', strategy.volumePassed],
       ['수급', strategy.supplyPassed], ['뉴스', newsAssessment?.newsPassed]]
-      .filter(([, value]) => typeof value !== 'boolean').map(([label]) => label);
+      .filter(([label, value]) => typeof value !== 'boolean' && !pending.includes(label)).map(([label]) => label);
 
     if (
       strategy.trendPassed ===
@@ -1550,6 +1559,7 @@ const buildRecommendationReason =
 
     return {
       unknownConditions: unknown,
+      ...(pending.length?{pendingConditions:pending}:{}),
       passedConditions:
         passed,
 
@@ -1623,7 +1633,7 @@ const getFinalRecommendationGrade =
 // ========================================
 
 const buildRecommendationResult =
-  async (stock) => {
+  async (stock, {intradayVolume=false}={}) => {
     const [
       quote,
       strategy,
@@ -1635,7 +1645,7 @@ const buildRecommendationResult =
         ),
 
         calculateStrategy(
-          stock.symbol
+          stock.symbol, {intradayVolume}
         ),
 
         fetchStockNewsBySymbol(
@@ -1716,6 +1726,7 @@ const buildRecommendationResult =
 
       requiredDataStatus: requiredDataMissing ? 'INSUFFICIENT_DATA' : 'VALID',
       unknownConditions: conditionReason.unknownConditions,
+      ...(intradayVolume?{pendingConditions:conditionReason.pendingConditions??[]}:{}),
       // 기존 3점 → 뉴스 포함 4점
       maxScore:
         4,
@@ -1788,6 +1799,7 @@ const buildRecommendationResult =
 
         volumePassed:
           strategy.volumePassed,
+        ...(intradayVolume?{volumeAssessment:strategy.volumeAssessment??null}:{}),
 
         supplyPassed:
           strategy.supplyPassed,
@@ -4462,7 +4474,7 @@ const expandedRuns=createExpandedRecommendationRuns({
   },
   fastScreen:stock=>currentFastScreen.screen(stock),
   deepReview:(stock,{recordRequest,recordFailure})=>
-    recommendationRequestContext.run({recordRequest,recordFailure},()=>buildRecommendationResult(stock)),
+    recommendationRequestContext.run({recordRequest,recordFailure},()=>buildRecommendationResult(stock,{intradayVolume:true})),
   rank:rankRecommendationResults,history:recommendationHistory,
   codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,rankRecommendationResults].map(fn=>fn.toString()).join('\n'))),
   analyze:analyzeRecommendationsWithGemini,deepLimit:expandedConfig.deepLimit,

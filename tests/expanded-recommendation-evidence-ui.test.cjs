@@ -199,3 +199,25 @@ test('TEST_ONLY active progress remains visible while terminal execution details
   assert.doesNotMatch(complete,/<details class="expanded-run-details" open/);
   assert.equal(JSON.stringify(run),before);
 });
+
+
+test('TEST_ONLY pending volume uses explicit intraday label and separate reasons without new services',()=>{
+  const item=candidate();item.strategy.volumePassed=null;
+  item.strategy.volumeAssessment={status:'INTRADAY_PENDING',partial:true,currentVolume:200000,averageVolume20:1000000};
+  item.passedConditions=['추세'];item.failedConditions=['수급'];item.unknownConditions=['뉴스'];item.pendingConditions=['거래량'];
+  const before=JSON.stringify(item);
+  const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true}));
+  assert.match(html,/<span>거래량<\/span><strong>장중 확인 중<\/strong>/);
+  assert.match(html,/장중 확인 중 조건<\/strong> 거래량/);
+  assert.match(html,/당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다/);
+  assert.equal(JSON.stringify(item),before);
+});
+test('TEST_ONLY unavailable and completed volume are not mislabeled intraday pending',()=>{
+  for(const [value,status,label] of [[null,'UNAVAILABLE','미확인'],[false,'COMPLETED_FAIL','미충족'],
+    [true,'COMPLETED_PASS','통과'],[true,'INTRADAY_CONFIRMED_STRONG','통과']]){
+    const item=candidate();item.strategy.volumePassed=value;item.strategy.volumeAssessment={status};
+    const html=render(item);
+    assert.match(html,new RegExp('<span>거래량</span><strong>'+label+'</strong>'));
+    assert.doesNotMatch(html,/장중 확인 중/);
+  }
+});

@@ -298,3 +298,17 @@ test('TEST_ONLY official exclusion provenance and separate type-request counts s
     securityTypeEvidence:testOnlyStockType('54321K','NON_COMMON')}];
   assert.throws(()=>store.saveExpanded(bad),{code:'HISTORY_UNIVERSE_INVALID'});
 });
+
+
+test('TEST_ONLY prior expanded policy history stays readable and immutable after policy version bump',t=>{
+  const {root,store}=fixture(t),old=expanded('TEST-ONLY-OLD-VOLUME-POLICY');
+  old.policyVersion='PUBLIC_SCREENING_EXPANDED_2_STAGE_V1';store.saveExpanded(old);
+  const before=fs.readdirSync(root).map(name=>[name,fs.readFileSync(path.join(root,name),'utf8')]);
+  const read=createRecommendationHistory({root,testOnly:true}).detail(old.scanId);
+  assert.equal(read.policyVersion,old.policyVersion);assert.equal(read.fastResults[0].volumeAssessment,undefined);
+  assert.equal(read.all[0].pendingConditions,undefined);assert.equal(read.all[0].strategy.volumeAssessment,undefined);
+  const newer=expanded('TEST-ONLY-NEW-VOLUME-POLICY');store.saveExpanded(newer);
+  for(const [name,content] of before)assert.equal(fs.readFileSync(path.join(root,name),'utf8'),content);
+  assert.equal(store.detail(old.scanId).policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V1');
+  assert.equal(store.detail(newer.scanId).policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V2');
+});

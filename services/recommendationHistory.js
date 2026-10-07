@@ -7,7 +7,7 @@ const {normalizeOfficialStockTypeEvidence,hasRequiredOfficialStockType}=require(
 const fs=require('node:fs'),path=require('node:path');
 const {createHash,randomUUID}=require('node:crypto');
 const HISTORY_VERSION='RECOMMENDATION_HISTORY_V1',POLICY_VERSION='PUBLIC_SCREENING_4_CONDITIONS_V1',PROMPT_VERSION='PUBLIC_RECOMMENDATION_PROMPT_V1';
-const EXPANDED_HISTORY_VERSION='RECOMMENDATION_HISTORY_V2',EXPANDED_POLICY_VERSION='PUBLIC_SCREENING_EXPANDED_2_STAGE_V1';
+const EXPANDED_HISTORY_VERSION='RECOMMENDATION_HISTORY_V2',EXPANDED_POLICY_VERSION='PUBLIC_SCREENING_EXPANDED_2_STAGE_V2';
 const MAX_RUNS=100,MAX_FILE_BYTES=1024*1024,MAX_TOTAL_BYTES=400*1024*1024;
 const hash=value=>createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
 const error=(code,status=503)=>Object.assign(new Error(code),{code,status});
@@ -24,10 +24,18 @@ function metadata(v,depth=0){
   return r;
 }
 const news=x=>({...pick(x,['id','title','publisher','date','summary','index']),url:safeUrl(x?.url),dataMetadata:metadata(x?.dataMetadata)});
-function candidate(x){return {
+function volumeAssessment(v){
+  if(v==null)return v;
+  if(!['UNAVAILABLE','INTRADAY_PENDING','INTRADAY_CONFIRMED_STRONG','COMPLETED_PASS','COMPLETED_FAIL'].includes(v.status))
+    throw error('HISTORY_EXPANDED_INPUT_INVALID');
+  return pick(v,['status','partial','sourceBusinessDate','observedAt','currentVolume','averageVolume20','volumePassed','reason']);
+}
+function candidate(x,{expanded=false}={}){return {
   ...pick(x,['symbol','stockName','decisionRole','currentPrice','priceChange','changeRate','score','maxScore','grade','requiredDataStatus','testData']),
+  ...(expanded&&Object.hasOwn(x,'pendingConditions')?{pendingConditions:words(x.pendingConditions)}:{}),
   passedConditions:words(x.passedConditions),failedConditions:words(x.failedConditions),unknownConditions:words(x.unknownConditions),dataMetadata:metadata(x.dataMetadata),
-  strategy:{...pick(x.strategy,['decisionRole','ma5','ma20','recentHigh20','recentLow20','nearestSupport','nearestResistance','currentVolume','averageVolume20','volumeRatio','foreignerNet','institutionNet','netSupplyTotal','trendPassed','volumePassed','supplyPassed','signal','tradeSignal','entryPrice','takeProfitPrice','stopLossPrice']),dataMetadata:metadata(x.strategy?.dataMetadata)},
+  strategy:{...pick(x.strategy,['decisionRole','ma5','ma20','recentHigh20','recentLow20','nearestSupport','nearestResistance','currentVolume','averageVolume20','volumeRatio','foreignerNet','institutionNet','netSupplyTotal','trendPassed','volumePassed','supplyPassed','signal','tradeSignal','entryPrice','takeProfitPrice','stopLossPrice']),dataMetadata:metadata(x.strategy?.dataMetadata),
+    ...(expanded&&Object.hasOwn(x.strategy??{},'volumeAssessment')?{volumeAssessment:volumeAssessment(x.strategy.volumeAssessment)}:{})},
   riskReward:pick(x.riskReward,['available','reason','classification','currentUpsideAmount','currentUpsidePercent','currentDownsideAmount','currentDownsidePercent','currentRiskRewardRatio','entryRewardAmount','entryRewardPercent','entryRiskAmount','entryRiskPercent','entryRiskRewardRatio','rewardGreaterThanRisk','currentPriceBelowTarget']),
   newsAssessment:{...pick(x.newsAssessment,['newsPassed','newsCount','positiveCount','negativeCount','neutralCount','sentiment','reason']),positiveHeadlines:words(x.newsAssessment?.positiveHeadlines),negativeHeadlines:words(x.newsAssessment?.negativeHeadlines)},
   news:Array.isArray(x.news)?x.news.slice(0,10).map(news):[]
@@ -101,7 +109,8 @@ function expandedSnapshot(result,{testOnly=false}={}){
     if(technical.symbol!=null&&technical.symbol!==x.symbol)throw error('EXPANDED_BASELINE_SOURCE_MISMATCH');
     const baseline=fastBaseline({...technical,symbol:x.symbol});
     if(score!==null&&(score<0||score>2))throw error('HISTORY_EXPANDED_INPUT_INVALID');
-    return {...(Object.hasOwn(technical,'outcomeBaseline')?{outcomeBaseline:baseline}:{}),
+    return {...(Object.hasOwn(technical,'volumeAssessment')?{volumeAssessment:volumeAssessment(technical.volumeAssessment)}:{}),
+      ...(Object.hasOwn(technical,'outcomeBaseline')?{outcomeBaseline:baseline}:{}),
       symbol:x.symbol,status:x.status,fastStatus:scalar(x.fastStatus),reason:scalar(x.reason),
       deepReviewSelected:x.deepReviewSelected,universeRank:expandedCount(x.universeRank),
       currentPrice:expandedNumber(technical.currentPrice),ma5:expandedNumber(technical.ma5),ma20:expandedNumber(technical.ma20),
@@ -118,7 +127,7 @@ function expandedSnapshot(result,{testOnly=false}={}){
   const fastBySymbol=new Map(fast.map(x=>[x.symbol,x]));
   const deep=result.deepResults.map(x=>{
     const baseline=verifyCandidateBaseline(x,fastBySymbol.get(x.symbol));
-    return {...candidate(x),...(Object.hasOwn(x,'outcomeBaseline')?{outcomeBaseline:baseline}:{})};
+    return {...candidate(x,{expanded:true}),...(Object.hasOwn(x,'outcomeBaseline')?{outcomeBaseline:baseline}:{})};
   }),failures=result.deepFailures.map(x=>({symbol:x?.symbol,stockName:scalar(x?.stockName),reason:'LOOKUP_FAILED'}));
   const chosen=new Set(fast.filter(x=>x.deepReviewSelected).map(x=>x.symbol)),reviewed=[...deep,...failures].map(x=>x.symbol);
   if(reviewed.length!==chosen.size||new Set(reviewed).size!==reviewed.length||reviewed.some(symbol=>!chosen.has(symbol))

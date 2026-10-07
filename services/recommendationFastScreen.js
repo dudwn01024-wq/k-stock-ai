@@ -3,6 +3,7 @@ const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 const {baselineFromDailyRow}=require('./recommendationOutcomeBaseline');
+const {assessRecommendationVolume,isIntradayVolumePending}=require('./recommendationVolumePolicy');
 
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
 const PRICE_PAGE_SIZE=30; // Existing detailed strategy requests 30 daily rows; at least 21 are required here.
@@ -27,10 +28,11 @@ function empty(symbol,reason,receivedAt=null){
   return {symbol,status:'INSUFFICIENT_DATA',reason,provider:PROVIDER,receivedAt,
     sourceBusinessDate:null,currentPrice:null,ma5:null,ma20:null,currentVolume:null,
     previous20AverageVolume:null,averageVolume20:null,volumeRatio:null,recentHigh20:null,
-    recentLow20:null,trendPassed:null,volumePassed:null,preScreenScore:null,dataPoints:0,outcomeBaseline:null};
+    recentLow20:null,trendPassed:null,volumePassed:null,preScreenScore:null,dataPoints:0,outcomeBaseline:null,
+    volumeAssessment:assessRecommendationVolume({observedAt:receivedAt})};
 }
 
-function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
+function calculateFastScreen(stock,rawRows,{receivedAt=null,observedAt=receivedAt??new Date().toISOString()}={}){
   const symbol=stock?.symbol;
   if(!isNaverKrStockItemCode(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
   if(!Array.isArray(rawRows)||rawRows.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt);
@@ -59,14 +61,16 @@ function calculateFastScreen(stock,rawRows,{receivedAt=null}={}){
   const volumeRatio=previous20AverageVolume>0?
     currentVolume/previous20AverageVolume:null;
   const trendPassed=currentPrice>=ma5&&ma5>=ma20;
-  const volumePassed=currentVolume>=previous20AverageVolume;
+  const volumeAssessment=assessRecommendationVolume({sourceBusinessDate:selected[0].date,observedAt,
+    currentVolume,averageVolume20:previous20AverageVolume});
+  const {volumePassed}=volumeAssessment;
   return {symbol,status:'READY',reason:null,provider:PROVIDER,receivedAt,
     sourceBusinessDate:selected[0].date,sourceTimestamp:selected[0].sourceTimestamp,
     outcomeBaseline:baselineFromDailyRow(symbol,selected[0],receivedAt),currentPrice,ma5,ma20,currentVolume,
     previous20AverageVolume,averageVolume20:previous20AverageVolume,volumeRatio,
     recentHigh20:Math.max(...selected.slice(0,20).map(row=>row.high)),
     recentLow20:Math.min(...selected.slice(0,20).map(row=>row.low)),
-    trendPassed,volumePassed,preScreenScore:Number(trendPassed)+Number(volumePassed),dataPoints:21};
+    trendPassed,volumePassed,volumeAssessment,preScreenScore:Number(trendPassed)+Number(volumePassed),dataPoints:21};
 }
 
 /** One request per symbol; no retries, redirects, quote, supply, or news calls. */
@@ -108,4 +112,12 @@ function createRecommendationFastScreen({fetchDaily,fetchImpl=globalThis.fetch,h
   return {screen,requestCount:()=>requestCount};
 }
 
-module.exports={createRecommendationFastScreen,calculateFastScreen,fetchNaverDailyPrice,PROVIDER,PRICE_PAGE_SIZE};
+// Do not use pairwise "skip ratio if either is pending": that comparator is not transitive.
+// Within a tied score containing pending volume, use universe order for the whole group.
+function rankFastScreenResults(items){
+  const pendingScores=new Set(items.filter(isIntradayVolumePending).map(x=>x.preScreenScore));
+  return [...items].sort((a,b)=>b.preScreenScore-a.preScreenScore||
+    (pendingScores.has(a.preScreenScore)?0:(b.volumeRatio??-Infinity)-(a.volumeRatio??-Infinity))||
+    a.universeRank-b.universeRank);
+}
+module.exports={rankFastScreenResults,createRecommendationFastScreen,calculateFastScreen,fetchNaverDailyPrice,PROVIDER,PRICE_PAGE_SIZE};

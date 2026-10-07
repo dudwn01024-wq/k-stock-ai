@@ -60,15 +60,21 @@ test('advanced volume thresholds and neutral band remain unchanged',()=>{
 // calculation inputs are synthetic. No listening socket or provider request occurs.
 function server({missingSupply=false,missingVolume=false,missingTrend=false,missingNews=false,priceRows=null,kisLoader=null,serverSource=source,aiAnalysis={summary:"fixture"}}={}) {
   const routes=new Map(),prompts=[];
-  const app={use(){},listen(){},get(route,handler){if(!routes.has(route))routes.set(route,handler);}};
+  const app={use(){},listen(){},post(route,handler){routes.set(route,handler);},get(route,handler){if(!routes.has(route))routes.set(route,handler);}};
   const express=()=>app;express.json=()=>()=>{};
   const rows=Array.from({length:21},(_,n)=>({date:new Date(Date.UTC(2026,7,29+n)).toISOString().slice(0,10).replaceAll('-',''),open:100,close:100,high:120,low:90,volume:n===20?(missingVolume?null:150):100}));
-  const ctx=vm.createContext({process:{env:{GEMINI_API_KEY:'MOCK_ONLY'}},console,AbortController,setTimeout,clearTimeout,
+  const ctx=vm.createContext({process:{env:{GEMINI_API_KEY:'MOCK_ONLY'}},console,AbortController,AbortSignal,setTimeout,clearTimeout,
     require:name=>{
+      if(['node:async_hooks','node:crypto'].includes(name))return require(name);
       if(name==='express')return express;if(name==='cors')return ()=>()=>{};if(name==='dotenv')return {config(){}};
       if(name==='./services/paperApi')return require('../services/paperApi');
+      if(name==='./services/recommendationVolumePolicy')return require('../services/recommendationVolumePolicy');
       if(name==='./services/dataFreshness')return require('../services/dataFreshness');
       if(name==='./services/naverMarketData')return require('../services/naverMarketData');
+      if(name==='./services/stockDetailNews')return require('../services/stockDetailNews');
+      if(name==='./services/recommendationHistory')return {...require('../services/recommendationHistory'),historyFromEnvironment:()=>require('../services/recommendationHistory').createRecommendationHistory()};
+      if(name==='./services/recommendationOutcomes')return {...require('../services/recommendationOutcomes'),outcomesFromEnvironment:({history})=>require('../services/recommendationOutcomes').createRecommendationOutcomes({history})};
+      if(['recommendationScans','recommendationUniverse','recommendationFastScreen','expandedRecommendationRuns'].some(x=>name==='./services/'+x))return require('../'+name.slice(2));
       if(name==='./services/executionMode')return {resolveExecutionMode:()=>({}),installExecutionMode(){}};
       if(name==='./services/kisMarketData')return {fetchKisDailyOHLCV:kisLoader || (async()=>rows)};
       if(name==='./services/chartAnalysis')return {analyzeMovingAverages:()=>({...chart(),ma60:missingTrend?null:98})};
@@ -86,8 +92,13 @@ function server({missingSupply=false,missingVolume=false,missingTrend=false,miss
       return {ok:true,json:async()=>body,text:async()=>JSON.stringify(body)};
     }});
   vm.runInContext(serverSource+'\nthis.recommend=buildRecommendationResult;this.score=getRecommendationScore;this.reasons=buildRecommendationReason;this.calculate=calculateStrategy;',ctx);
-  return {ctx,prompts,async call(route){let result;let status=200;const res={status(code){status=code;return this;},json(value){result=value;}};
-    await routes.get(route)({query:{symbol:'005930'}},res);assert.equal(status,200);return result;}};
+  return {ctx,prompts,async call(route){let result;let status=200;const res={set(){return this;},status(code){status=code;return this;},json(value){result=value;}};
+    const query={symbol:'005930'};
+    if(route==='/api/stock/recommendations-ai'){
+      let candidates;await routes.get('/api/stock/recommendations')({query:{}},{set(){return this;},json(x){candidates=x;}});
+      query.scanId=candidates.scanId;delete query.symbol;
+    }
+    await routes.get(route)({query},res);assert.equal(status,200);return result;}};
 }
 for(const missing of ['missingSupply','missingVolume','missingTrend','missingNews']) {
   test('detail API gates '+missing,async()=>{
@@ -129,9 +140,9 @@ test('complete detail and AI routes retain entry candidate',async()=>{
 
 test('recommendation AI route never selects incomplete candidates for AI explanation',async()=>{
   const s=server({missingSupply:true});const r=await s.call('/api/stock/recommendations-ai');
-  assert.equal(r.aiCandidates.length,0);assert.equal(s.prompts.length,0);
-  assert.ok(r.watch.length>0);
-  for(const item of r.watch) assert.equal(item.strategy.signal,'INSUFFICIENT_DATA');
+  assert.equal(r.ai.length,0);assert.equal(s.prompts.length,0);assert.equal(r.aiStatus,'NOT_REQUIRED');
+  const candidates=await s.call('/api/stock/recommendations');assert.ok(candidates.watch.length>0);
+  for(const item of candidates.watch)assert.equal(item.strategy.signal,'INSUFFICIENT_DATA');
 });
 
 test('recommendation measured failure and unknown have distinct reasons',()=>{

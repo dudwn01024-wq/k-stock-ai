@@ -110,13 +110,15 @@ test('TEST_ONLY legacy strategy and explicit individual AI endpoints retain thei
   assert.equal(ai.status,200);assert.equal(ai.body.analysis.summary,'TEST_ONLY 해설');assert.equal(f.calls.news,2);
 });
 
-test('TEST_ONLY recommendation, history, outcome, provider normalization and order implementations are untouched',()=>{
+test('TEST_ONLY watchlist and recommendation news reader contract are preserved',()=>{
   const {execFileSync}=require('node:child_process');
   const before=execFileSync('git',['show','HEAD:server.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
-  // Compare the complete scanner/ranking route block and existing watchlist; no recalculation policy changes.
-  for(const [a,b] of [['const buildRecommendationResult =','const rankRecommendationResults ='],['const RECOMMENDATION_WATCHLIST =','const sleep =']]){
+  // Volume policy may evolve; the watchlist and the canonical news provider must remain stable.
+  for(const [a,b] of [['const RECOMMENDATION_WATCHLIST =','const sleep =']]){
     assert.ok(source.indexOf(a)>=0&&before.indexOf(a)>=0);
     assert.equal(source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a))),before.slice(before.indexOf(a),before.indexOf(b,before.indexOf(a))));
   }
   assert.match(source,/app\.get\(\s*'\/api\/stock\/news'/);
+  const builder=section('const buildRecommendationResult =','const rankRecommendationResults =');
+  assert.equal((builder.match(/fetchStockNewsBySymbol\(/g)||[]).length,1);
 });
