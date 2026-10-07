@@ -19,29 +19,35 @@ const volumeFields=[['currentVolume','거래량'],['averageVolume20','20일 평�
   ['foreignerNet','외국인 순수급'],['institutionNet','기관 순수급']];
 
 // Presentation only: no services, hooks, requests, ranking or price calculations.
-export default function ExpandedCandidateCard({item,children}){
+export default function ExpandedCandidateCard({item,children,screening=false,onSelect}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
   const news=Array.isArray(item.news)?item.news.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).slice(0,3):null;
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
-    <div className="expanded-card-heading"><strong>{item.stockName||item.symbol}</strong><small>{item.symbol}</small></div>
+    <div className="expanded-card-heading">{screening&&onSelect?<button type="button" className="expanded-stock-name" onClick={()=>onSelect({code:item.symbol,name:item.stockName||item.symbol})}>{item.stockName||item.symbol}</button>:<strong>{item.stockName||item.symbol}</strong>}<small>{item.symbol}</small></div>
     <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · 기존 추천 점수 {number(item.score)} / 4</p>
-    <dl className="expanded-card-prices">
+    {!screening&&<dl className="expanded-card-prices">
       <div className="expanded-card-quote"><dt>분석 당시 조회가</dt><dd>{price(item.currentPrice)}</dd></div>
       <div><dt>등락률</dt><dd>{percent(item.changeRate)}</dd></div>
       <div><dt>진입 참고가</dt><dd>{price(strategy.entryPrice)}</dd></div>
       <div><dt>익절 참고가</dt><dd>{price(strategy.takeProfitPrice)}</dd></div>
       <div><dt>손절 참고가</dt><dd>{price(strategy.stopLossPrice)}</dd></div>
-    </dl>
+    </dl>}
     <ul className="expanded-card-conditions" aria-label="추천 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
         <span>{label}</span><strong>{condition(value)}</strong>
       </li>)}
     </ul>
+    {screening&&<div className="expanded-selection-reasons">
+      <p><strong>추천 이유 · 통과 조건</strong> {words(item.passedConditions)}</p>
+      <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>
+      <p><strong>미확인 조건</strong> {words(item.unknownConditions)}</p>
+      <p className="expanded-card-note">자료 기준일: {text(metadata?.sourceBusinessDate)} · 제공처: {text(metadata?.source)}</p>
+    </div>}
     {item.dataMetadata?.dateConsistency==='MISMATCH'&&<p className="home-warning">데이터 기준일 불일치 · 당시 자료의 날짜가 서로 다릅니다.</p>}
     <details className="expanded-card-evidence"><summary>상세 근거 보기</summary>
-      <p className="expanded-card-note">분석 당시 자료입니다. 참고 가격은 주문 지시가 아니며, 시세 최신성을 보장하지 않습니다.</p>
+      <p className="expanded-card-note">{screening?'분석 당시 저장된 선정 근거이며, 시세 최신성과 매수 허가를 뜻하지 않습니다.':'분석 당시 자료입니다. 참고 가격은 주문 지시가 아니며, 시세 최신성을 보장하지 않습니다.'}</p>
       <h4>거래량·수급</h4>
       <dl className="expanded-card-facts">{volumeFields.map(([key,label])=><div key={key}><dt>{label}</dt><dd>{number(strategy[key])}</dd></div>)}</dl>
       <p className="expanded-card-note">거래량·수급 단위와 확정 여부는 이 화면에서 추가 검증하지 않습니다.</p>
@@ -64,13 +70,13 @@ export default function ExpandedCandidateCard({item,children}){
         </li>;
       })}</ol>:<p>{news?'저장된 뉴스 없음':'저장된 뉴스 미확인'}</p>}
       <p className="expanded-card-note">저장된 뉴스 중 최대 3건을 표시합니다. 제공처 표기 시각은 최초 발행 시각으로 검증되지 않았으며, 뉴스의 최신성·완전성은 미확인입니다.</p>
-      <h4>손익비 · 분석 당시 조회가 기준</h4>
+      {!screening&&<><h4>손익비 · 분석 당시 조회가 기준</h4>
       {riskReward?.available===true?<dl className="expanded-card-facts">
         <div><dt>상승 여력</dt><dd>{percent(riskReward.currentUpsidePercent)}</dd></div>
         <div><dt>하락 위험</dt><dd>{percent(riskReward.currentDownsidePercent)}</dd></div>
         <div><dt>손익비</dt><dd>{number(riskReward.currentRiskRewardRatio)}</dd></div>
       </dl>:<p>손익비 미확인</p>}
-      {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {riskReward.reason}</p>}
+      {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {riskReward.reason}</p>}</>}
       <h4>당시 선정 조건</h4>
       <p>통과: {words(item.passedConditions)}</p><p>미충족: {words(item.failedConditions)}</p><p>미확인: {words(item.unknownConditions)}</p>
       <h4>자료 기준</h4>
@@ -84,6 +90,7 @@ export default function ExpandedCandidateCard({item,children}){
         {metadata?.freshnessStatus==='STALE'?'오래된 자료 · 최신성 재확인 필요':'최신성 미확인 · 실시간 시세가 아닙니다.'}
       </p>
     </details>
+    {screening&&onSelect&&<button type="button" className="home-secondary expanded-detail-link" onClick={()=>onSelect({code:item.symbol,name:item.stockName||item.symbol})}>현재 상세 분석 보기</button>}
     {children}
   </>;
 }

@@ -18,7 +18,7 @@ export function expandedRunStatusLabel(run){
   return failureCount>0?'일부 조회 실패':'일부 결과 미완료';
 }
 
-export default function ExpandedRecommendation({service,onHistory,aiEnabled=false}){
+export default function ExpandedRecommendation({service,onHistory,onSelect,aiEnabled=false}){
   const [run,setRun]=useState(null);
   const [saved,setSaved]=useState(null);
   const [storage,setStorage]=useState(null);
@@ -99,8 +99,9 @@ export default function ExpandedRecommendation({service,onHistory,aiEnabled=fals
         <span>조회 대상 <strong>{number(stats?.universeCount??display.scannedCount)}</strong></span>
         <span>최종 후보 <strong>{number(stats?.finalCandidateCount??actual.length)}</strong></span>
       </div>
+      <p className="expanded-card-note">추천목록은 종목 선정 근거를 보여줍니다. 현재 가격 전략은 상세 분석에서 확인하세요.</p>
       {actual.length?<ol className="expanded-candidates">{actual.map(item=><li key={item.symbol}>
-        <ExpandedCandidateCard item={item}/>
+        <ExpandedCandidateCard item={item} screening onSelect={onSelect}/>
       </li>)}</ol>:<p className="home-state">저장된 최종 후보가 없습니다.</p>}
       <details className="expanded-result-notes"><summary>분석 범위 안내</summary>
         <p className="home-warning">1단계에서 정밀분석 대상이 아닌 종목은 정책상 탈락으로 판정하지 않았습니다. 자료 부족·조회 실패와 조건 미충족은 별도 상태입니다.</p>

@@ -4,6 +4,7 @@ import ObservationPanel from './ObservationPanel.jsx';
 import CandidateOverview from './CandidateOverview.jsx';
 import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
+import HoldingGuidance from './HoldingGuidance.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
@@ -754,7 +755,7 @@ export default function App() {
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
         {activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
-        {activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
           error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
@@ -1953,6 +1954,8 @@ export default function App() {
     </div>
   </div>
 </section>
+
+            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData}/>
 
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">

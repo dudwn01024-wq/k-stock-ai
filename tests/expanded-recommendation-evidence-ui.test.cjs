@@ -33,6 +33,25 @@ const candidate=()=>({testData:true,symbol:'000001',stockName:'TEST_ONLY 합성 
     sourceTimestamp:'2026-10-02T15:00:00+09:00',receivedAt:'2026-10-02T06:01:00Z',freshnessStatus:'STALE'}},
   outcomeBaseline:{kind:'DAILY_CLOSE',price:100,businessDate:'2026-10-02'}});
 const render=item=>renderToStaticMarkup(React.createElement(Card,{item}));
+test('TEST_ONLY screening card removes only price strategy presentation and preserves stored selection evidence',()=>{
+  const item=candidate(),before=JSON.stringify(item);
+  const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true,onSelect:()=>assert.fail('RENDER_MUST_NOT_SELECT')}));
+  assert.doesNotMatch(html,/분석 당시 조회가|등락률|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|손익비|105원|110원|95원/);
+  for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','자료 기준일','제공처','현재 상세 분석 보기'])
+    assert.ok(html.includes(label),label);
+  assert.equal((html.match(/저장된 원문 링크/g)||[]).length,3);
+  assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
+});
+test('TEST_ONLY screening selection is explicit and passes only stored stock identity to existing detail flow',()=>{
+  const item=candidate(),selected=[];
+  const tree=Card({item,screening:true,onSelect:value=>selected.push(value)});
+  const buttons=[];const visit=node=>{
+    if(!node||typeof node!=='object')return;
+    if(node.type==='button')buttons.push(node);React.Children.forEach(node.props?.children,visit);
+  };visit(tree);assert.equal(selected.length,0);assert.equal(buttons.length,2);
+  for(const button of buttons)button.props.onClick();
+  assert.deepEqual(selected.map(value=>({...value})),[{code:item.symbol,name:item.stockName},{code:item.symbol,name:item.stockName}]);
+});
 const field=(html,label)=>{const match=html.match(new RegExp('<dt>'+label+'</dt><dd>([^<]*)</dd>'));assert.ok(match,'missing '+label);return match[1];};
 const detail=items=>({schemaVersion:'RECOMMENDATION_HISTORY_V2',testOnly:true,scanId:'TEST-ONLY-EVIDENCE',
   scanStartedAt:'2026-10-02T00:00:00Z',scanCompletedAt:'2026-10-02T00:01:00Z',stats:{},aiStatus:'DISABLED',
@@ -137,7 +156,7 @@ test('TEST_ONLY page mount and reread load only saved results and never start a 
     const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
     renderToStaticMarkup(React.createElement(component,{service}));const cleanup=effects.map(fn=>fn());
     await new Promise(setImmediate);assert.equal(states[1],saved);index=0;refIndex=0;
-    const html=renderToStaticMarkup(React.createElement(component,{service}));assert.match(html,/분석 당시 조회가/);
+    const html=renderToStaticMarkup(React.createElement(component,{service}));assert.match(html,/추천 이유 · 통과 조건/);
     cleanup.forEach(fn=>fn?.());
   }
   assert.deepEqual(calls,{getHistory:2,getHistoryDetail:2});
@@ -160,7 +179,7 @@ test('TEST_ONLY expanded home shows only two summary totals, a compact risk note
   assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   assert.doesNotMatch(html,/<h2|2단계 스크리닝 · 분석 참고용|사이트 접속·새로고침·이력 조회|최근 10분/);
   assert.match(html,/저장된 분석 결과 · 실시간 시세가 아닙니다/);
-  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'진입 참고가'),'100원');
+  assert.doesNotMatch(html,/분석 당시 조회가|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|<dt>손익비<\/dt>/);
   assert.match(html,/상세 근거 보기/);assert.match(html,/TEST_ONLY 뉴스 0/);
   assert.equal(JSON.stringify(saved),before);
 });

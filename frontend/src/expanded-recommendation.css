@@ -22,6 +22,11 @@
 @media(max-width:600px){.expanded-recommendation .home-heading{display:grid;gap:.8rem}.expanded-recommendation .history-controls{display:flex;flex-wrap:wrap}.expanded-counts{grid-template-columns:repeat(2,minmax(0,1fr))}.expanded-progress,.expanded-result{padding:.85rem}}
 
 /* A lighter presentation scoped to the expanded main, not saved-history cards. */
+.expanded-stock-name{padding:0;border:0;background:transparent;color:#f5f9fd;font:inherit;font-size:1.05rem;font-weight:700;text-align:left;cursor:pointer;text-decoration:underline;text-underline-offset:.2rem}
+.expanded-stock-name:focus-visible,.expanded-detail-link:focus-visible{outline:2px solid #a0e6d0;outline-offset:4px}
+.expanded-selection-reasons{display:grid;gap:.35rem;line-height:1.6;font-size:.88rem;overflow-wrap:anywhere}
+.expanded-selection-reasons p{margin:0}.expanded-selection-reasons strong{color:#e8f1fb;margin-right:.35rem}
+.expanded-detail-link{justify-self:start;margin-top:.1rem}
 .expanded-recommendation{gap:.9rem;color:#edf3fa}
 .expanded-home-toolbar{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .expanded-risk-note{font-size:.8rem;line-height:1.6;color:#d4e1ee;border-left:2px solid #f6ce82;padding:.2rem 0 .2rem .7rem;margin:0}
