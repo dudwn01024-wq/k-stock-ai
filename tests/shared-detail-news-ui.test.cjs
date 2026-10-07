@@ -19,7 +19,7 @@ const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'
   news:[{title:'TEST_ONLY '+symbol,summary:'TEST_ONLY',url:null}],strategy:strategy(),chartAnalysis:{},
   newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1},
   marketContext:{newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1}}});
-function harness({ai,detailResponse}={}){
+function harness({ai,aiStatus=200,detailResponse}={}){
   const states=[],refs=[],effects=[],calls=[];let stateCursor=0,refCursor=0;
   const react={...React,useState:initial=>{const i=stateCursor++;if(!(i in states))states[i]=bindings[i]==='recommendationMode'?'expanded500':initial;
     return [states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];},
@@ -36,7 +36,8 @@ function harness({ai,detailResponse}={}){
       case '/api/stock/recommendation-mode':body={universeMode:'expanded500',settings:{aiEnabled:false}};break;
       default:throw Error('TEST_ONLY_FORBIDDEN_REQUEST '+url.pathname);
     }
-    return {ok:true,json:async()=>body};
+    const status=url.pathname==='/api/stock/ai-analysis'?aiStatus:200;
+    return {ok:status>=200&&status<300,status,json:async()=>body};
   };
   const cache=new Map(),load=file=>{
     if(cache.has(file))return cache.get(file);
@@ -119,4 +120,44 @@ test('TEST_ONLY UI labels unavailable news distinctly and retains explicit AI re
   assert.match(source,/현재 상세 분석 시 조회한 뉴스/);
   const loader=source.slice(source.indexOf('const loadRealStockData'),source.indexOf('const requestAIAnalysis'));
   assert.doesNotMatch(loader,/getAIAnalysis|getStockNews|getStockStrategy|startExpandedRun|collectRecommendationOutcomes/);
+});
+
+test('TEST_ONLY snapshot expiry shows the short title and reread instruction without any automatic request',async()=>{
+  const h=harness({aiStatus:410,ai:async()=>({error:'DETAIL_NEWS_SNAPSHOT_UNAVAILABLE',
+    message:'상세 뉴스 묶음이 만료되었거나 없습니다. 상세 자료를 다시 조회한 뒤 AI 해설을 요청하세요. 자동 재조회하지 않습니다.'})});
+  await h.select('005930');const before=h.state('strategyData');await h.button().props.onClick();
+  assert.equal(h.state('aiError'),'뉴스 정보가 만료되었습니다.');
+  const tree=h.render();
+  assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='뉴스 정보가 만료되었습니다.'));
+  assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='종목을 다시 조회한 뒤 AI 해설을 요청해주세요.'));
+  assert.equal(h.state('strategyData'),before);assert.equal(h.calls.length,4);
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/detail-analysis')).length,1);
+});
+
+test('TEST_ONLY other AI failures retain their meaning instead of displaying expiry',async()=>{
+  for(const [status,error,message] of [[503,'GEMINI_FAILED','TEST_ONLY Gemini 실패'],
+    [400,'DETAIL_NEWS_SYMBOL_MISMATCH','TEST_ONLY 종목·뉴스 묶음 불일치']]){
+    const h=harness({aiStatus:status,ai:async()=>({error,message})});await h.select('005930');
+    await h.button().props.onClick();const tree=h.render();
+    assert.equal(h.state('aiError'),message);
+    assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='AI 해설을 가져오지 못했습니다.'));
+    assert.ok(visit(tree,n=>n.type==='p'&&n.props.children===message));
+    assert.equal(visit(tree,n=>n.type==='p'&&n.props.children==='뉴스 정보가 만료되었습니다.'),undefined);
+    assert.equal(h.calls.length,4);
+  }
+});
+
+test('TEST_ONLY presentation mapper recognizes expiry code, HTTP 410 and the specific legacy message only',async()=>{
+  const {pathToFileURL}=require('node:url');
+  const {aiAnalysisError}=await import(pathToFileURL(require.resolve('../frontend/src/utils/aiAnalysisError.js')).href);
+  for(const error of [{code:'DETAIL_NEWS_SNAPSHOT_UNAVAILABLE'}, {status:410},
+    '상세 뉴스 묶음이 만료되었거나 없습니다. 상세 자료를 다시 조회한 뒤 AI 해설을 요청하세요.']){
+    assert.deepEqual(aiAnalysisError(error),{message:'뉴스 정보가 만료되었습니다.',title:'뉴스 정보가 만료되었습니다.',
+      description:'종목을 다시 조회한 뒤 AI 해설을 요청해주세요.'});
+  }
+  for(const error of [null,undefined,'Failed to fetch',{status:500,code:'GEMINI_FAILED'},
+    {status:400,code:'DETAIL_NEWS_SYMBOL_MISMATCH'},{code:'UNKNOWN'}]){
+    assert.equal(aiAnalysisError(error).title,'AI 해설을 가져오지 못했습니다.');
+    assert.notEqual(aiAnalysisError(error).message,'뉴스 정보가 만료되었습니다.');
+  }
 });

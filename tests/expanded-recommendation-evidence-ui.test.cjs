@@ -181,6 +181,10 @@ test('TEST_ONLY expanded home shows only two summary totals, a compact risk note
   assert.match(html,/저장된 분석 결과 · 실시간 시세가 아닙니다/);
   assert.doesNotMatch(html,/분석 당시 조회가|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|<dt>손익비<\/dt>/);
   assert.match(html,/상세 근거 보기/);assert.match(html,/TEST_ONLY 뉴스 0/);
+  assert.doesNotMatch(html,/추천 이력 보기/);
+  assert.match(html,/500종목 분석 요청/);
+  const actions=html.match(/<div class="expanded-home-actions">([\s\S]*?)<\/div>/)?.[1];
+  assert.ok(actions);assert.equal((actions.match(/<button\b/g)||[]).length,1);
   assert.equal(JSON.stringify(saved),before);
 });
 test('TEST_ONLY active progress remains visible while terminal execution details start collapsed',()=>{

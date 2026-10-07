@@ -6,6 +6,7 @@ import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
+import {aiAnalysisError} from './utils/aiAnalysisError.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -432,7 +433,8 @@ recentLow20:
       `${this.baseUrl}/stock/ai-analysis?symbol=${encodeURIComponent(symbol)}&newsSnapshotId=${encodeURIComponent(newsSnapshotId)}`
     );
     const body=await response.json();
-    if (!response.ok) throw new Error(body.message||body.error||`AI 분석 API 오류 (${response.status})`);
+    if (!response.ok) throw new Error(aiAnalysisError({code:body.error,status:response.status,
+      message:body.message||body.error||`AI 분석 API 오류 (${response.status})`}).message);
     if(body.symbol!==symbol || body.newsSnapshotId!==newsSnapshotId)throw Error('AI 해설의 종목·뉴스 묶음이 일치하지 않습니다.');
     return body;
   }
@@ -510,6 +512,7 @@ export default function App() {
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
+  const aiErrorView=aiAnalysisError(aiError);
   const detailRequestRef=useRef(0);
   const aiRequestRef=useRef(0);
   const detailSnapshotRef=useRef(null);
@@ -2028,8 +2031,8 @@ export default function App() {
               ) : aiError && !aiAnalysis ? (
                 <div className="bg-red-950/30 border border-red-900/40 rounded-xl p-6 text-center space-y-2">
                   <AlertTriangle className="w-5 h-5 text-red-400 mx-auto" />
-                  <p className="text-xs font-medium text-red-200">AI 분석을 일시적으로 사용할 수 없습니다.</p>
-                  <p className="text-[11px] text-slate-500">{aiError}</p>
+                  <p className="text-xs font-medium text-red-200">{aiErrorView.title}</p>
+                  <p className="text-xs text-slate-300">{aiErrorView.description}</p>
                 </div>
               ) : aiAnalysis ? (
                 <div className="space-y-4 text-xs">
