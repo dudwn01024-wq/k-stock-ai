@@ -167,6 +167,7 @@ test('TEST_ONLY frontend shows reuse, original timestamps, and no new-analysis c
   const component={exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/ExpandedRecommendation.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code,{module:component,exports:component.exports,require:name=>name==='react'?stub:{},Intl,Date,Set,Number});
   const html=renderToStaticMarkup(React.createElement(component.exports.default,{service:{}}));
-  assert.match(html,/최근 분석 결과 재사용 · 외부 데이터 재조회 없음/);assert.match(html,/원래 분석 완료/);assert.match(html,/최근 10분/);assert.match(html,/500종목 분석 요청/);
+  assert.match(html,/최근 분석 결과 재사용 · 외부 데이터 재조회 없음/);assert.match(html,/원래 분석 완료/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);assert.match(html,/500종목 분석 요청/);
+  assert.doesNotMatch(html,/사이트 접속·새로고침·이력 조회|최근 10분/);
   assert.doesNotMatch(html,/새 분석 완료|이번 실행 결과/);assert.match(html,/26\. 10\. 3\./);
 });

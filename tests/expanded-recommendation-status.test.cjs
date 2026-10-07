@@ -31,7 +31,8 @@ function renderStatus(status,stats){
   const service=new Proxy({},{get:()=>()=>{calls++;throw Error('TEST_ONLY_PROVIDER_FORBIDDEN');}});
   const html=renderToStaticMarkup(React.createElement(component.exports.default,{service}));
   const label=component.exports.expandedRunStatusLabel(run);
-  assert.equal(calls,0);assert.match(html,/최근 10분/);assert.match(html,/500종목 분석 요청/);
+  assert.equal(calls,0);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);assert.match(html,/500종목 분석 요청/);
+  assert.doesNotMatch(html,/사이트 접속·새로고침·이력 조회|최근 10분/);
   assert.equal(new RegExp('<strong>실행 상태: ([^<]*)</strong>').exec(html)?.[1],label);
   return {html,label};
 }

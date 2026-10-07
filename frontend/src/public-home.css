@@ -39,6 +39,19 @@
 .home-expanded > summary { padding:16px; cursor:pointer; color:#cbd5e1; }
 #stock-detail { scroll-margin-top:180px; }
 .public-home button:focus-visible,.public-home summary:focus-visible { outline:2px solid #6ee7b7; outline-offset:4px; }
+/* Expanded main only. History, legacy50 and private screens keep their theme. */
+.public-home.expanded-home-theme { background:#20334d; color:#edf3fa; }
+.expanded-home-theme .home-header { background:#293f59; border-color:#4c6580; }
+.expanded-home-theme .home-header p { color:#c6d5e5; }
+.expanded-home-theme .home-search label { color:#dbe7f3; }
+.expanded-home-theme .home-search input { background:#21364e; border-color:#6b8199; color:#f4f8fc; }
+.expanded-home-theme .home-header>button { background:#39536f; border-color:#6b8199; color:#edf3fa; }
+.expanded-home-theme .home-popular-strip { background:#2a4059; border-color:#4c6580; }
+.expanded-home-theme .home-popular-strip>span,.expanded-home-theme .home-popular-strip button span { color:#b9cce0; }
+.expanded-home-theme .home-popular-strip button { background:#354d68; border-color:#627b96; color:#e5eef7; }
+.expanded-home-theme .home-reference-strip { background:#263e55; border-color:#4c6580; color:#c5e7de; }
+.expanded-home-theme>footer { background:#233850; border-color:#4c6580; color:#b9cce0; }
+.expanded-home-theme>footer p { color:#b9cce0; }
 @media(max-width:640px) {
  .home-search { order:3; width:100%; max-width:none; min-width:0; flex-basis:100%; }
  .public-home .home-header { gap:12px; }

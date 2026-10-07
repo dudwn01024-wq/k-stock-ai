@@ -116,7 +116,7 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
     const html=renderToStaticMarkup(React.createElement(component,{service:noService}));
     assert.ok(html.indexOf('TEST_ONLY_FIRST')<html.indexOf('TEST_ONLY_SECOND'));assert.doesNotMatch(html,/TEST_ONLY_EXCLUDED/);
     assert.match(html,/관심 후보 · 기존 추천 점수 2 \/ 4/);assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);
-    assert.match(html,/상세 근거 보기/);assert.match(html,/최근 10분/);
+    assert.match(html,/상세 근거 보기/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   }
   assert.equal(JSON.stringify(items),before);
 });
@@ -141,4 +141,38 @@ test('TEST_ONLY page mount and reread load only saved results and never start a 
     cleanup.forEach(fn=>fn?.());
   }
   assert.deepEqual(calls,{getHistory:2,getHistoryDetail:2});
+});
+
+function renderHome({run=null,saved=null}){
+  let index=0;const react={...React,useState:()=>[index++===0?run:index===2?saved:null,()=>{}],
+    useEffect:()=>{},useCallback:fn=>fn,useRef:()=>({current:0})};
+  const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
+  return renderToStaticMarkup(React.createElement(component,{service:noService}));
+}
+test('TEST_ONLY expanded home shows only two summary totals, a compact risk note and unchanged candidate evidence',()=>{
+  const saved=detail([candidate()]);saved.stats={universeCount:500,fastCompleted:500,fastInsufficient:7,
+    fastFailed:0,deepTargetCount:40,deepCompleted:40,deepFailed:0,finalCandidateCount:1};
+  const before=JSON.stringify(saved),html=renderHome({saved});
+  const totals=html.match(/<div class="expanded-counts">([\s\S]*?)<\/div>/)?.[1];assert.ok(totals);
+  assert.equal((totals.match(/<span>/g)||[]).length,2);
+  assert.match(totals,/조회 대상 <strong>500<\/strong>/);assert.match(totals,/최종 후보 <strong>1<\/strong>/);
+  assert.doesNotMatch(totals,/1단계|2단계|실패|자료 부족/);
+  assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
+  assert.doesNotMatch(html,/<h2|2단계 스크리닝 · 분석 참고용|사이트 접속·새로고침·이력 조회|최근 10분/);
+  assert.match(html,/저장된 분석 결과 · 실시간 시세가 아닙니다/);
+  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'진입 참고가'),'100원');
+  assert.match(html,/상세 근거 보기/);assert.match(html,/TEST_ONLY 뉴스 0/);
+  assert.equal(JSON.stringify(saved),before);
+});
+test('TEST_ONLY active progress remains visible while terminal execution details start collapsed',()=>{
+  const run={runId:'TEST_ONLY_HOME',status:'FAST_SCREENING',stats:{universeCount:500,fastCompleted:237,
+    fastFailed:0,fastInsufficient:0,deepTargetCount:40,deepCompleted:0,deepFailed:0},recommendations:[],aiStatus:'DISABLED'};
+  const before=JSON.stringify(run),active=renderHome({run});
+  assert.match(active,/<details class="expanded-run-details" open="">/);
+  assert.match(active,/1단계 처리 237 \/ 500/);
+  const complete=renderHome({run:{...run,status:'COMPLETED'}});
+  assert.match(complete,/<strong>실행 상태: 완료<\/strong>/);
+  assert.match(complete,/<details class="expanded-run-details">/);
+  assert.doesNotMatch(complete,/<details class="expanded-run-details" open/);
+  assert.equal(JSON.stringify(run),before);
 });

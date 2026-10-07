@@ -678,7 +678,7 @@ export default function App() {
   };
 
   return (
-    <div className="public-home min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950">
+    <div className={`public-home ${recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -726,7 +726,7 @@ export default function App() {
         </button>
       </header>
 
-      <div className="bg-slate-900/60 border-b border-slate-800/80 px-4 lg:px-8 py-2 flex items-center gap-2 overflow-x-auto text-xs">
+      <div className="home-popular-strip bg-slate-900/60 border-b border-slate-800/80 px-4 lg:px-8 py-2 flex items-center gap-2 overflow-x-auto text-xs">
         <span className="text-slate-400 shrink-0">주요 종목:</span>
         {POPULAR_STOCKS.map((stock) => (
           <button
@@ -743,7 +743,7 @@ export default function App() {
         ))}
       </div>
 
-      <div className="bg-emerald-950/30 border-b border-emerald-900/40 px-4 lg:px-8 py-1.5 text-[11px] text-emerald-300">
+      <div className="home-reference-strip bg-emerald-950/30 border-b border-emerald-900/40 px-4 lg:px-8 py-1.5 text-[11px] text-emerald-300">
         <div className="flex items-center gap-2">
           <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
           <span>
