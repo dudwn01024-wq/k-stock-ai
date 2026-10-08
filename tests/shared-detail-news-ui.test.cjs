@@ -20,7 +20,7 @@ const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'
   newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1},
   marketContext:{newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1}}});
 function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode='expanded500'}={}){
-  let states=[],refs=[],effects=[],cleanups=[];const calls=[],navigations=[],document={title:'K-Stock AI',getElementById:()=>null};let stateCursor=0,refCursor=0;
+  let states=[],refs=[],effects=[],cleanups=[];const calls=[],navigations=[],document=require('./helpers/public-meta-dom.cjs')();let stateCursor=0,refCursor=0;
   let props={routeSymbol:symbol,onNavigateStock:next=>navigate(next)};
   const react={...React,useState:initial=>{const store=states,i=stateCursor++;if(!(i in store))store[i]=bindings[i]==='recommendationMode'?mode:initial;
     return [store[i],value=>{store[i]=typeof value==='function'?value(store[i]):value;}];},

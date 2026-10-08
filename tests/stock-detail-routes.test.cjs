@@ -119,12 +119,16 @@ test('TEST_ONLY back/forward selects URL symbols without crashes or query secret
  }finally{router.dispose();}
 });
 test('TEST_ONLY title uses successful quote stockName and returns to service title on home/exit',async()=>{
- const h=await makeReady('005930');h.render();h.effects.find(fn=>fn.toString().includes('document.title'))();
- assert.equal(h.document.title,'TEST_ONLY 005930 주식 분석 | K-Stock AI');h.navigate(null);assert.equal(h.document.title,'K-Stock AI');
+ const h=await makeReady('005930');const tree=h.render(),meta=visit(tree,n=>n.type?.name==='PageMeta');
+ meta.type(meta.props);const clear=h.effects.at(-1)();
+ assert.equal(h.document.title,'TEST_ONLY 005930 주식 분석 | K-Stock AI');clear();
+ assert.equal(h.document.title,'K-Stock AI | 국내주식 데이터 분석');h.navigate(null);
+ assert.equal(h.document.title,'K-Stock AI | 국내주식 데이터 분석');
 });
 test('TEST_ONLY route addition preserves backend, analysis/math/auth/data, CSS, manual AI function and payload mapping exactly',()=>{
  const base='2e731ee1ca0d80e952a6d8b46a75f60f37f2df7e',current=fs.readFileSync('frontend/src/App.jsx','utf8'),old=execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(require('./helpers/without-stock-routing.cjs')(current),old);
- assert.equal(current.slice(0,current.indexOf('export default function App')),old.slice(0,old.indexOf('export default function App')));
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/components','frontend/src/pages','frontend/src/main.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ const withoutSeo=require('./helpers/without-public-seo.cjs')(current);
+ assert.equal(withoutSeo.slice(0,withoutSeo.indexOf('export default function App')),old.slice(0,old.indexOf('export default function App')));
+ assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/components',':!frontend/src/components/PageMeta.jsx','frontend/src/pages','frontend/src/main.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
 });

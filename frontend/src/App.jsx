@@ -14,6 +14,7 @@ import { strategyExplanation } from './utils/strategyExplanation.js';
 import './public-home.css';
 import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
+import PageMeta from './components/PageMeta.jsx';
 import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -645,12 +646,6 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
     };
   }, [initialDetailSymbol,isStockRoute,routeSymbol,loadRealStockData]);
 
-  useEffect(()=>{
-    document.title=routeSymbol&&quoteData?.symbol===routeSymbol
-      ? (quoteData.stockName||routeSymbol)+' 주식 분석 | K-Stock AI':'K-Stock AI';
-    return()=>{document.title='K-Stock AI';};
-  },[routeSymbol,quoteData?.symbol,quoteData?.stockName]);
-
   const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
     patch=>setRecommendationRun(previous=>({...previous,...patch}))),[backendService]);
   const loadRecommendations=useCallback(()=>recommendationLoader.load(),[recommendationLoader]);
@@ -744,6 +739,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
   return (
     <div className={`public-home public-light-theme ${!isStockRoute&&recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
+      <PageMeta path={routeSymbol?'/stocks/'+routeSymbol:'/'} stockName={routeSymbol&&quoteData?.symbol===routeSymbol?quoteData.stockName:null}/>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
         <div className="home-brand flex items-center gap-3">
           <div className="home-brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">

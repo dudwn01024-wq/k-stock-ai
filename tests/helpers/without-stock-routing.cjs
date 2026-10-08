@@ -106,7 +106,7 @@ const edits=[
   ]
 ];
 module.exports=source=>{
- source=source.replaceAll('\r\n','\n');
+ source=require('./without-public-seo.cjs')(source).replaceAll('\r\n','\n');
  if(!source.includes('export default function App({routeSymbol=null'))return source;
  for(const [before,after] of edits.slice().reverse()){
   if(source.split(after).length!==2)throw Error('APP_ROUTING_BOUNDARY_CHANGED '+after.slice(0,80));
