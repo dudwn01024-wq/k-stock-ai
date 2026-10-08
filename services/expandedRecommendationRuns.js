@@ -3,6 +3,7 @@ const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {hasRequiredOfficialStockType}=require('./krxStockSecurityType');
 const {attachOutcomeBaseline}=require('./recommendationOutcomeBaseline');
 const {rankFastScreenResults}=require('./recommendationFastScreen');
+const {expandedRunFailureDiagnostic}=require('./expandedRunFailureDiagnostics');
 const {randomUUID}=require('node:crypto');
 const {EXPANDED_HISTORY_VERSION,EXPANDED_POLICY_VERSION}=require('./recommendationHistory');
 const {EXPANDED_REUSE_TTL_MS,reuseKeyFor}=require('./expandedRecommendationReuse');
@@ -41,9 +42,10 @@ function createExpandedRecommendationRuns({
   loadUniverse,fastScreen,deepReview,rank,
   history=null,codeVersion=null,deepLimit=DEFAULT_DEEP_LIMIT,
   fastConcurrency=DEFAULT_FAST_CONCURRENCY,deepConcurrency=DEFAULT_DEEP_CONCURRENCY,
-  aiEnabled=false,analyze=null,now=Date.now,makeId=randomUUID,maxEntries=MAX_RUNS_IN_MEMORY
+  aiEnabled=false,analyze=null,now=Date.now,makeId=randomUUID,maxEntries=MAX_RUNS_IN_MEMORY,
+  logFailure=line=>console.warn(line)
 }){
-  if(![loadUniverse,fastScreen,deepReview,rank].every(x=>typeof x==='function'))throw problem('EXPANDED_RUN_CONFIG_INVALID');
+  if(![loadUniverse,fastScreen,deepReview,rank,logFailure].every(x=>typeof x==='function'))throw problem('EXPANDED_RUN_CONFIG_INVALID');
   if(!Number.isInteger(deepLimit)||deepLimit<20||deepLimit>60||
     !Number.isInteger(fastConcurrency)||fastConcurrency<1||fastConcurrency>MAX_FAST_CONCURRENCY||
     !Number.isInteger(deepConcurrency)||deepConcurrency<1||deepConcurrency>MAX_DEEP_CONCURRENCY||
@@ -128,6 +130,7 @@ function createExpandedRecommendationRuns({
     if(!validId(runId)||runs.has(runId))throw problem('EXPANDED_RUN_ID_INVALID');
     const run={...compatibility,reuseKey,runId,scanId:runId,protocolVersion:RUN_PROTOCOL,status:'QUEUED',
       reused:false,reuseTtlMs:EXPANDED_REUSE_TTL_MS,
+      failureStage:null,failureReason:null,failureDiagnostic:null,
       scanStartedAt:timestamp(),scanCompletedAt:null,
       stats:{universeCount:0,fastCompleted:0,fastFailed:0,fastInsufficient:0,
         deepTargetCount:0,deepCompleted:0,deepFailed:0,finalCandidateCount:0},
@@ -137,9 +140,12 @@ function createExpandedRecommendationRuns({
     runs.set(runId,run);
     activeId=runId;
     run.work=Promise.resolve().then(async()=>{
+      let failureStage='UNIVERSE_LOAD',universeSnapshot=null;
       try{
         run.status='FAST_SCREENING';
         const snapshot=await loadUniverse();
+        failureStage='UNIVERSE_VALIDATION';
+        universeSnapshot=snapshot;
         if(!Array.isArray(snapshot?.stocks)||snapshot.stocks.length!==500||
           new Set(snapshot.stocks.map(x=>x.symbol)).size!==500||
           snapshot.stocks.some(x=>!isNaverKrStockItemCode(x.symbol)||
@@ -152,6 +158,7 @@ function createExpandedRecommendationRuns({
         run.requestStats.universeRequests=snapshot.requestCount??0;
         run.requestStats.officialTypeRequests=snapshot.officialTypeRequests??0;
         run.stats.universeCount=500;
+        failureStage='FAST_SCREEN';
         const screened=await mapBounded(snapshot.stocks,fastConcurrency,async(stock,index)=>{
           try{
             const item=await fastScreen(stock);
@@ -185,6 +192,7 @@ function createExpandedRecommendationRuns({
         }));
         run.stats.deepTargetCount=deepTargets.length;
         run.status='DEEP_REVIEWING';
+        failureStage='DEEP_REVIEW';
         const deep=await mapBounded(deepTargets,deepConcurrency,async(stock)=>{
           const observed={deepReviewRequests:0,newsRequests:0,failedRequests:0};
           const recordRequest=(category,failed=false)=>{
@@ -216,6 +224,7 @@ function createExpandedRecommendationRuns({
         const finalStatus=run.stats.fastFailed||run.stats.fastInsufficient||run.stats.deepFailed?'PARTIAL':'COMPLETED';
         run.status=finalStatus;
         run.scanCompletedAt=timestamp();
+        failureStage='HISTORY_WRITE';
         if(history?.status().status==='CONFIGURED'){
           try{
             run.history=history.saveExpanded({scanId:runId,scanStartedAt:run.scanStartedAt,
@@ -226,6 +235,7 @@ function createExpandedRecommendationRuns({
           }catch(error){run.history={status:'FAILED',reason:error.code?.startsWith('HISTORY_')?error.code:'HISTORY_WRITE_FAILED'};}
         }
         if(aiEnabled&&typeof analyze==='function'){
+          failureStage='AI_EXPLANATION';
           const targets=ranked.filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION'].includes(x.grade)).slice(0,3);
           if(targets.length){
             run.status='AI_EXPLAINING';
@@ -265,12 +275,15 @@ function createExpandedRecommendationRuns({
       }catch(error){
         run.status='FAILED';
         run.scanCompletedAt=timestamp();
-        run.failureReason=error.code?.startsWith('EXPANDED_')||error.code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'?
-          error.code:'EXPANDED_RUN_FAILED';
-        if(Number.isInteger(error.officialTypeRequests))
-          run.requestStats.officialTypeRequests=error.officialTypeRequests;
-        if(Number.isInteger(error.requestCount))
-          run.requestStats.universeRequests=error.requestCount;
+        const diagnostic=expandedRunFailureDiagnostic(error,{stage:failureStage,universeSnapshot});
+        run.failureStage=diagnostic.stage;
+        run.failureReason=diagnostic.code;
+        run.failureDiagnostic=diagnostic;
+        if(diagnostic.officialTypeRequests!==null)
+          run.requestStats.officialTypeRequests=diagnostic.officialTypeRequests;
+        if(diagnostic.universeRequests!==null)
+          run.requestStats.universeRequests=diagnostic.universeRequests;
+        try{logFailure('[K-Stock AI] Expanded recommendation failed '+JSON.stringify(diagnostic));}catch{}
         if(Number.isInteger(error.failedRequests))
           run.requestStats.failedRequests+=error.failedRequests;
         else if(['UNIVERSE_PROVIDER_REQUEST_FAILED','UNIVERSE_PROVIDER_HTTP_FAILED',

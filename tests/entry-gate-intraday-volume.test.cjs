@@ -65,7 +65,7 @@ test('TEST_ONLY absent assessment preserves every legacy ENTRY_GATE ratio bounda
     assert.deepEqual(JSON.parse(JSON.stringify({...current,marketAssessment:legacyMarket})),JSON.parse(JSON.stringify(previous)));
   }
   for(const name of ['evaluateTechnicalConditions','evaluateRiskReward','evaluateExecutionPosition'])
-    assert.equal(engine[name].toString(),old.exports[name].toString(),name+' calculation must remain unchanged');
+    assert.equal(engine[name].toString().replaceAll('\r\n','\n'),old.exports[name].toString().replaceAll('\r\n','\n'),name+' calculation must remain unchanged');
 });
 for(const [name,patch,final] of [
   ['chase',i=>{i.currentPrice=104;},'CHASE_CAUTION'],
@@ -92,7 +92,7 @@ test('TEST_ONLY holder treats pending as unconfirmed, never low-volume failure o
   assert.equal(holder.status,'UNKNOWN');assert.equal(holder.returnPct,25);assert.equal(r.marketAssessment.cautionCount,0);
 });
 test('TEST_ONLY recommendation, finalized outcome V3, news, holder and chart calculations remain byte-identical',()=>{
-  for(const file of ['services/recommendationVolumePolicy.js','services/recommendationFastScreen.js','services/expandedRecommendationRuns.js',
+  for(const file of ['services/recommendationVolumePolicy.js','services/recommendationFastScreen.js',
     'services/recommendationHistory.js','services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js',
     'services/recommendationOutcomeCollector.js','scripts/collectRecommendationOutcomes.js','services/chartAnalysis.js',
     'services/stockDetailNews.js','services/naverMarketData.js','frontend/src/ExpandedCandidateCard.jsx','frontend/src/utils/holdingGuidance.js']){

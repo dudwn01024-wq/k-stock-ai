@@ -10,10 +10,18 @@ const PAGE_SIZE=100;
 const TARGET_COUNT=500;
 const MAX_REQUESTS=10;
 
-function failure(code,requestCount=0){
+function failure(code,requestCount=0,diagnostic={}){
   const error=new Error(code);
   error.code=code;
   error.requestCount=requestCount;
+  for(const key of ['officialTypeChecks','officialTypeRequests'])
+    if(Number.isSafeInteger(diagnostic?.[key])&&diagnostic[key]>=0)error[key]=diagnostic[key];
+  if(code==='UNIVERSE_PROVIDER_HTTP_FAILED'&&Number.isInteger(diagnostic?.httpStatus)&&
+    diagnostic.httpStatus>=100&&diagnostic.httpStatus<=599)error.httpStatus=diagnostic.httpStatus;
+  if(code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'){
+    if(isNaverKrStockItemCode(diagnostic?.blockedSymbol))error.blockedSymbol=diagnostic.blockedSymbol;
+    if(MARKETS.includes(diagnostic?.blockedMarket))error.blockedMarket=diagnostic.blockedMarket;
+  }
   return error;
 }
 
@@ -71,7 +79,7 @@ async function fetchNaverUniversePage({market,page,pageSize=PAGE_SIZE,fetchImpl=
   let response;
   try{response=await fetchImpl(url,{method:'GET',headers,redirect:'error',signal:signal??AbortSignal.timeout(12000)});}
   catch{throw failure('UNIVERSE_PROVIDER_REQUEST_FAILED',1);}
-  if(!response?.ok)throw failure('UNIVERSE_PROVIDER_HTTP_FAILED',1);
+  if(!response?.ok)throw failure('UNIVERSE_PROVIDER_HTTP_FAILED',1,{httpStatus:response?.status});
   let data;
   try{data=await response.json();}catch{throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',1);}
   const responsePage=integer(data?.page),responseSize=integer(data?.pageSize),totalCount=integer(data?.totalCount);
@@ -102,7 +110,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       onRequest({market,page,pageSize:PAGE_SIZE,requestCount});
       let result;
       try{result=await readPage({market,page,pageSize:PAGE_SIZE});}
-      catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount);}
+      catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount,error);}
       if(!result||!Array.isArray(result.stocks)||!Number.isInteger(result.totalCount)||
         result.totalCount<0||typeof result.hasNext!=='boolean'||result.stocks.length>PAGE_SIZE||
         result.stocks.length===0||result.hasNext!==(page*PAGE_SIZE<result.totalCount)||
@@ -122,7 +130,8 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
           const classification=typeClassifier.classify(item.stock);
           Object.assign(item.stock,classification);
           if(classification.securityType==='UNVERIFIED'){
-            const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount);
+            const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount,{
+              blockedSymbol:item.stock.symbol,blockedMarket:item.stock.market});
             error.officialTypeRequests=typeClassifier.requestCount();
             error.officialTypeChecks=typeClassifier.checkCount();
             throw error;
@@ -143,6 +152,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       entry.totalCount=result.totalCount;
       entry.done=!result.hasNext;
     };
+    try{
     // Inspect each market before comparing its next unseen page with the global cutoff.
     for(const market of MARKETS)await read(market);
     while(true){
@@ -165,6 +175,12 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
         .sort((a,b)=>state[b].lastValue-state[a].lastValue||a.localeCompare(b));
       if(!choices.length||requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_TOP_500_NOT_PROVEN',requestCount);
       await read(choices[0]);
+    }
+    }catch(error){
+      // Copy only public identifiers/status and measured counters; discard raw exceptions.
+      throw failure(error?.code,requestCount,{
+        officialTypeChecks:typeClassifier.checkCount(),officialTypeRequests:typeClassifier.requestCount(),
+        blockedSymbol:error?.blockedSymbol,blockedMarket:error?.blockedMarket,httpStatus:error?.httpStatus});
     }
   }
   return {load};
