@@ -59,9 +59,9 @@ const fixture=()=>({testOnly:true,currentPrice:10000,entryPrice:9500,takeProfitP
     macd:{status:'FAVORABLE',detail:'MACD가 Signal 위에 있고 Histogram이 양수입니다.'}}},
   marketAssessment:{available:true,conditions:{volume:{status:'CAUTION',label:'거래량',detail:'20일 평균 대비 0.32배로 거래량이 낮습니다.'}}},
   riskRewardAssessment:{status:'FAIL'}});
-function render(strategy){
+function render(strategy, analysis){
   let cursor=0;
-  const values={showDetail:true,recommendationMode:'expanded500',strategyData:strategy,
+  const values={showDetail:true,recommendationMode:'expanded500',strategyData:strategy,aiAnalysis:analysis?{analysis}:undefined,
     quoteData:{testOnly:true,symbol:'000001',stockName:'TEST_ONLY 합성 종목',currentPrice:10000,changeRate:0}};
   const react={...React,useState:initial=>[Object.hasOwn(values,bindings[cursor])?values[bindings[cursor++]]:(cursor++,initial),()=>{}],
     useEffect:()=>{},useMemo:fn=>fn(),useCallback:fn=>fn,useRef:initial=>({current:initial})};
@@ -75,7 +75,7 @@ test('TEST_ONLY actual detail render shows easy copy while retaining indicator n
     strategy.marketAssessment.conditions.volume.detail]){
     assert.ok(html.includes(copy(input)),copy(input));assert.ok(!html.includes(input));
   }
-  for(const label of ['RSI14','MACD','Signal','ATR14','볼린저밴드 위치','MA5','MA20','MA60','MA120','KIS 일봉 기준'])assert.ok(html.includes(label),label);
+  for(const label of ['RSI14','MACD','신호선','ATR14','볼린저밴드 위치','MA5','MA20','MA60','MA120','KIS 일봉 기준'])assert.ok(html.includes(label),label);
   for(const value of ['47.02','2.75','1.25','123원','45.25%','0.32배','10,000원','9,500원','12,000원','9,000원'])assert.ok(html.includes(value),value);
   assert.equal(JSON.stringify(strategy),before,'no value, status, score, price, pattern or reason is rewritten');
 });
@@ -92,7 +92,7 @@ test('TEST_ONLY intraday pending detail retains its special status and exact num
 test('TEST_ONLY explanations stay display-only while all existing server calculations remain protected',()=>{
   assert.equal((appSource.match(/strategyExplanation\(strategyData/g)||[]).length,5);
   const before=execFileSync('git',['show','5e2dc4469b9c1c66beeebc95f00a2512772d0216:server.js'],{encoding:'utf8'});
-  assert.equal(require('./helpers/without-private-holding.cjs')(fs.readFileSync('server.js','utf8')),before.replaceAll('\r\n','\n'));
+  assert.equal(require('./helpers/without-private-holding.cjs')(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8'))),before.replaceAll('\r\n','\n'));
   assert.equal(execFileSync('git',['diff','5e2dc4469b9c1c66beeebc95f00a2512772d0216','--','services/tradingStrategy.js',
     'services/chartAnalysis.js','services/recommendationUniverse.js','services/recommendationFastScreen.js',
     'services/recommendationVolumePolicy.js','services/expandedRecommendationRuns.js','services/recommendationHistory.js',

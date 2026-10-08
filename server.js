@@ -2498,7 +2498,7 @@ const buildGeminiPrompt =
 2. 제공되지 않은 가격, 거래량, 수급, 뉴스, 기업 사실을 만들지 않는다.
 3. 인터넷에서 알고 있는 별도 정보나 기억을 추가하지 않는다.
 4. 가격을 새로 계산하거나 임의로 제시하지 않는다.
-5. 진입 고려가, 목표가, 손절가는 backend가 실제 가격 데이터로 이미 계산한 값을 그대로 사용한다.
+5. 전략 계산 기준가, 상단 가격 기준, 하단 위험 기준은 backend가 실제 가격 데이터로 이미 계산한 값을 그대로 사용한다.
 6. 해당 값이 null이면 절대로 숫자를 만들어 채우지 않는다.
 7. 뉴스 분석은 반드시 suppliedNews 배열에 포함된 기사만 사용한다.
 8. 기사에 없는 사실을 추론해서 확정적으로 말하지 않는다.
@@ -2524,7 +2524,7 @@ ${JSON.stringify(
 
 {
   "summary": "제공 데이터와 확인된 기준일에 따른 종합 분석",
-  "technicalAnalysis": "현재가, MA5, MA20, 최근 고가/저가를 이용한 설명",
+  "technicalAnalysis": "현재가, 5일·20일 이동평균선, 최근 고가/저가를 이용한 설명",
   "volumeAnalysis": "제공 거래량과 20일 평균 거래량 비교 및 기준일 한계 설명",
   "supplyDemandAnalysis": "외국인/기관 순매수 데이터를 이용한 설명",
   "newsAnalysis": "suppliedNews에 포함된 최신 기사만 이용한 설명",
@@ -2537,13 +2537,13 @@ ${JSON.stringify(
   "strategyExplanation": {
     "signal": "backend의 signal 값을 그대로 설명",
     "entryPrice": null,
-    "entryReason": "backend가 계산한 진입 고려가의 근거 설명",
+    "entryReason": "backend가 계산한 전략 계산 기준가의 근거 설명",
     "targetPrice": null,
-    "targetReason": "backend가 계산한 목표가의 근거 설명",
+    "targetReason": "backend가 계산한 상단 가격 기준의 근거 설명",
     "stopLossPrice": null,
-    "stopLossReason": "backend가 계산한 손절가의 근거 설명"
+    "stopLossReason": "backend가 계산한 하단 위험 기준의 근거 설명"
   },
-  "riskRewardExplanation": "현재가 기준 손익비와 진입 고려가 기준 손익비 설명",
+  "riskRewardExplanation": "현재가 기준 손익비와 전략 계산 기준가 기준 손익비 설명",
   "newsEvidence": [
     {
       "title": "실제로 suppliedNews에 존재하는 기사 제목",
@@ -2574,6 +2574,16 @@ strategy.stopLossPrice와 정확히 동일해야 한다.
 newsEvidence에는 suppliedNews에 실제 존재하는 기사만 넣는다.
 
 관련성이 낮으면 newsEvidence를 빈 배열로 반환한다.
+
+공개 해설 표현 규칙 (계산·판정 변경 없음):
+- 제공된 숫자, 기준일, 상태, 점수, 판정과 불확실성을 그대로 유지하고 설명 문구만 쉽게 쓴다.
+- entryPrice는 전략 계산 기준가, takeProfitPrice는 상단 가격 기준, stopLossPrice는 하단 위험 기준으로 부른다. 진입가·목표가·손절가라는 이전 표현은 사용자 설명에서 쓰지 않는다.
+- 추격매수 대신 가격 추격이라는 표현을 사용한다. 매수·매도 지시나 수익 보장을 하지 않는다.
+- RSI, MACD, ATR, 볼린저밴드라는 지표명은 유지한다. Signal은 신호선, Histogram은 MACD와 신호선의 차이로 설명한다.
+- MA5 > MA20 > MA60 정배열 및 MA20 상회는 단기·중기 이동평균선이 상승 방향으로 정렬돼 있고 현재 주가도 20일 이동평균선 위에 있다는 뜻으로 설명한다. 계산식 형태를 그대로 사용자 문장에 노출하지 않는다.
+- touches는 제공된 횟수를 그대로 사용해 최근 N회 확인된 지지선·저항선으로 설명한다. 횟수를 추정하지 않는다.
+- ATR로 하단 위험 기준을 계산한 근거는 가격 변동폭을 반영해 지지선보다 낮은 위치에 위험 기준을 계산했다는 쉬운 설명을 먼저 쓴다. 제공된 배수·차감 계산 정보는 보조 설명으로 그대로 유지한다.
+- 이 표현 규칙은 summary, positiveFactors, riskFactors, strategyExplanation을 포함한 모든 해설 문장에 적용한다. API JSON key, 계산값, backend 판정은 변경하지 않는다.
 
 한국어로 작성한다.
 `.trim();

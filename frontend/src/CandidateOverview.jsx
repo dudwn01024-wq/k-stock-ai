@@ -1,4 +1,5 @@
 import React from 'react';
+import { strategyExplanation } from './utils/strategyExplanation.js';
 import { toNullableNumber } from './utils/numbers.js';
 
 const conditions = [['trendPassed', '추세'], ['volumePassed', '거래량'], ['supplyPassed', '수급'], ['newsPassed', '뉴스']];
@@ -58,9 +59,9 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
               <div className="candidate-price"><span className="home-label">{historical?"당시 조회가":"현재가"}</span><strong>{price === null ? '데이터 없음' : `${price.toLocaleString('ko-KR')}원`}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
               <div className="candidate-context"><p><span className="home-label">선정 이유</span>{summary.reason}</p><p className="home-warning"><span className="home-label">주요 위험</span>{summary.risk}</p></div>
               <div className="candidate-score">후보 점수 {item.score??'미확인'} / {item.maxScore??'미확인'} · {gradeLabels[item.grade]??item.grade??'등급 미확인'}</div>
-              {ai?.summary&&<div className="candidate-ai"><span className="home-label">Gemini 설명 · 동일 scanId</span><p>{ai.summary}</p><details><summary>설명 근거와 주의 사항</summary>
-                {[['차트',ai.chartExplanation],['거래량',ai.volumeExplanation],['수급',ai.supplyDemandExplanation],['제공된 뉴스',ai.newsExplanation],['손익비',ai.riskRewardExplanation]].map(([label,value])=><p key={label}><b>{label}</b> · {value||'설명 미제공'}</p>)}
-                {Array.isArray(ai.riskFactors)&&ai.riskFactors.map((risk,index)=><p className="home-warning" key={index}>{risk}</p>)}
+              {ai?.summary&&<div className="candidate-ai"><span className="home-label">Gemini 설명 · 동일 scanId</span><p>{strategyExplanation(ai.summary)}</p><details><summary>설명 근거와 주의 사항</summary>
+                {[['차트',ai.chartExplanation],['거래량',ai.volumeExplanation],['수급',ai.supplyDemandExplanation],['제공된 뉴스',ai.newsExplanation],['손익비',ai.riskRewardExplanation]].map(([label,value])=><p key={label}><b>{label}</b> · {strategyExplanation(value)||'설명 미제공'}</p>)}
+                {Array.isArray(ai.riskFactors)&&ai.riskFactors.map((risk,index)=><p className="home-warning" key={index}>{strategyExplanation(risk)}</p>)}
               </details></div>}
               <div className="candidate-time"><span>출처: {metadata?.source || '미제공'}</span><span>기준 시각: {metadata?.sourceTimestamp || '없음'}</span><span>기준일: {metadata?.sourceBusinessDate || '없음'}</span><strong className={metadata?.freshnessStatus === 'STALE' ? 'home-warning' : ''}>{metadata?.freshnessStatus === 'STALE' ? '오래된 데이터 · 재확인 필요' : '최신 여부 미확인'}</strong></div>
             </li>;

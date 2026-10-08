@@ -8,9 +8,11 @@ const React = frontendRequire('react');
 const { renderToStaticMarkup } = frontendRequire('react-dom/server');
 const numbers = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/numbers.js'), 'utf8'), {format:'cjs'}).code, {module:numbers,exports:numbers.exports});
+const language = { exports: {} };
+vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'), 'utf8'), {format:'cjs'}).code, {module:language,exports:language.exports});
 const component = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/CandidateOverview.jsx'), 'utf8'), {loader:'jsx',format:'cjs'}).code,
-  { module:component, exports:component.exports, require:name=>name==='react'?React:numbers.exports });
+  { module:component, exports:component.exports, require:name=>name==='react'?React:name==='./utils/strategyExplanation.js'?language.exports:numbers.exports });
 const candidate = overrides => ({testData:true,symbol:'TEST',stockName:'테스트 종목',currentPrice:100,changeRate:1,
   strategy:{trendPassed:true,volumePassed:false},...overrides});
 const payload = item => ({universeSize:1,priority:[item],chase:[],watch:[],recommendations:[item]});

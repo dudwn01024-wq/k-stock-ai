@@ -1110,7 +1110,7 @@ export default function App() {
   <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-3">
     <div className="text-[11px] text-slate-500 mb-1">현재 후보 판단</div>
     <p className="text-xs text-slate-200 leading-relaxed">
-      {ai.summary || ai.candidateSummary}
+      {strategyExplanation(ai.summary || ai.candidateSummary)}
     </p>
   </div>
 )}
@@ -1121,7 +1121,7 @@ export default function App() {
                                   <div className="text-xs font-semibold text-emerald-400 mb-2">긍정 요인</div>
                                   <ul className="space-y-1.5 text-xs text-slate-300 list-disc list-inside">
                                     {ai.positiveFactors.map((factor, idx) => (
-                                      <li key={idx} className="leading-relaxed">{factor}</li>
+                                      <li key={idx} className="leading-relaxed">{strategyExplanation(factor)}</li>
                                     ))}
                                   </ul>
                                 </div>
@@ -1132,7 +1132,7 @@ export default function App() {
                                   <div className="text-xs font-semibold text-red-400 mb-2">주의 요인</div>
                                   <ul className="space-y-1.5 text-xs text-slate-300 list-disc list-inside">
                                     {ai.riskFactors.map((factor, idx) => (
-                                      <li key={idx} className="leading-relaxed">{factor}</li>
+                                      <li key={idx} className="leading-relaxed">{strategyExplanation(factor)}</li>
                                     ))}
                                   </ul>
                                 </div>
@@ -1142,7 +1142,7 @@ export default function App() {
                             {ai.riskRewardExplanation && (
                               <div className="bg-orange-950/15 border border-orange-900/30 rounded-lg p-3">
                                 <div className="text-[11px] text-orange-300 mb-1">손익비 해설</div>
-                                <p className="text-xs text-slate-300 leading-relaxed">{ai.riskRewardExplanation}</p>
+                                <p className="text-xs text-slate-300 leading-relaxed">{strategyExplanation(ai.riskRewardExplanation)}</p>
                               </div>
                             )}
 
@@ -1152,14 +1152,14 @@ export default function App() {
                                   <Newspaper className="w-3.5 h-3.5" />
                                   최신 뉴스 해설
                                 </div>
-                                <p className="text-xs text-slate-300 leading-relaxed">{ai.newsSummary}</p>
+                                <p className="text-xs text-slate-300 leading-relaxed">{strategyExplanation(ai.newsSummary)}</p>
                               </div>
                             )}
 
                             {ai.strategyComment && (
                               <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-3">
                                 <div className="text-[11px] text-slate-500 mb-1">가격 기준선 설명</div>
-                                <p className="text-xs text-slate-300 leading-relaxed">{ai.strategyComment}</p>
+                                <p className="text-xs text-slate-300 leading-relaxed">{strategyExplanation(ai.strategyComment)}</p>
                               </div>
                             )}
 
@@ -1169,7 +1169,7 @@ export default function App() {
                                   <AlertTriangle className="w-3.5 h-3.5" />
                                   최종 확인 포인트
                                 </div>
-                                <p className="text-xs text-amber-100/90 leading-relaxed">{ai.finalComment}</p>
+                                <p className="text-xs text-amber-100/90 leading-relaxed">{strategyExplanation(ai.finalComment)}</p>
                               </div>
                             )}
                           </div>
@@ -1607,7 +1607,7 @@ export default function App() {
         </span>
 
         <span className="text-[10px] text-slate-500 block mt-1">
-          Signal{' '}
+          신호선{' '}
           {hasNumber(strategyData?.macd?.signal)
             ? Number(strategyData.macd.signal).toLocaleString('ko-KR')
             : '-'}
@@ -2034,14 +2034,14 @@ export default function App() {
                   {aiAnalysis?.analysis?.summary && (
                     <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
                       <span className="text-slate-400 font-semibold uppercase tracking-wider block">종합 요약</span>
-                      <p className="text-slate-200 leading-relaxed text-sm">{aiAnalysis.analysis.summary}</p>
+                      <p className="text-slate-200 leading-relaxed text-sm">{strategyExplanation(aiAnalysis.analysis.summary)}</p>
                     </div>
                   )}
 
                   {aiAnalysis?.analysis?.marketCondition && (
                     <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
                       <span className="text-slate-400 font-semibold uppercase tracking-wider block">시장 상태</span>
-                      <p className="text-slate-200 leading-relaxed">{aiAnalysis.analysis.marketCondition}</p>
+                      <p className="text-slate-200 leading-relaxed">{strategyExplanation(aiAnalysis.analysis.marketCondition)}</p>
                     </div>
                   )}
 
@@ -2052,11 +2052,11 @@ export default function App() {
                         {Array.isArray(aiAnalysis.analysis.positiveFactors) ? (
                           <ul className="space-y-1 list-disc list-inside text-slate-200">
                             {aiAnalysis.analysis.positiveFactors.map((factor, idx) => (
-                              <li key={idx} className="leading-relaxed">{factor}</li>
+                              <li key={idx} className="leading-relaxed">{strategyExplanation(factor)}</li>
                             ))}
                           </ul>
                         ) : (
-                          <p className="text-slate-200 leading-relaxed">{aiAnalysis.analysis.positiveFactors}</p>
+                          <p className="text-slate-200 leading-relaxed">{strategyExplanation(aiAnalysis.analysis.positiveFactors)}</p>
                         )}
                       </div>
                     )}
@@ -2066,11 +2066,11 @@ export default function App() {
                         {Array.isArray(aiAnalysis.analysis.riskFactors) ? (
                           <ul className="space-y-1 list-disc list-inside text-slate-200">
                             {aiAnalysis.analysis.riskFactors.map((factor, idx) => (
-                              <li key={idx} className="leading-relaxed">{factor}</li>
+                              <li key={idx} className="leading-relaxed">{strategyExplanation(factor)}</li>
                             ))}
                           </ul>
                         ) : (
-                          <p className="text-slate-200 leading-relaxed">{aiAnalysis.analysis.riskFactors}</p>
+                          <p className="text-slate-200 leading-relaxed">{strategyExplanation(aiAnalysis.analysis.riskFactors)}</p>
                         )}
                       </div>
                     )}
@@ -2084,28 +2084,28 @@ export default function App() {
 
     {typeof aiAnalysis.analysis.strategyExplanation === 'string' ? (
       <p className="text-slate-200 leading-relaxed">
-        {aiAnalysis.analysis.strategyExplanation}
+        {strategyExplanation(aiAnalysis.analysis.strategyExplanation)}
       </p>
     ) : (
       <div className="space-y-2 text-slate-200">
         {aiAnalysis.analysis.strategyExplanation.entryReason && (
           <p>
             <span className="text-emerald-400 font-semibold">전략 기준가 근거: </span>
-            {aiAnalysis.analysis.strategyExplanation.entryReason}
+            {strategyExplanation(aiAnalysis.analysis.strategyExplanation.entryReason)}
           </p>
         )}
 
         {aiAnalysis.analysis.strategyExplanation.targetReason && (
           <p>
             <span className="text-red-400 font-semibold">상단 가격 기준 근거: </span>
-            {aiAnalysis.analysis.strategyExplanation.targetReason}
+            {strategyExplanation(aiAnalysis.analysis.strategyExplanation.targetReason)}
           </p>
         )}
 
         {aiAnalysis.analysis.strategyExplanation.stopLossReason && (
           <p>
             <span className="text-sky-400 font-semibold">하단 위험 기준 근거: </span>
-            {aiAnalysis.analysis.strategyExplanation.stopLossReason}
+            {strategyExplanation(aiAnalysis.analysis.strategyExplanation.stopLossReason)}
           </p>
         )}
       </div>
@@ -2155,7 +2155,7 @@ export default function App() {
                   {aiAnalysis?.analysis?.newsExplanation && (
                     <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
                       <span className="text-slate-400 font-semibold uppercase tracking-wider block">뉴스 해설</span>
-                      <p className="text-slate-200 leading-relaxed">{aiAnalysis.analysis.newsExplanation}</p>
+                      <p className="text-slate-200 leading-relaxed">{strategyExplanation(aiAnalysis.analysis.newsExplanation)}</p>
                     </div>
                   )}
 
@@ -2165,7 +2165,7 @@ export default function App() {
                         <AlertTriangle className="w-3.5 h-3.5" />
                         주의사항
                       </span>
-                      <p className="leading-relaxed">{aiAnalysis.analysis.caution}</p>
+                      <p className="leading-relaxed">{strategyExplanation(aiAnalysis.analysis.caution)}</p>
                     </div>
                   )}
                 </div>

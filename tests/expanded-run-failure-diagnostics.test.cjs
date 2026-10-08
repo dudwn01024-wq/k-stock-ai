@@ -166,7 +166,7 @@ test('TEST_ONLY entry/volume, scoring, official classification, history and outc
     'services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/recommendationHistory.js','services/expandedRecommendationReuse.js',
     'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js',
     'scripts/collectRecommendationOutcomes.js']){
-    const normalize = value => file==='server.js'?require('./helpers/without-private-holding.cjs')(value):value.replaceAll('\r\n','\n');
+    const normalize = value => file==='server.js'?require('./helpers/without-private-holding.cjs')(require('./helpers/without-public-language-policy.cjs')(value)):value.replaceAll('\r\n','\n');
     const current = normalize(fs.readFileSync(file,'utf8'));
     // Later UI copy changes leave the original data and decision code intact.
     const displayOnly = file === 'frontend/src/App.jsx' ? current

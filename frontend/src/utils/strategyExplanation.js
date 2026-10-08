@@ -28,6 +28,27 @@ export function strategyExplanation(text) {
   }
   const volume = text.match(/^20일 평균 대비 ([+-]?\d+(?:\.\d+)?)배로 거래량이 낮습니다\.$/);
   if (volume) return '최근 20일 평균보다 거래량이 적은 편입니다. 평균의 ' + volume[1] + '배입니다.';
-  // Missing, pending, and unfamiliar explanations retain their original meaning.
-  return text;
+  // Translate only known wording/terms. Never infer a new signal from free text.
+  let display = text
+    .replace(/현재가가 진입가보다 높아 추격매수 주의 구간으로 판정되었습니다\./g,
+      '현재 가격이 전략 계산 기준가보다 높아 가격 추격에 주의가 필요한 구간입니다.')
+    .replace(/MA5\s*>\s*MA20\s*>\s*MA60 정배열 및 MA20 상회 유지/g,
+      '단기·중기 이동평균선이 상승 방향으로 정렬돼 있고, 현재 주가도 20일 이동평균선 위에 있음')
+    .replace(/MA5\s*>\s*MA20\s*>\s*MA60 정배열/g,
+      '단기·중기 이동평균선이 상승 방향으로 정렬돼 있음')
+    .replace(/가장 가까운 (?:실제 )?(지지선|저항선)\s*\(touches:\s*(\d+)\)/g,
+      (_, line, count) => '최근 ' + count + '회 확인된 가장 가까운 ' + line)
+    .replace(/((?:최근 \d+회 확인된 가장 가까운 |가장 가까운 (?:실제 )?)?지지선)에서 (ATR(?:14)?)의 (\d+(?:\.\d+)?)배를 차감하여 산정되었습니다\./g,
+      (_, line, indicator, multiple) => '최근 가격 변동폭(ATR)을 반영해 ' + line + '보다 낮은 위치에 위험 기준을 계산했습니다. ' +
+        '계산에는 ' + indicator + '의 ' + multiple + '배를 차감하는 방식이 사용됩니다.')
+    .replace(/(?:전략 참고 )?(?:진입 고려가|진입가)(?=$|[^\p{L}]|보다|는|를|가|의|와|로|에|도|부터|까지)/gu, '전략 계산 기준가')
+    .replace(/(?:전략 참고 )?(목표가|손절가)(?=$|[^\p{L}]|보다|는|를|가|의|와|로|에|도|부터|까지)(는|를|가|와|로)?/gu, (_, term, particle = '') =>
+      (term === '목표가' ? '상단 가격 기준' : '하단 위험 기준') +
+      ({는:'은',를:'을',가:'이',와:'과',로:'으로'}[particle] || particle))
+    .replace(/추격매수/g, '가격 추격');
+  if (/\bMACD\b/.test(display)) {
+    display = display.replace(/\bSignal\b/g, '신호선').replace(/\bHistogram\b/g, 'MACD와 신호선의 차이');
+  }
+  // Unrecognized clauses and missing/pending meanings are otherwise unchanged.
+  return display;
 }
