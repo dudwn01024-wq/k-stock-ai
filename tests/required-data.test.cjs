@@ -107,7 +107,7 @@ for(const missing of ['missingSupply','missingVolume','missingTrend','missingNew
   });
   test('AI API receives insufficient strategy for '+missing,async()=>{
     const s=server({[missing]:true});await s.call('/api/stock/ai-analysis');
-    assert.equal(s.prompts.length,1);assert.match(s.prompts[0],/DATA_INSUFFICIENT/);assert.doesNotMatch(s.prompts[0],/ENTRY_CANDIDATE/);
+    assert.equal(s.prompts.length,1);assert.equal(promptInput(s.prompts[0]).strategy.finalAssessment.status,'DATA_INSUFFICIENT');assert.doesNotMatch(JSON.stringify(promptInput(s.prompts[0])),/ENTRY_CANDIDATE/);
   });
 }
 for(const missing of ['missingSupply','missingVolume','missingNews']) test('recommendation builder gates '+missing,async()=>{
@@ -133,10 +133,12 @@ test('recommendation API excludes missing required data from entry candidates',a
   }
 });
 
+// Prose rules name all enums; verify the actual canonical input, not the rule text.
+const promptInput = prompt => JSON.parse(prompt.split('분석 대상 실제 데이터:')[1].split('다음 JSON 형식으로만 답한다.')[0].trim());
 test('complete detail and AI routes retain entry candidate',async()=>{
   const s=server();const r=await s.call('/api/kis/trading-strategy-test');
   assert.equal(r.strategy.finalAssessment.status,'ENTRY_CANDIDATE');
-  await s.call('/api/stock/ai-analysis');assert.match(s.prompts[0],/ENTRY_CANDIDATE/);
+  await s.call('/api/stock/ai-analysis');assert.equal(promptInput(s.prompts[0]).strategy.finalAssessment.status,'ENTRY_CANDIDATE');
 });
 
 test('recommendation AI route never selects incomplete candidates for AI explanation',async()=>{
@@ -239,7 +241,7 @@ for(const [rawField,field] of [['acml_vol','volume'],['stck_clpr','close'],['stc
     const calls=adapter.calls();const s=server({kisLoader:adapter.load});
     const detail=await s.call('/api/kis/trading-strategy-test');blocked(detail.strategy);
     assert.equal(detail.strategy.sourceIntegrity.complete,false);
-    await s.call('/api/stock/ai-analysis');assert.match(s.prompts[0],/DATA_INSUFFICIENT/);assert.doesNotMatch(s.prompts[0],/ENTRY_CANDIDATE/);
+    await s.call('/api/stock/ai-analysis');assert.equal(promptInput(s.prompts[0]).strategy.finalAssessment.status,'DATA_INSUFFICIENT');assert.doesNotMatch(JSON.stringify(promptInput(s.prompts[0])),/ENTRY_CANDIDATE/);
     assert.equal(adapter.calls(),calls);
     rows.latestSourceIntegrity.missingFields.length=0;
     assert.ok((await adapter.load()).latestSourceIntegrity.missingFields.includes(field));
@@ -255,7 +257,7 @@ test('normal KIS adapter preserves normal detail and AI candidate and price plan
   const s=server({kisLoader:kisAdapter(kisRaw()).load});const r=await s.call('/api/kis/trading-strategy-test');
   assert.equal(r.strategy.finalAssessment.status,'ENTRY_CANDIDATE');
   assert.deepEqual([r.strategy.entryPrice,r.strategy.takeProfitPrice,r.strategy.stopLossPrice],[100,120,95]);
-  await s.call('/api/stock/ai-analysis');assert.match(s.prompts[0],/ENTRY_CANDIDATE/);
+  await s.call('/api/stock/ai-analysis');assert.equal(promptInput(s.prompts[0]).strategy.finalAssessment.status,'ENTRY_CANDIDATE');
 });
 test('KIS zero volume is complete and retained as zero',async()=>{
   const raw=kisRaw();raw[0].acml_vol=0;const rows=await kisAdapter(raw).load();
