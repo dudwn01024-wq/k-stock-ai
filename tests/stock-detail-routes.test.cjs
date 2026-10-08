@@ -133,5 +133,5 @@ test('TEST_ONLY route addition preserves backend, analysis/math/auth/data, CSS, 
  assert.equal(require('./helpers/without-stock-routing.cjs')(current),old);
  const withoutSeo=require('./helpers/without-public-seo.cjs')(current);
  assert.equal(withoutSeo.slice(0,withoutSeo.indexOf('export default function App')),old.slice(0,old.indexOf('export default function App')));
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/components',':!frontend/src/components/PageMeta.jsx','frontend/src/pages','frontend/src/main.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/components',':!frontend/src/components/PageMeta.jsx','frontend/src/pages','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
 });

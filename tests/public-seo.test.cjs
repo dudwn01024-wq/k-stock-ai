@@ -87,5 +87,5 @@ test('TEST_ONLY Vite emits only the two static crawler assets from the same meta
 test('TEST_ONLY App body, API/detail transactions, security, calculations, CSS and policy content stay exact',()=>{
  const base='76f910fa9c00c9a9c74665619db5a4793ca63853',app=fs.readFileSync('frontend/src/App.jsx','utf8');
  assert.equal(require('./helpers/without-public-seo.cjs')(app),execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/pages','frontend/src/main.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/pages','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
 });

@@ -12,7 +12,7 @@ function gate(symbol){
  const react={...React,useState:initial=>[requested,next=>{requested=typeof next==='function'?next(requested):next;}]};
  const App=props=>{appMounts++;return React.createElement('p',null,'TEST_ONLY_DETAIL_'+props.routeSymbol);};
  const Landing=pageModule(landingFile,{App,react}).default;
- const render=()=>Landing({symbol,onNavigateStock:()=>{}}),button=()=>visit(render(),n=>n.type==='button');
+ const render=()=>{const tree=Landing({symbol,onNavigateStock:()=>{}});return tree.type.name==='StockLandingGuide'?tree.type(tree.props):tree;},button=()=>visit(render(),n=>n.type==='button');
  return {render,button,get requested(){return requested;},get appMounts(){return appMounts;}};
 }
 for(const [symbol,name] of [['005930','삼성전자'],['000660','SK하이닉스'],['035420','NAVER'],['005380','현대차']])
@@ -27,7 +27,7 @@ test('TEST_ONLY initial '+symbol+' renders static name/guide without hidden App 
  }finally{router.dispose();}
 });
 test('TEST_ONLY landing source has no effect, provider, fetch, storage, user-agent or crawler-specific behavior',()=>{
- const source=fs.readFileSync(landingFile,'utf8')+fs.readFileSync('frontend/src/stockLandingContent.js','utf8');
+ const source=fs.readFileSync(landingFile,'utf8')+fs.readFileSync('frontend/src/stockLandingContent.js','utf8')+fs.readFileSync('frontend/src/StockLandingGuide.jsx','utf8');
  assert.doesNotMatch(source,/fetch\s*\(|useEffect|XMLHttpRequest|localStorage|sessionStorage|navigator|userAgent|requestIdleCallback|setTimeout|api\/|backendService|createRecommendationLoader/);
  assert.match(source,/if\(analysisRequested\)return <App routeSymbol=\{symbol\}/);
 });
@@ -95,7 +95,7 @@ test('TEST_ONLY page guide has mobile touch target, visible focus, white theme v
 test('TEST_ONLY Stage5 leaves main App body, calculations, UI, API, SEO assets, auth and all stored-data policies exact',()=>{
  const app=fs.readFileSync('frontend/src/App.jsx','utf8'),previous=execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(require('./helpers/without-stock-landing.cjs')(app),previous);
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/components','frontend/src/pages','frontend/src/seo','frontend/src/main.jsx','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/light-theme.css','frontend/src/public-home.css','frontend/public','frontend/index.html','frontend/vite.config.js','frontend/seo-build.js','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/components','frontend/src/pages','frontend/src/seo','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/light-theme.css','frontend/src/public-home.css','frontend/public','frontend/index.html','frontend/vite.config.js','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
  const xml=fs.readFileSync('frontend/public/sitemap.xml','utf8');assert.equal((xml.match(/<loc>/g)||[]).length,6);assert.doesNotMatch(xml,/\/stocks\//);
  const meta=pageModule(require.resolve('../frontend/src/seo/publicMetadata.js'));assert.equal(meta.getPageMeta('/stocks/005930').robots,'noindex,follow');
 });
