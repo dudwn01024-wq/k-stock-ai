@@ -116,6 +116,8 @@ test('TEST_ONLY exact backend diff is limited to two prose blocks; calculation/a
  for(const file of ['frontend/src/ExpandedCandidateCard.jsx','frontend/src/App.jsx','frontend/src/CandidateOverview.jsx']){
   let expected=execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
   for(const [before,after] of edits[file])expected=expected.replaceAll(before,after);
-  assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),expected,'exact display-only change: '+file);
+  const current=fs.readFileSync(file,'utf8').replaceAll('\r\n','\n');
+  if(file==='frontend/src/App.jsx')require('./helpers/public-light-boundaries.cjs').assertApp(current,expected);
+  else assert.equal(current,expected,'exact display-only change: '+file);
  }
 });

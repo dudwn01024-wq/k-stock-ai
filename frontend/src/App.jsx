@@ -12,6 +12,8 @@ import {createRecommendationLoader} from './utils/recommendationRun.js';
 import {aiAnalysisError} from './utils/aiAnalysisError.js';
 import { strategyExplanation } from './utils/strategyExplanation.js';
 import './public-home.css';
+import './light-theme.css';
+import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -707,19 +709,19 @@ export default function App() {
   };
 
   return (
-    <div className={`public-home ${recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
+    <div className={`public-home public-light-theme ${recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+        <div className="home-brand flex items-center gap-3">
+          <div className="home-brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
             <TrendingUp className="w-6 h-6 text-slate-950 stroke-[2.5]" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-white font-mono">
+              <h1 className="text-xl font-bold tracking-tight text-white">
                 K-Stock <span className="text-emerald-400">AI</span>
               </h1>
             </div>
-            <p className="text-xs text-slate-400">국내주식 데이터와 분석을 한곳에서</p>
+            <p className="home-brand-caption text-xs text-slate-400">국내주식 데이터와 분석을 한곳에서</p>
           </div>
         </div>
 
@@ -738,7 +740,7 @@ export default function App() {
             <button
               type="submit"
               disabled={loading}
-              className="absolute right-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-semibold text-xs rounded-lg"
+              className="home-search-submit absolute right-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-semibold text-xs rounded-lg"
             >
               {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : '종목 검색'}
             </button>
@@ -853,7 +855,7 @@ export default function App() {
   >
     {recommendationsCollapsed ? '▼ 추천 종목 펼치기' : '✕ 추천 종목 닫기'}
   </button>
-)}   
+)}
  <button
                 onClick={loadRecommendations}
                 disabled={recommendationLoading || recommendationAILoading}
@@ -1213,16 +1215,8 @@ export default function App() {
         )}
 
         {showDetail && !loading && !errorMsg && quoteData && activeTab === 'detail' && (
-          <div id="stock-detail" className="space-y-6">
+          <div id="stock-detail" className="stock-detail-layout">
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
-              <div className="text-xs text-slate-400 mb-3 space-y-1">
-                <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
-                <p>거래량 — {describeDataMetadata(quoteData?.dataMetadata?.volume)}</p>
-                <p>수급 — {describeDataMetadata(quoteData?.dataMetadata?.supply)}</p>
-                <p>상세 일봉 — {describeDataMetadata(strategyData?.dataMetadata?.daily)}</p>
-                <p>{quoteData?.dataMetadata?.dateConsistency === 'MISMATCH' || strategyData?.dataMetadata?.dateConsistency === 'MISMATCH'
-                  ? '데이터 기준일 불일치: 서로 다른 날짜의 값이 포함되어 있습니다.' : '항목별 기준일과 최신성은 별도 확인이 필요합니다.'}</p>
-              </div>
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-3">
@@ -1284,9 +1278,20 @@ export default function App() {
                   </div>
                 </div>
               </div>
+                <p>{quoteData?.dataMetadata?.dateConsistency === 'MISMATCH' || strategyData?.dataMetadata?.dateConsistency === 'MISMATCH'
+                  ? '데이터 기준일 불일치: 서로 다른 날짜의 값이 포함되어 있습니다.' : '항목별 기준일과 최신성은 별도 확인이 필요합니다.'}</p>
+              <details className="detail-source-info"><summary>데이터 제공처 · 기준일 확인</summary><div className="text-xs text-slate-400 space-y-1">
+                <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
+                <p>거래량 — {describeDataMetadata(quoteData?.dataMetadata?.volume)}</p>
+                <p>수급 — {describeDataMetadata(quoteData?.dataMetadata?.supply)}</p>
+                <p>상세 일봉 — {describeDataMetadata(strategyData?.dataMetadata?.daily)}</p>
+
+              </div></details>
             </section>
 
-            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-5">
+            <CurrentAnalysisSummary strategy={strategyData}/>
+
+            <section className="analysis-section strategy-verdict">
   {/* =========================================
       HEADER
   ========================================= */}
@@ -1373,7 +1378,9 @@ export default function App() {
   </div>
 
 
-  {/* =========================================
+</section>
+<section className="analysis-section" aria-label="가격 기준선">
+{/* =========================================
       가격 전략
   ========================================= */}
   <div className="space-y-2">
@@ -1381,7 +1388,7 @@ export default function App() {
       1. 가격 기준선
     </h4>
 
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+    <div className="strategy-price-grid">
       <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
         <span className="text-[11px] text-slate-400 block">
           현재가
@@ -1489,43 +1496,107 @@ export default function App() {
     </div>
   </div>
 
+</section>
+<section className="analysis-section" aria-label="기술적 지표">
 {/* =========================================
-    최근 20일 고가 / 저가
-========================================= */}
-<div className="space-y-2 pt-2">
-  <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-    최근 20거래일 가격 범위
-  </h4>
+      기술적 지표
+  ========================================= */}
+  <div className="space-y-2 pt-2">
+    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+      3. 기술적 지표
+    </h4>
 
-  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-    <div className="bg-red-950/15 border border-red-900/30 rounded-xl p-4">
-      <span className="text-[11px] text-red-400 block">
-        20일 최고가
-      </span>
+    <div className="indicator-grid">
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          RSI14
+        </span>
 
-      <span className="text-lg font-bold font-mono text-red-300">
-        {formatKRW(strategyData?.recentHigh20)}
-      </span>
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {hasNumber(strategyData?.rsi14)
+            ? Number(strategyData.rsi14).toFixed(2)
+            : '데이터 없음'}
+        </span>
+        <p className="indicator-caption">{strategyExplanation(strategyData?.technicalAssessment?.conditions?.rsi?.label) || '해석 미확인'}</p>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          MACD
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {hasNumber(strategyData?.macd?.macd)
+            ? Number(strategyData.macd.macd).toLocaleString('ko-KR')
+            : '데이터 없음'}
+        </span>
+
+        <span className="text-[10px] text-slate-500 block mt-1">
+          신호선{' '}
+          {hasNumber(strategyData?.macd?.signal)
+            ? Number(strategyData.macd.signal).toLocaleString('ko-KR')
+            : '-'}
+        </span>
+        <p className="indicator-caption">{strategyExplanation(strategyData?.technicalAssessment?.conditions?.macd?.label) || '해석 미확인'}</p>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          ATR14
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {formatKRW(strategyData?.atr14)}
+        </span>
+        <p className="indicator-caption">실제 가격 변동폭</p>
+      </div>
+
+      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+        <span className="text-[11px] text-slate-400 block">
+          볼린저밴드 위치
+        </span>
+
+        <span className="text-sm font-bold font-mono text-white mt-1 block">
+          {hasNumber(strategyData?.bollingerBands?.position)
+            ? `${Number(strategyData.bollingerBands.position).toFixed(2)}%`
+            : '데이터 없음'}
+        </span>
+      </div>
     </div>
 
-    <div className="bg-blue-950/15 border border-blue-900/30 rounded-xl p-4">
-      <span className="text-[11px] text-blue-400 block">
-        20일 최저가
-      </span>
+    <details className="indicator-explanations"><summary>RSI · MACD 해석 자세히 보기</summary><div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {strategyData?.technicalAssessment?.conditions?.rsi?.detail && (
+        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+          <span className="text-[11px] text-slate-500 block mb-1">
+            RSI 해석
+          </span>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {strategyExplanation(strategyData.technicalAssessment.conditions.rsi.detail)}
+          </p>
+        </div>
+      )}
 
-      <span className="text-lg font-bold font-mono text-blue-300">
-        {formatKRW(strategyData?.recentLow20)}
-      </span>
-    </div>
+      {strategyData?.technicalAssessment?.conditions?.macd?.detail && (
+        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
+          <span className="text-[11px] text-slate-500 block mb-1">
+            MACD 해석
+          </span>
+          <p className="text-xs text-slate-300 leading-relaxed">
+            {strategyExplanation(strategyData.technicalAssessment.conditions.macd.detail)}
+          </p>
+        </div>
+      )}
+    </div></details>
   </div>
-</div>
-  {/* =========================================
+</section>
+<details className="analysis-accordion"><summary>세부 기술 분석 · 이동평균선과 가격 범위</summary><div className="accordion-content">
+{/* =========================================
       이동평균선
   ========================================= */}
   <div className="space-y-2 pt-2">
     <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
       2. 이동평균선
-   
+
     </h4>
 
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1575,95 +1646,38 @@ export default function App() {
 
 
   {/* =========================================
-      기술적 지표
-  ========================================= */}
-  <div className="space-y-2 pt-2">
-    <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-      3. 기술적 지표
-    </h4>
+    최근 20일 고가 / 저가
+========================================= */}
+<div className="space-y-2 pt-2">
+  <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+    최근 20거래일 가격 범위
+  </h4>
 
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-        <span className="text-[11px] text-slate-400 block">
-          RSI14
-        </span>
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="bg-red-950/15 border border-red-900/30 rounded-xl p-4">
+      <span className="text-[11px] text-red-400 block">
+        20일 최고가
+      </span>
 
-        <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {hasNumber(strategyData?.rsi14)
-            ? Number(strategyData.rsi14).toFixed(2)
-            : '데이터 없음'}
-        </span>
-      </div>
-
-      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-        <span className="text-[11px] text-slate-400 block">
-          MACD
-        </span>
-
-        <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {hasNumber(strategyData?.macd?.macd)
-            ? Number(strategyData.macd.macd).toLocaleString('ko-KR')
-            : '데이터 없음'}
-        </span>
-
-        <span className="text-[10px] text-slate-500 block mt-1">
-          신호선{' '}
-          {hasNumber(strategyData?.macd?.signal)
-            ? Number(strategyData.macd.signal).toLocaleString('ko-KR')
-            : '-'}
-        </span>
-      </div>
-
-      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-        <span className="text-[11px] text-slate-400 block">
-          ATR14
-        </span>
-
-        <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {formatKRW(strategyData?.atr14)}
-        </span>
-      </div>
-
-      <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
-        <span className="text-[11px] text-slate-400 block">
-          볼린저밴드 위치
-        </span>
-
-        <span className="text-sm font-bold font-mono text-white mt-1 block">
-          {hasNumber(strategyData?.bollingerBands?.position)
-            ? `${Number(strategyData.bollingerBands.position).toFixed(2)}%`
-            : '데이터 없음'}
-        </span>
-      </div>
+      <span className="text-lg font-bold font-mono text-red-300">
+        {formatKRW(strategyData?.recentHigh20)}
+      </span>
     </div>
 
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {strategyData?.technicalAssessment?.conditions?.rsi?.detail && (
-        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
-          <span className="text-[11px] text-slate-500 block mb-1">
-            RSI 해석
-          </span>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            {strategyExplanation(strategyData.technicalAssessment.conditions.rsi.detail)}
-          </p>
-        </div>
-      )}
+    <div className="bg-blue-950/15 border border-blue-900/30 rounded-xl p-4">
+      <span className="text-[11px] text-blue-400 block">
+        20일 최저가
+      </span>
 
-      {strategyData?.technicalAssessment?.conditions?.macd?.detail && (
-        <div className="bg-slate-950/40 border border-slate-800 rounded-lg p-3">
-          <span className="text-[11px] text-slate-500 block mb-1">
-            MACD 해석
-          </span>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            {strategyExplanation(strategyData.technicalAssessment.conditions.macd.detail)}
-          </p>
-        </div>
-      )}
+      <span className="text-lg font-bold font-mono text-blue-300">
+        {formatKRW(strategyData?.recentLow20)}
+      </span>
     </div>
   </div>
-
-
-  {/* =========================================
+</div>
+  </div></details>
+<section className="analysis-section" aria-label="지지선 · 저항선">
+{/* =========================================
       지지 / 저항
   ========================================= */}
   <div className="space-y-2 pt-2">
@@ -1707,7 +1721,9 @@ export default function App() {
   </div>
 
 
-  {/* =========================================
+  </section>
+<section className="analysis-section" aria-label="거래량 · 수급 · 뉴스">
+{/* =========================================
       거래량 / 수급 / 뉴스
   ========================================= */}
   <div className="space-y-2 pt-2">
@@ -1824,7 +1840,83 @@ export default function App() {
   </div>
 
 
-  {/* =========================================
+  </div>
+  </section>
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    외국인 · 기관 수급
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">백엔드에서 조회된 최근 순매수 수량입니다.</p>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  기준일 {formatNewsDate(quoteData.supplyDate)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                  <span className="text-xs text-slate-400 block mb-1">외국인 순매수</span>
+                  <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.foreignerNet)}`}>
+                    {formatNumberWithUnit(quoteData.foreignerNet, '주')}
+                  </span>
+                </div>
+
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                  <span className="text-xs text-slate-400 block mb-1">기관 순매수</span>
+                  <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.institutionNet)}`}>
+                    {formatNumberWithUnit(quoteData.institutionNet, '주')}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-emerald-400" />
+                    실제 주가 차트
+                  </h3>
+                  <p className="text-xs text-slate-400">조회된 일봉 데이터입니다. 최신 여부 확인이 필요합니다.</p>
+                </div>
+
+                <p className="text-xs text-slate-400">마지막 일봉 — {describeDataMetadata(chartData.at(-1)?.dataMetadata)}</p>
+                <div className="flex items-center bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto">
+                  {TIMEFRAMES.map((tf) => (
+                    <button
+                      key={tf.code}
+                      onClick={() => handleTimeframeChange(tf.code)}
+                      aria-pressed={chartTimeframe === tf.code}
+                      className={`px-2 sm:px-3 py-1 rounded-lg shrink-0 ${
+                        chartTimeframe === tf.code
+                          ? 'bg-emerald-500 text-slate-950 font-bold'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {tf.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {!chartSupported ? (
+                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
+                  <Info className="w-5 h-5" />
+                  <span>일봉 차트 자료를 확인하지 못했습니다.</span>
+                </div>
+              ) : chartData.length > 0 ? (
+                <CandlestickChart rows={chartData}/>
+              ) : (
+                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
+                  <Info className="w-5 h-5" />
+                  <span>표시할 실제 차트 데이터가 없습니다.</span>
+                </div>
+              )}
+            </section><details className="analysis-accordion"><summary>패턴 분석 · KIS 일봉 기준</summary><div className="accordion-content">
+{/* =========================================
       패턴 분석
   ========================================= */}
   <div className="space-y-2 pt-2">
@@ -1934,7 +2026,9 @@ export default function App() {
   </div>
 
 
-  {/* =========================================
+  </div></details>
+<details className="analysis-accordion"><summary>기술조건 상세 집계</summary><div className="accordion-content">
+{/* =========================================
       기술조건 요약
   ========================================= */}
   <div className="space-y-2 pt-2">
@@ -1976,7 +2070,9 @@ export default function App() {
   </div>
 
 
-  {/* =========================================
+  </div></details>
+<section className="analysis-section" aria-label="가격 기준선 출처 안내">
+{/* =========================================
       데이터 출처 안내
   ========================================= */}
   <div className="border-t border-slate-800 pt-4">
@@ -1986,11 +2082,7 @@ export default function App() {
       데이터가 없으면 추측하지 않고 데이터 없음으로 표시합니다.
          </p>
     </div>
-  </div>
 </section>
-
-            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData} service={backendService}/>
-
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
                 <div className="flex items-center gap-2">
@@ -2046,7 +2138,8 @@ export default function App() {
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {aiAnalysis?.analysis?.positiveFactors && (
+  <details className="analysis-accordion"><summary>AI 긍정 요인 자세히 보기</summary><div className="accordion-content">
+                  {aiAnalysis?.analysis?.positiveFactors && (
                       <div className="bg-emerald-950/20 p-4 rounded-xl border border-emerald-950/40 space-y-1">
                         <span className="text-emerald-400 font-semibold uppercase tracking-wider block">긍정 요인</span>
                         {Array.isArray(aiAnalysis.analysis.positiveFactors) ? (
@@ -2060,7 +2153,8 @@ export default function App() {
                         )}
                       </div>
                     )}
-                    {aiAnalysis?.analysis?.riskFactors && (
+  </div></details>
+                  {aiAnalysis?.analysis?.riskFactors && (
                       <div className="bg-red-950/20 p-4 rounded-xl border border-red-950/40 space-y-1">
                         <span className="text-red-400 font-semibold uppercase tracking-wider block">위험 요인</span>
                         {Array.isArray(aiAnalysis.analysis.riskFactors) ? (
@@ -2076,7 +2170,8 @@ export default function App() {
                     )}
                   </div>
 
-                  {aiAnalysis?.analysis?.strategyExplanation && (
+                  <details className="analysis-accordion"><summary>AI 상세 해설 · 가격 근거와 뉴스</summary><div className="accordion-content">
+{aiAnalysis?.analysis?.strategyExplanation && (
   <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-2">
     <span className="text-slate-400 font-semibold uppercase tracking-wider block">
       전략 해설
@@ -2159,6 +2254,7 @@ export default function App() {
                     </div>
                   )}
 
+</div></details>
                   {aiAnalysis?.analysis?.caution && (
                     <div className="bg-amber-950/20 p-4 rounded-xl border border-amber-900/30 space-y-1 text-amber-300">
                       <span className="font-semibold uppercase tracking-wider block flex items-center gap-1.5">
@@ -2176,80 +2272,8 @@ export default function App() {
               )}
             </section>
 
-            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-400" />
-                    외국인 · 기관 수급
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">백엔드에서 조회된 최근 순매수 수량입니다.</p>
-                </div>
-                <span className="text-[11px] text-slate-500 font-mono">
-                  기준일 {formatNewsDate(quoteData.supplyDate)}
-                </span>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400 block mb-1">외국인 순매수</span>
-                  <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.foreignerNet)}`}>
-                    {formatNumberWithUnit(quoteData.foreignerNet, '주')}
-                  </span>
-                </div>
-
-                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
-                  <span className="text-xs text-slate-400 block mb-1">기관 순매수</span>
-                  <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.institutionNet)}`}>
-                    {formatNumberWithUnit(quoteData.institutionNet, '주')}
-                  </span>
-                </div>
-              </div>
-            </section>
-
-            <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                    <BarChart2 className="w-4 h-4 text-emerald-400" />
-                    실제 주가 차트
-                  </h3>
-                  <p className="text-xs text-slate-400">조회된 일봉 데이터입니다. 최신 여부 확인이 필요합니다.</p>
-                </div>
-
-                <p className="text-xs text-slate-400">마지막 일봉 — {describeDataMetadata(chartData.at(-1)?.dataMetadata)}</p>
-                <div className="flex items-center bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto">
-                  {TIMEFRAMES.map((tf) => (
-                    <button
-                      key={tf.code}
-                      onClick={() => handleTimeframeChange(tf.code)}
-                      aria-pressed={chartTimeframe === tf.code}
-                      className={`px-2 sm:px-3 py-1 rounded-lg shrink-0 ${
-                        chartTimeframe === tf.code
-                          ? 'bg-emerald-500 text-slate-950 font-bold'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {tf.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {!chartSupported ? (
-                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
-                  <Info className="w-5 h-5" />
-                  <span>일봉 차트 자료를 확인하지 못했습니다.</span>
-                </div>
-              ) : chartData.length > 0 ? (
-                <CandlestickChart rows={chartData}/>
-              ) : (
-                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
-                  <Info className="w-5 h-5" />
-                  <span>표시할 실제 차트 데이터가 없습니다.</span>
-                </div>
-              )}
-            </section>
+            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData} service={backendService}/>
           </div>
         )}
 

@@ -4,7 +4,7 @@ import {prepareCandles,candleDomain,candleGeometry,candleState} from './utils/ca
 import {toNullableNumber} from './utils/numbers.js';
 import './candlestick-chart.css';
 
-const colors={상승:'#fb7185',하락:'#60a5fa',보합:'#cbd5e1'};
+const colors={상승:'var(--ui-candle-up)',하락:'var(--ui-candle-down)',보합:'var(--ui-muted)'};
 const number=value=>{const n=toNullableNumber(value);return n===null?'미확인':n.toLocaleString('ko-KR');};
 export function CandleValues({row}){
   if(!row)return null;
@@ -40,19 +40,19 @@ export default function CandlestickChart({rows}){
     <div className="candle-scroll"><div className="candle-canvas" style={{minWidth:candles.length*7+64}}>
       <div className="candle-price-panel"><ResponsiveContainer width="100%" height="100%">
         <BarChart data={candles} syncId={syncId} margin={{top:12,right:8,left:0,bottom:0}} accessibilityLayer>
-          <CartesianGrid stroke="#334155" strokeDasharray="3 3" vertical={false}/>
+          <CartesianGrid stroke="var(--ui-border)" strokeDasharray="3 3" vertical={false}/>
           <XAxis dataKey="date" hide padding={{left:4,right:4}}/>
-          <YAxis domain={candleDomain(candles)} width={56} fontSize={10} stroke="#94a3b8" tickLine={false} tickFormatter={number}/>
-          <Tooltip content={<CandleTooltip/>} cursor={{fill:'#64748b',fillOpacity:.15}} isAnimationActive={false}/>
+          <YAxis domain={candleDomain(candles)} width={56} fontSize={10} stroke="var(--ui-muted)" tickLine={false} tickFormatter={number}/>
+          <Tooltip content={<CandleTooltip/>} cursor={{fill:'var(--ui-muted)',fillOpacity:.15}} isAnimationActive={false}/>
           <Bar dataKey="candleRange" name="일봉" shape={props=><CandleShape {...props} onSelect={onSelect}/>} activeBar={false} isAnimationActive={false}/>
         </BarChart>
       </ResponsiveContainer></div>
       <div className="candle-volume-panel"><ResponsiveContainer width="100%" height="100%">
         <BarChart data={candles} syncId={syncId} margin={{top:6,right:8,left:0,bottom:0}} accessibilityLayer>
-          <XAxis dataKey="date" padding={{left:4,right:4}} fontSize={10} stroke="#94a3b8" tickLine={false} minTickGap={30} tickFormatter={date=>date.slice(5)}/>
-          <YAxis domain={[0,'auto']} width={56} fontSize={9} stroke="#94a3b8" tickLine={false} tickFormatter={value=>value>=10000?`${Math.round(value/10000)}만`:number(value)}/>
+          <XAxis dataKey="date" padding={{left:4,right:4}} fontSize={10} stroke="var(--ui-muted)" tickLine={false} minTickGap={30} tickFormatter={date=>date.slice(5)}/>
+          <YAxis domain={[0,'auto']} width={56} fontSize={9} stroke="var(--ui-muted)" tickLine={false} tickFormatter={value=>value>=10000?`${Math.round(value/10000)}만`:number(value)}/>
           <Tooltip content={()=>null} cursor={false} isAnimationActive={false}/>
-          <Bar dataKey="volume" name="거래량" fill="#769dbf" isAnimationActive={false} onClick={bar=>onSelect(bar.payload)}/>
+          <Bar dataKey="volume" name="거래량" fill="var(--ui-volume)" isAnimationActive={false} onClick={bar=>onSelect(bar.payload)}/>
         </BarChart>
       </ResponsiveContainer></div>
     </div></div>

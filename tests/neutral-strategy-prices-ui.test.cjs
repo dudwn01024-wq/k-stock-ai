@@ -65,7 +65,8 @@ test('TEST_ONLY all server/API/math/security modules and detail request code rem
  assert.equal(execFileSync('git',['diff','d33cba4dc19f09ded0f05be3b324f0e2385ead16','--','services','scripts'],{encoding:'utf8'}),'');
  assert.equal(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8')),execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  const before=execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
- assert.equal(source.slice(0,source.indexOf('export default function App')).replaceAll('\r\n','\n'),before.slice(0,before.indexOf('export default function App')));
+ const presentationSource=require('./helpers/public-light-boundaries.cjs').strip(source);
+ assert.equal(presentationSource.slice(0,presentationSource.indexOf('export default function App')),before.slice(0,before.indexOf('export default function App')));
  const holder=fs.readFileSync('frontend/src/HoldingGuidance.jsx','utf8').replaceAll('\r\n','\n');
  const oldHolder=execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:frontend/src/HoldingGuidance.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(holder.slice(0,holder.indexOf('  return <section')),oldHolder.slice(0,oldHolder.indexOf('  return <section')));

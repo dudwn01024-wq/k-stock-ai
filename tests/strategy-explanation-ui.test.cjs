@@ -90,7 +90,7 @@ test('TEST_ONLY intraday pending detail retains its special status and exact num
 });
 
 test('TEST_ONLY explanations stay display-only while all existing server calculations remain protected',()=>{
-  assert.equal((appSource.match(/strategyExplanation\(strategyData/g)||[]).length,5);
+  assert.equal((appSource.match(/strategyExplanation\(strategyData/g)||[]).length,7);
   const before=execFileSync('git',['show','5e2dc4469b9c1c66beeebc95f00a2512772d0216:server.js'],{encoding:'utf8'});
   assert.equal(require('./helpers/without-private-holding.cjs')(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8'))),before.replaceAll('\r\n','\n'));
   assert.equal(execFileSync('git',['diff','5e2dc4469b9c1c66beeebc95f00a2512772d0216','--','services/tradingStrategy.js',
