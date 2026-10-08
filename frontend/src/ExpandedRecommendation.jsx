@@ -138,7 +138,7 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
         <span>조회 대상 <strong>{number(stats?.universeCount??display.scannedCount)}</strong></span>
         <span>최종 후보 <strong>{number(stats?.finalCandidateCount??actual.length)}</strong></span>
       </div>
-      <p className="expanded-card-note">추천목록은 종목 선정 근거를 보여줍니다. 현재 가격 전략은 상세 분석에서 확인하세요.</p>
+      <p className="expanded-card-note">추천목록은 종목 선정 근거를 보여줍니다. 가격 기준선은 종목을 선택한 뒤 상세 분석에서 확인하세요.</p>
       {actual.length?<ol className="expanded-candidates">{actual.map(item=><li key={item.symbol}>
         <ExpandedCandidateCard item={item} screening onSelect={onSelect}/>
       </li>)}</ol>:<p className="home-state">저장된 최종 후보가 없습니다.</p>}

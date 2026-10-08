@@ -36,7 +36,7 @@ const render=item=>renderToStaticMarkup(React.createElement(Card,{item}));
 test('TEST_ONLY screening card removes only price strategy presentation and preserves stored selection evidence',()=>{
   const item=candidate(),before=JSON.stringify(item);
   const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true,onSelect:()=>assert.fail('RENDER_MUST_NOT_SELECT')}));
-  assert.doesNotMatch(html,/분석 당시 조회가|등락률|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가|상승 여력|하락 위험|손익비|105원|110원|95원/);
+  assert.doesNotMatch(html,/분석 당시 조회가|등락률|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가|상승 여력|하락 위험|<dt>손익비<\/dt>|105원|110원|95원/);
   for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','데이터 기준','제공처','현재 상세 분석 보기'])
     assert.ok(html.includes(label),label);
   assert.equal((html.match(/저장된 원문 링크/g)||[]).length,3);
@@ -58,10 +58,10 @@ const detail=items=>({schemaVersion:'RECOMMENDATION_HISTORY_V2',testOnly:true,sc
   all:items,fastResults:[],failures:[],requestStats:{}});
 const noService=new Proxy({},{get:()=>()=>assert.fail('TEST_ONLY_SERVICE_CALL_FORBIDDEN')});
 
-test('TEST_ONLY card shows stored quote and three distinct strategy prices without changing any input',()=>{
+test('TEST_ONLY card keeps the stored quote but hides all three strategy prices without changing any input',()=>{
   const item=candidate(),before=JSON.stringify(item),html=render(item);
   assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'등락률'),'0%');
-  assert.equal(field(html,'전략 참고 진입가'),'100원');assert.equal(field(html,'전략 참고 목표가'),'110원');assert.equal(field(html,'전략 참고 손절가'),'95원');
+  assert.doesNotMatch(html,/전략 계산 기준가|상단 가격 기준|하단 위험 기준|100원|110원|95원/);
   assert.equal(JSON.stringify(item),before);assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
 });
 for(const value of [null,undefined,NaN,Infinity,'105',{},false,0,-1])
@@ -70,7 +70,7 @@ for(const value of [null,undefined,NaN,Infinity,'105',{},false,0,-1])
   });
 test('TEST_ONLY absent strategy, change rate and assessment remain unconfirmed',()=>{
   const html=render({...candidate(),strategy:undefined,changeRate:null,newsAssessment:undefined});
-  for(const label of ['등락률','전략 참고 진입가','전략 참고 목표가','전략 참고 손절가','거래량','평가 기사 수','긍정 단서 수','부정 단서 수'])
+  for(const label of ['등락률','거래량','평가 기사 수','긍정 단서 수','부정 단서 수'])
     assert.equal(field(html,label),'미확인');
   assert.equal(field(html,'뉴스 조건'),'미확인');
 });
@@ -143,7 +143,7 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
 test('TEST_ONLY V2 history reuses the same evidence rules and keeps outcome baseline separate',()=>{
   const {ExpandedHistoryRecord}=load(require.resolve('../frontend/src/RecommendationHistory.jsx'));
   const html=renderToStaticMarkup(React.createElement(ExpandedHistoryRecord,{detail:detail([candidate()]),service:noService}));
-  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'전략 참고 진입가'),'100원');
+  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.doesNotMatch(html,/전략 계산 기준가|상단 가격 기준|하단 위험 기준|110원|95원/);
   assert.match(html,/성과 추적 기준: 2026-10-02 종가 100/);assert.match(html,/TEST_ONLY 뉴스 0/);
 });
 test('TEST_ONLY page mount and reread load only saved results and never start a scan or AI request',async()=>{

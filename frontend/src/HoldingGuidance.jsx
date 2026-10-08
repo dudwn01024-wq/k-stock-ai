@@ -51,7 +51,7 @@ export default function HoldingGuidance({symbol,strategy,service}){
         <button type="submit" className="home-secondary" disabled={busy||!password}>잠금 해제</button>
       </form>
     </>:<>
-      <p className="holding-note">평균매수가는 개인 손익 표시에만 사용하며, 기존 목표·손절 기준을 바꾸지 않습니다.</p>
+      <p className="holding-note">평균매수가는 개인 손익 표시에만 사용하며, 기존 상단·하단 가격 기준을 바꾸지 않습니다.</p>
       <form onSubmit={evaluate} className="holding-form">
         <label className="holding-input">평균매수가 (원)<input type="number" inputMode="decimal" min="0" step="any" value={value}
           onChange={event=>{generation.current++;setInput({symbol,snapshotId,value:event.target.value});setResult(null);}}
@@ -66,8 +66,8 @@ export default function HoldingGuidance({symbol,strategy,service}){
           <div><dt>현재가 · 상세 전략 기준</dt><dd>{price(guidance.currentPrice)}</dd></div>
           <div><dt>현재 손익률</dt><dd>{typeof guidance.returnPct==='number'&&Number.isFinite(guidance.returnPct)?
             (guidance.returnPct>0?'+':'')+guidance.returnPct.toLocaleString('ko-KR',{maximumFractionDigits:2})+'%':'미확인'}</dd></div>
-          <div><dt>전략 참고 목표가</dt><dd>{price(guidance.takeProfitPrice)}</dd></div>
-          <div><dt>전략 참고 손절가</dt><dd>{price(guidance.stopLossPrice)}</dd></div>
+          <div><dt>현재 상단 가격 기준</dt><dd>{price(guidance.takeProfitPrice)}</dd></div>
+          <div><dt>현재 하단 위험 기준</dt><dd>{price(guidance.stopLossPrice)}</dd></div>
         </dl>
         <div className={'holding-result holding-'+guidance.status} role="status"><strong>보유자 참고 판정 · {guidance.label}</strong>
           <ul>{guidance.reasons?.map(reason=><li key={reason}>{reason}</li>)}</ul></div>

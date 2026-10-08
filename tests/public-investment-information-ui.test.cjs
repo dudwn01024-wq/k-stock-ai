@@ -32,7 +32,7 @@ test('TEST_ONLY public labels change without any enum, saved history or calculat
     const code=fs.readFileSync('frontend/src/'+file,'utf8');assert.ok(code.includes('조건 우수 후보'));assert.ok(!code.includes('최우선 후보'));
   }
   const app=fs.readFileSync('frontend/src/App.jsx','utf8');
-  for(const text of ['전략 참고 진입가','전략 참고 목표가','전략 참고 손절가',"ENTRY_CANDIDATE: '분석 조건 충족'"])assert.ok(app.includes(text));
+  for(const text of ['전략 계산 기준가','상단 가격 기준','하단 위험 기준',"ENTRY_CANDIDATE: '분석 조건 충족'"])assert.ok(app.includes(text));
   assert.ok(app.includes('entryPrice'));assert.ok(app.includes('takeProfitPrice'));assert.ok(app.includes('stopLossPrice'));
 });
 test('TEST_ONLY credential POST uses body only, bearer token only, no cookies, no raw error or automatic retry',async()=>{

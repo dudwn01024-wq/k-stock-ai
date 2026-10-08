@@ -72,7 +72,7 @@ test('TEST_ONLY personal input sends only symbol, opaque detail ID and average; 
   const call=h.calls[0];assert.equal(call.action,'evaluate');assert.equal(call.token,'TEST_ONLY_TOKEN');
   assert.deepEqual(JSON.parse(JSON.stringify(call.body)),{symbol:'TEST_ONLY_A',snapshotId:'TEST_ONLY_SNAPSHOT',averageBuyPrice:80});
   const html=renderToStaticMarkup(h.render());assert.ok(html.includes('+25%'));assert.ok(html.includes('보유 유지 참고'));
-  assert.equal(field(html,'전략 참고 목표가'),'120원');assert.equal(field(html,'전략 참고 손절가'),'90원');
+  assert.equal(field(html,'현재 상단 가격 기준'),'120원');assert.equal(field(html,'현재 하단 위험 기준'),'90원');
   assert.doesNotMatch(html,/매도하세요|반드시 보유하세요/);
 });
 test('TEST_ONLY invalid average cannot start a request or generate a return',async()=>{

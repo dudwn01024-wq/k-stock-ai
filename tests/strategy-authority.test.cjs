@@ -45,5 +45,5 @@ test('one individual AI route remains and frontend keeps existing endpoint',()=>
 
 test('screening cards do not label candidates as buy authorization',()=>{
  const ui=fs.readFileSync(require.resolve('../frontend/src/App.jsx'),'utf8');
- assert.doesNotMatch(ui,/매수 신호/);assert.match(ui,/스크리닝 진입가 도달 · 상세 확인 필요/);
+ assert.doesNotMatch(ui,/매수 신호/);assert.match(ui,/전략 기준 가격대 도달 · 상세 확인 필요/);
 });

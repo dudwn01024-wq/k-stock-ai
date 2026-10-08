@@ -902,7 +902,7 @@ export default function App() {
                         현재 조건을 만족하는 조건 우수 후보가 없습니다.
                       </p>
                       <p className="text-xs text-slate-500 mt-1">
-                        추세 · 거래량 · 수급이 좋아도 현재가에서 목표가까지 남은 기대수익이 손절 위험보다 작으면 조건 우수 후보로 올리지 않습니다.
+                        추세 · 거래량 · 수급이 좋아도 현재가에서 상단 가격 기준까지 남은 가격 여력이 하단 위험폭보다 작으면 조건 우수 후보로 올리지 않습니다.
                       </p>
                     </div>
                   </div>
@@ -1018,38 +1018,21 @@ export default function App() {
 
     <span className="text-sm font-bold text-white">
       {item.strategy.tradeSignal === 'BUY'
-        ? '🟢 스크리닝 진입가 도달 · 상세 확인 필요'
+        ? '🟢 전략 기준 가격대 도달 · 상세 확인 필요'
         : item.strategy.tradeSignal === 'WAIT_FOR_ENTRY'
-          ? '🟡 스크리닝 진입가 대기'
+          ? '🟡 전략 기준 가격대 대기'
           : item.strategy.tradeSignal === 'TAKE_PROFIT'
-            ? '🔴 스크리닝 목표가 도달'
+            ? '🔴 상단 가격 기준 도달'
             : item.strategy.tradeSignal === 'STOP'
-              ? '🔵 스크리닝 손절선 도달'
+              ? '🔵 하단 위험 기준 도달'
               : '⚪ 관망'}
     </span>
   </div>
 )}
 
-<div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-  <div>
-    <span className="text-slate-500 block">현재가</span>
-    <span className="text-white font-mono">{formatKRW(item.currentPrice)}</span>
-  </div>
-
-  <div>
-    <span className="text-slate-500 block">전략 참고 진입가</span>
-    <span className="text-emerald-300 font-mono">{formatKRW(item.strategy?.entryPrice)}</span>
-  </div>
-
-  <div>
-    <span className="text-slate-500 block">목표가</span>
-    <span className="text-red-400 font-mono">{formatKRW(item.strategy?.takeProfitPrice)}</span>
-  </div>
-
-  <div>
-    <span className="text-slate-500 block">손절가</span>
-    <span className="text-blue-400 font-mono">{formatKRW(item.strategy?.stopLossPrice)}</span>
-  </div>
+<div className="text-xs">
+  <span className="text-slate-500 block">분석 당시 조회가</span>
+  <span className="text-white font-mono">{formatKRW(item.currentPrice)}</span>
 </div>
 
                           {hasRiskReward && (
@@ -1083,7 +1066,7 @@ export default function App() {
                                 </span>
                               </div>
                               <div className="bg-slate-900 rounded-lg p-2.5">
-                                <span className="text-slate-500 block mb-1">진입가 손익비</span>
+                                <span className="text-slate-500 block mb-1">전략 기준 손익비</span>
                                 <span className="text-sky-300 font-mono font-semibold">
                                   {hasNumber(item.riskReward?.entryRiskRewardRatio)
                                     ? `${Number(item.riskReward.entryRiskRewardRatio).toFixed(2)} : 1`
@@ -1175,7 +1158,7 @@ export default function App() {
 
                             {ai.strategyComment && (
                               <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-3">
-                                <div className="text-[11px] text-slate-500 mb-1">가격 전략 설명</div>
+                                <div className="text-[11px] text-slate-500 mb-1">가격 기준선 설명</div>
                                 <p className="text-xs text-slate-300 leading-relaxed">{ai.strategyComment}</p>
                               </div>
                             )}
@@ -1371,7 +1354,7 @@ export default function App() {
 
       <div className="text-right">
         <span className="text-[11px] text-slate-500 block mb-1">
-          현재가 ↔ 진입가 거리
+          현재가 ↔ 전략 계산 기준가 거리
         </span>
 
         <span className="text-sm font-bold font-mono text-white">
@@ -1395,7 +1378,7 @@ export default function App() {
   ========================================= */}
   <div className="space-y-2">
     <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-      1. 가격 전략
+      1. 가격 기준선
     </h4>
 
     <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
@@ -1411,7 +1394,7 @@ export default function App() {
 
       <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/40">
         <span className="text-[11px] text-emerald-400/80 block">
-          전략 참고 진입가
+          전략 계산 기준가
         </span>
 
         <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
@@ -1421,7 +1404,7 @@ export default function App() {
 
       <div className="bg-red-950/20 p-3.5 rounded-xl border border-red-900/40">
         <span className="text-[11px] text-red-400/80 block">
-          전략 참고 목표가
+          상단 가격 기준
         </span>
 
         <span className="text-sm font-bold font-mono text-red-400 mt-1 block">
@@ -1431,7 +1414,7 @@ export default function App() {
 
       <div className="bg-blue-950/20 p-3.5 rounded-xl border border-blue-900/40">
         <span className="text-[11px] text-blue-400/80 block">
-          전략 참고 손절가
+          하단 위험 기준
         </span>
 
         <span className="text-sm font-bold font-mono text-blue-400 mt-1 block">
@@ -1441,7 +1424,7 @@ export default function App() {
 
       <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
         <span className="text-[11px] text-slate-400 block">
-          진입 기준 손익비
+          전략 기준 손익비
         </span>
 
         <span className="text-sm font-bold font-mono text-amber-300 mt-1 block">
@@ -1452,10 +1435,15 @@ export default function App() {
       </div>
     </div>
 
+    <p className="text-[11px] text-slate-400 leading-relaxed">
+      위 가격은 실제 시장 데이터를 바탕으로 계산한 분석 기준선입니다.
+      특정 가격에서의 매수·매도를 지시하거나 수익을 보장하는 값이 아닙니다.
+    </p>
+
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3">
         <span className="text-[11px] text-slate-500 block">
-          진입 → 목표 기대수익률
+          기준가 → 상단 가격 여력
         </span>
 
         <span className="text-sm font-bold font-mono text-red-400">
@@ -1467,7 +1455,7 @@ export default function App() {
 
       <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-3">
         <span className="text-[11px] text-slate-500 block">
-          진입 → 손절 위험률
+          기준가 → 하단 위험폭
         </span>
 
         <span className="text-sm font-bold font-mono text-blue-400">
@@ -1993,8 +1981,8 @@ export default function App() {
   ========================================= */}
   <div className="border-t border-slate-800 pt-4">
     <p className="text-[11px] text-slate-500 leading-relaxed">
-      가격 전략은 실제 KIS OHLCV에서 계산한 지지선·저항선·ATR을 기반으로 하며,
-      AI가 임의로 진입가·목표가·손절가를 생성하지 않습니다.
+      가격 기준선은 실제 KIS OHLCV에서 계산한 지지선·저항선·ATR을 기반으로 하며,
+      AI가 임의로 가격 기준을 생성하지 않습니다.
       데이터가 없으면 추측하지 않고 데이터 없음으로 표시합니다.
          </p>
     </div>
@@ -2102,21 +2090,21 @@ export default function App() {
       <div className="space-y-2 text-slate-200">
         {aiAnalysis.analysis.strategyExplanation.entryReason && (
           <p>
-            <span className="text-emerald-400 font-semibold">진입가 근거: </span>
+            <span className="text-emerald-400 font-semibold">전략 기준가 근거: </span>
             {aiAnalysis.analysis.strategyExplanation.entryReason}
           </p>
         )}
 
         {aiAnalysis.analysis.strategyExplanation.targetReason && (
           <p>
-            <span className="text-red-400 font-semibold">전략 참고 목표가 근거: </span>
+            <span className="text-red-400 font-semibold">상단 가격 기준 근거: </span>
             {aiAnalysis.analysis.strategyExplanation.targetReason}
           </p>
         )}
 
         {aiAnalysis.analysis.strategyExplanation.stopLossReason && (
           <p>
-            <span className="text-sky-400 font-semibold">전략 참고 손절가 근거: </span>
+            <span className="text-sky-400 font-semibold">하단 위험 기준 근거: </span>
             {aiAnalysis.analysis.strategyExplanation.stopLossReason}
           </p>
         )}
@@ -2125,7 +2113,7 @@ export default function App() {
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-800">
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      전략 참고 진입가
+      전략 계산 기준가
     </span>
     <span className="text-sm font-bold font-mono text-emerald-300">
       {formatKRW(strategyData?.entryPrice)}
@@ -2134,7 +2122,7 @@ export default function App() {
 
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      전략 참고 목표가
+      상단 가격 기준
     </span>
     <span className="text-sm font-bold font-mono text-red-400">
       {formatKRW(strategyData?.takeProfitPrice)}
@@ -2143,7 +2131,7 @@ export default function App() {
 
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      전략 참고 손절가
+      하단 위험 기준
     </span>
     <span className="text-sm font-bold font-mono text-blue-400">
       {formatKRW(strategyData?.stopLossPrice)}
@@ -2152,7 +2140,7 @@ export default function App() {
 
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      진입 기준 손익비
+      전략 기준 손익비
     </span>
     <span className="text-sm font-bold font-mono text-yellow-300">
       {hasNumber(strategyData?.riskRewardRatio)

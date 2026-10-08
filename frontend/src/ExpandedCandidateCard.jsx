@@ -33,10 +33,11 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     {!screening&&<dl className="expanded-card-prices">
       <div className="expanded-card-quote"><dt>분석 당시 조회가</dt><dd>{price(item.currentPrice)}</dd></div>
       <div><dt>등락률</dt><dd>{percent(item.changeRate)}</dd></div>
-      <div><dt>전략 참고 진입가</dt><dd>{price(strategy.entryPrice)}</dd></div>
-      <div><dt>전략 참고 목표가</dt><dd>{price(strategy.takeProfitPrice)}</dd></div>
-      <div><dt>전략 참고 손절가</dt><dd>{price(strategy.stopLossPrice)}</dd></div>
     </dl>}
+    {screening&&<p className="expanded-card-note">손익비 참고 상태: {riskReward?.available===true?
+      gradeLabels[riskReward.classification]||'판정 미확인':'손익비 미확인'}
+      {typeof riskReward?.reason==='string'&&riskReward.reason&&<> · {riskReward.reason}</>}
+    </p>}
     <ul className="expanded-card-conditions" aria-label="추천 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
         <span>{label}</span><strong>{label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
