@@ -2,7 +2,7 @@
 require('./helpers/local-only.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const {pathToFileURL}=require('node:url');
-const modulePromise=import(pathToFileURL(require.resolve('../frontend/src/utils/holdingGuidance.js')));
+const modulePromise=Promise.resolve(require('../services/holdingGuidance'));
 const condition=status=>({status});
 const input=()=>({testOnly:true,averageBuyPrice:80,currentPrice:100,entryPrice:98,takeProfitPrice:120,stopLossPrice:90,
   technicalAssessment:{status:'FAVORABLE',cautionCount:0,missingRequired:[],conditions:Object.fromEntries(

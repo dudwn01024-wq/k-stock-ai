@@ -36,11 +36,11 @@ const render=item=>renderToStaticMarkup(React.createElement(Card,{item}));
 test('TEST_ONLY screening card removes only price strategy presentation and preserves stored selection evidence',()=>{
   const item=candidate(),before=JSON.stringify(item);
   const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true,onSelect:()=>assert.fail('RENDER_MUST_NOT_SELECT')}));
-  assert.doesNotMatch(html,/분석 당시 조회가|등락률|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|손익비|105원|110원|95원/);
+  assert.doesNotMatch(html,/분석 당시 조회가|등락률|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가|상승 여력|하락 위험|손익비|105원|110원|95원/);
   for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','데이터 기준','제공처','현재 상세 분석 보기'])
     assert.ok(html.includes(label),label);
   assert.equal((html.match(/저장된 원문 링크/g)||[]).length,3);
-  assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
+  assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
 });
 test('TEST_ONLY screening selection is explicit and passes only stored stock identity to existing detail flow',()=>{
   const item=candidate(),selected=[];
@@ -61,8 +61,8 @@ const noService=new Proxy({},{get:()=>()=>assert.fail('TEST_ONLY_SERVICE_CALL_FO
 test('TEST_ONLY card shows stored quote and three distinct strategy prices without changing any input',()=>{
   const item=candidate(),before=JSON.stringify(item),html=render(item);
   assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'등락률'),'0%');
-  assert.equal(field(html,'진입 참고가'),'100원');assert.equal(field(html,'익절 참고가'),'110원');assert.equal(field(html,'손절 참고가'),'95원');
-  assert.equal(JSON.stringify(item),before);assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);
+  assert.equal(field(html,'전략 참고 진입가'),'100원');assert.equal(field(html,'전략 참고 목표가'),'110원');assert.equal(field(html,'전략 참고 손절가'),'95원');
+  assert.equal(JSON.stringify(item),before);assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
 });
 for(const value of [null,undefined,NaN,Infinity,'105',{},false,0,-1])
   test('TEST_ONLY invalid quote '+String(value)+' stays unconfirmed without invented zero',()=>{
@@ -70,7 +70,7 @@ for(const value of [null,undefined,NaN,Infinity,'105',{},false,0,-1])
   });
 test('TEST_ONLY absent strategy, change rate and assessment remain unconfirmed',()=>{
   const html=render({...candidate(),strategy:undefined,changeRate:null,newsAssessment:undefined});
-  for(const label of ['등락률','진입 참고가','익절 참고가','손절 참고가','거래량','평가 기사 수','긍정 단서 수','부정 단서 수'])
+  for(const label of ['등락률','전략 참고 진입가','전략 참고 목표가','전략 참고 손절가','거래량','평가 기사 수','긍정 단서 수','부정 단서 수'])
     assert.equal(field(html,label),'미확인');
   assert.equal(field(html,'뉴스 조건'),'미확인');
 });
@@ -135,7 +135,7 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
     const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
     const html=renderToStaticMarkup(React.createElement(component,{service:noService}));
     assert.ok(html.indexOf('TEST_ONLY_FIRST')<html.indexOf('TEST_ONLY_SECOND'));assert.doesNotMatch(html,/TEST_ONLY_EXCLUDED/);
-    assert.match(html,/관심 후보 · 기존 추천 점수 2 \/ 4/);assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);
+    assert.match(html,/관심 후보 · 기존 추천 점수 2 \/ 4/);assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
     assert.match(html,/상세 근거 보기/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   }
   assert.equal(JSON.stringify(items),before);
@@ -143,7 +143,7 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
 test('TEST_ONLY V2 history reuses the same evidence rules and keeps outcome baseline separate',()=>{
   const {ExpandedHistoryRecord}=load(require.resolve('../frontend/src/RecommendationHistory.jsx'));
   const html=renderToStaticMarkup(React.createElement(ExpandedHistoryRecord,{detail:detail([candidate()]),service:noService}));
-  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'진입 참고가'),'100원');
+  assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'전략 참고 진입가'),'100원');
   assert.match(html,/성과 추적 기준: 2026-10-02 종가 100/);assert.match(html,/TEST_ONLY 뉴스 0/);
 });
 test('TEST_ONLY page mount and reread load only saved results and never start a scan or AI request',async()=>{
@@ -180,7 +180,7 @@ test('TEST_ONLY expanded home shows only two summary totals, a compact risk note
   assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   assert.doesNotMatch(html,/<h2|2단계 스크리닝 · 분석 참고용|사이트 접속·새로고침·이력 조회|최근 10분/);
   assert.match(html,/저장된 분석 결과 · 실시간 시세가 아닙니다/);
-  assert.doesNotMatch(html,/분석 당시 조회가|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|<dt>손익비<\/dt>/);
+  assert.doesNotMatch(html,/분석 당시 조회가|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가|상승 여력|하락 위험|<dt>손익비<\/dt>/);
   assert.match(html,/상세 근거 보기/);assert.match(html,/TEST_ONLY 뉴스 0/);
   assert.doesNotMatch(html,/추천 이력 보기/);
   assert.match(html,/500종목 분석 요청/);

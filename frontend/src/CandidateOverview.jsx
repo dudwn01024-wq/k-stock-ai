@@ -20,7 +20,7 @@ export function candidateSummary(item) {
 }
 
 const runTime=value=>value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value)):'미제공';
-const gradeLabels={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
+const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
 export default function CandidateOverview({ data, loading, error, aiData, aiLoading, aiError, onSelect, onRefresh, onHistory, historical=false }) {
   const available = ['priority', 'chase', 'watch'].every(key => Array.isArray(data?.[key]));
   const items = available ? data.recommendations : [];

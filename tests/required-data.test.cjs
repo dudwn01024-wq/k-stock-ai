@@ -71,6 +71,7 @@ function server({missingSupply=false,missingVolume=false,missingTrend=false,miss
       if(name==='./services/recommendationVolumePolicy')return require('../services/recommendationVolumePolicy');
       if(name==='./services/dataFreshness')return require('../services/dataFreshness');
       if(name==='./services/naverMarketData')return require('../services/naverMarketData');
+      if(name==='./services/holdingGuidanceAccess')return require('../services/holdingGuidanceAccess');
       if(name==='./services/stockDetailNews')return require('../services/stockDetailNews');
       if(name==='./services/recommendationHistory')return {...require('../services/recommendationHistory'),historyFromEnvironment:()=>require('../services/recommendationHistory').createRecommendationHistory()};
       if(name==='./services/recommendationOutcomes')return {...require('../services/recommendationOutcomes'),outcomesFromEnvironment:({history})=>require('../services/recommendationOutcomes').createRecommendationOutcomes({history})};

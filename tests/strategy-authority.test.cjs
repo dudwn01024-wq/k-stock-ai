@@ -40,7 +40,7 @@ test('one individual AI route remains and frontend keeps existing endpoint',()=>
   const ui=fs.readFileSync(require.resolve('../frontend/src/App.jsx'),'utf8');
   assert.match(ui,/stock\/ai-analysis/);assert.match(ui,/분석 후보 · 스크리닝/);
   assert.match(ui,/후보 등급은 매수 허가가 아닙니다/);assert.match(ui,/조회 시점이 다를 수/);
-  assert.match(ui,/ENTRY_CANDIDATE: '진입 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류'/);
+  assert.match(ui,/ENTRY_CANDIDATE: '분석 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류'/);
 });
 
 test('screening cards do not label candidates as buy authorization',()=>{

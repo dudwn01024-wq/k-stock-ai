@@ -4,3 +4,5 @@
 .holding-values{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.85rem;margin:0}.holding-values dt{font-size:.83rem;color:#cfdeed;line-height:1.5}.holding-values dd{margin:.25rem 0 0;font-size:1.05rem;font-weight:650;font-variant-numeric:tabular-nums}
 .holding-result{background:#20334d;border:1px solid #71879f;border-radius:.65rem;padding:.8rem 1rem;line-height:1.7}.holding-result ul{padding-left:1.15rem;margin:.5rem 0 0;font-size:.88rem}.holding-result strong{color:#e8f1fb}.holding-HOLD strong{color:#b7f2de}.holding-TAKE_PROFIT_CONSIDER strong{color:#f8d887}.holding-STOP_LOSS_CONSIDER strong,.holding-RISK_CAUTION strong,.holding-warning{color:#ffd0d3}.holding-warning{font-size:.85rem}
 @media(max-width:600px){.holding-guidance{padding:1rem;gap:.8rem}.holding-values{grid-template-columns:repeat(2,minmax(0,1fr))}.holding-values>div:nth-child(3){grid-column:1/-1}.holding-input{max-width:none}}
+
+.holding-form{display:flex;align-items:flex-end;gap:.7rem;flex-wrap:wrap}.holding-form .holding-input{flex:1;min-width:min(100%,14rem)}.holding-form button:disabled{opacity:.5}

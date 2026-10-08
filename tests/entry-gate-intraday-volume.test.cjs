@@ -87,7 +87,7 @@ test('TEST_ONLY pending volume cannot be masked by forged candidate or neutral s
   r.marketAssessment.conditions.volume.status='NEUTRAL';r.marketAssessment.pendingRequired='volume';assert.equal(engine.isEntryAllowed(r),false);
 });
 test('TEST_ONLY holder treats pending as unconfirmed, never low-volume failure or confirmed HOLD',async()=>{
-  const {pathToFileURL}=require('node:url');const {evaluateHoldingGuidance}=await import(pathToFileURL(require.resolve('../frontend/src/utils/holdingGuidance.js')));
+  const {pathToFileURL}=require('node:url');const {evaluateHoldingGuidance}=require('../services/holdingGuidance');
   const r=engine.calculateTradingStrategy(input()),holder=evaluateHoldingGuidance({...r,averageBuyPrice:80});
   assert.equal(holder.status,'UNKNOWN');assert.equal(holder.returnPct,25);assert.equal(r.marketAssessment.cautionCount,0);
 });
@@ -95,7 +95,7 @@ test('TEST_ONLY recommendation, finalized outcome V3, news, holder and chart cal
   for(const file of ['services/recommendationVolumePolicy.js','services/recommendationFastScreen.js',
     'services/recommendationHistory.js','services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js',
     'services/recommendationOutcomeCollector.js','scripts/collectRecommendationOutcomes.js','services/chartAnalysis.js',
-    'services/stockDetailNews.js','services/naverMarketData.js','frontend/src/utils/holdingGuidance.js']){
+    'services/stockDetailNews.js','services/naverMarketData.js']){
     const before=execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),before,file);
   }

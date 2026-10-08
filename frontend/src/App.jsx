@@ -5,6 +5,8 @@ import CandidateOverview from './CandidateOverview.jsx';
 import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
+import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
+import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
 import CandlestickChart from './CandlestickChart.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import {aiAnalysisError} from './utils/aiAnalysisError.js';
@@ -423,6 +425,9 @@ recentLow20:
   };
 }
 
+  unlockHoldingGuidance(password) {return holdingGuidancePost(this.baseUrl,'unlock',{password});}
+  evaluateHoldingGuidance(input,token) {return holdingGuidancePost(this.baseUrl,'evaluate',input,token);}
+
   async getAIAnalysis(symbol,newsSnapshotId) {
     const response = await fetch(
       `${this.baseUrl}/stock/ai-analysis?symbol=${encodeURIComponent(symbol)}&newsSnapshotId=${encodeURIComponent(newsSnapshotId)}`
@@ -838,6 +843,7 @@ export default function App() {
                 <p className="text-xs text-slate-400 mt-0.5">
                   후보 등급은 매수 허가가 아닙니다. 추천과 상세는 조회 시점이 다를 수 있으므로 각 기준일·수신시각을 확인하세요. 최종 진입 조건은 별도로 조회한 상세 전략에서 확인합니다. 50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
                 </p>
+                  <InvestmentNotice/>
               </div>
           {recommendationData && (
   <button
@@ -875,7 +881,7 @@ export default function App() {
                 <div className="space-y-5">
                 <div className="flex flex-wrap items-center gap-2 text-[11px]">
                   <span className="px-2.5 py-1 rounded-full bg-emerald-950/50 border border-emerald-800/50 text-emerald-300">
-                    🟢 최우선 후보 = 4/4 + 현재가 손익비 통과
+                    🟢 조건 우수 후보 = 4/4 + 현재가 손익비 통과
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-orange-950/30 border border-orange-800/40 text-orange-300">
                     🟠 추격 주의 = 4/4이지만 현재가 손익비 불리
@@ -893,10 +899,10 @@ export default function App() {
                     <ShieldCheck className="w-5 h-5 text-slate-400 mt-0.5 shrink-0" />
                     <div>
                       <p className="text-sm font-semibold text-slate-200">
-                        현재 조건을 만족하는 최우선 후보가 없습니다.
+                        현재 조건을 만족하는 조건 우수 후보가 없습니다.
                       </p>
                       <p className="text-xs text-slate-500 mt-1">
-                        추세 · 거래량 · 수급이 좋아도 현재가에서 목표가까지 남은 기대수익이 손절 위험보다 작으면 최우선 후보로 올리지 않습니다.
+                        추세 · 거래량 · 수급이 좋아도 현재가에서 목표가까지 남은 기대수익이 손절 위험보다 작으면 조건 우수 후보로 올리지 않습니다.
                       </p>
                     </div>
                   </div>
@@ -917,7 +923,7 @@ export default function App() {
                 {recommendationAILoading && (
                   <div className="bg-slate-950/60 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-2 text-xs text-slate-300">
                     <div className="w-4 h-4 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
-                    최우선 후보와 추격 주의 후보의 실제 뉴스 및 AI 해설을 불러오는 중입니다...
+                    조건 우수 후보와 추격 주의 후보의 실제 뉴스 및 AI 해설을 불러오는 중입니다...
                   </div>
                 )}
 
@@ -965,7 +971,7 @@ export default function App() {
                                 {item.stockName}
                                 {isPriority && (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                    🟢 최우선 후보
+                                    🟢 조건 우수 후보
                                   </span>
                                 )}
                                 {isChaseCaution && (
@@ -1031,7 +1037,7 @@ export default function App() {
   </div>
 
   <div>
-    <span className="text-slate-500 block">진입 고려가</span>
+    <span className="text-slate-500 block">전략 참고 진입가</span>
     <span className="text-emerald-300 font-mono">{formatKRW(item.strategy?.entryPrice)}</span>
   </div>
 
@@ -1305,12 +1311,13 @@ export default function App() {
     <div>
       <h3 className="text-base font-semibold text-white flex items-center gap-2">
         <Target className="w-4 h-4 text-emerald-400" />
-        최종 진입 조건 · 상세 전략
+        분석 조건 · 상세 전략 참고
       </h3>
 
       <p className="text-xs text-slate-400 mt-1">
-        KIS 실제 OHLCV와 실제 거래량·수급·뉴스를 기반으로 별도 계산합니다. 진입 조건 충족은 전략상 후보이며 실제 주문 허가나 실행을 의미하지 않습니다.
+        KIS 실제 OHLCV와 실제 거래량·수급·뉴스를 기반으로 별도 계산합니다. 분석 조건 충족은 전략상 참고 상태이며 실제 주문 허가나 실행을 의미하지 않습니다.
       </p>
+  <InvestmentNotice context="strategy"/>
     </div>
 
     <span
@@ -1332,7 +1339,7 @@ export default function App() {
         <Clock className="w-3.5 h-3.5" />
       )}
 
-      {({ ENTRY_CANDIDATE: '진입 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '판정 데이터 없음'}
+      {({ ENTRY_CANDIDATE: '분석 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '판정 데이터 없음'}
     </span>
   </div>
 
@@ -1358,7 +1365,7 @@ export default function App() {
                   : 'text-slate-300'
           }`}
         >
-          {({ ENTRY_CANDIDATE: '진입 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '데이터 없음'}
+          {({ ENTRY_CANDIDATE: '분석 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '데이터 없음'}
         </span>
       </div>
 
@@ -1404,7 +1411,7 @@ export default function App() {
 
       <div className="bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-900/40">
         <span className="text-[11px] text-emerald-400/80 block">
-          진입 고려가
+          전략 참고 진입가
         </span>
 
         <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
@@ -1414,7 +1421,7 @@ export default function App() {
 
       <div className="bg-red-950/20 p-3.5 rounded-xl border border-red-900/40">
         <span className="text-[11px] text-red-400/80 block">
-          목표가
+          전략 참고 목표가
         </span>
 
         <span className="text-sm font-bold font-mono text-red-400 mt-1 block">
@@ -1424,7 +1431,7 @@ export default function App() {
 
       <div className="bg-blue-950/20 p-3.5 rounded-xl border border-blue-900/40">
         <span className="text-[11px] text-blue-400/80 block">
-          손절가
+          전략 참고 손절가
         </span>
 
         <span className="text-sm font-bold font-mono text-blue-400 mt-1 block">
@@ -1994,7 +2001,7 @@ export default function App() {
   </div>
 </section>
 
-            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData}/>
+            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData} service={backendService}/>
 
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
@@ -2007,6 +2014,7 @@ export default function App() {
                       AI 종합 분석
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">실제 데이터와 뉴스를 기반으로 한 AI 해설 및 분석</p>
+                <InvestmentNotice context="ai"/>
                   </div>
                 </div>
                 {aiAnalysis?.modelUsed && (
@@ -2101,14 +2109,14 @@ export default function App() {
 
         {aiAnalysis.analysis.strategyExplanation.targetReason && (
           <p>
-            <span className="text-red-400 font-semibold">목표가 근거: </span>
+            <span className="text-red-400 font-semibold">전략 참고 목표가 근거: </span>
             {aiAnalysis.analysis.strategyExplanation.targetReason}
           </p>
         )}
 
         {aiAnalysis.analysis.strategyExplanation.stopLossReason && (
           <p>
-            <span className="text-sky-400 font-semibold">손절가 근거: </span>
+            <span className="text-sky-400 font-semibold">전략 참고 손절가 근거: </span>
             {aiAnalysis.analysis.strategyExplanation.stopLossReason}
           </p>
         )}
@@ -2117,7 +2125,7 @@ export default function App() {
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-800">
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      진입 고려가
+      전략 참고 진입가
     </span>
     <span className="text-sm font-bold font-mono text-emerald-300">
       {formatKRW(strategyData?.entryPrice)}
@@ -2126,7 +2134,7 @@ export default function App() {
 
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      목표가
+      전략 참고 목표가
     </span>
     <span className="text-sm font-bold font-mono text-red-400">
       {formatKRW(strategyData?.takeProfitPrice)}
@@ -2135,7 +2143,7 @@ export default function App() {
 
   <div className="bg-slate-900/70 rounded-lg p-3">
     <span className="text-[11px] text-slate-500 block mb-1">
-      손절가
+      전략 참고 손절가
     </span>
     <span className="text-sm font-bold font-mono text-blue-400">
       {formatKRW(strategyData?.stopLossPrice)}
@@ -2321,8 +2329,9 @@ export default function App() {
       <footer className="border-t border-slate-800/80 bg-slate-950 px-4 lg:px-8 py-4 text-center text-xs text-slate-500 space-y-1">
         <p>© 2026 K-Stock AI Platform.</p>
         <p className="text-[11px] text-slate-600">
-          실제 조회 데이터만 표시하며, 투자 판단과 책임은 사용자에게 있습니다.
+          실제 조회 데이터만 표시하며, 투자 판단과 책임은 사용자에게 있습니다. 수익을 보장하거나 실제 주문을 대신 실행하지 않습니다.
         </p>
+        <PublicInformation/>
       </footer>
     </div>
   );

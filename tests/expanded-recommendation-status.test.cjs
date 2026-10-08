@@ -16,6 +16,7 @@ function renderStatus(status,stats){
   const component={exports:{}};
   vm.runInNewContext(code,{module:component,exports:component.exports,require:name=>{
     if(name==='react')return stub;
+    if(name==='./PublicInformation.jsx')return {InvestmentNotice:()=>null};
     if(name==='./expanded-recommendation.css')return {};
     if(name==='./ExpandedCandidateCard.jsx'){
       const card={exports:{}};

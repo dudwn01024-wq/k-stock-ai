@@ -2,7 +2,7 @@ import React from 'react';
 import './expanded-recommendation.css';
 import {recommendationDataDates} from './recommendationDataDates.js';
 
-const gradeLabels={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
+const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
 const number=value=>numeric(value)?value.toLocaleString('ko-KR'):'미확인';
 const price=value=>numeric(value)&&value>0?`${number(value)}원`:'미확인';
@@ -33,9 +33,9 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     {!screening&&<dl className="expanded-card-prices">
       <div className="expanded-card-quote"><dt>분석 당시 조회가</dt><dd>{price(item.currentPrice)}</dd></div>
       <div><dt>등락률</dt><dd>{percent(item.changeRate)}</dd></div>
-      <div><dt>진입 참고가</dt><dd>{price(strategy.entryPrice)}</dd></div>
-      <div><dt>익절 참고가</dt><dd>{price(strategy.takeProfitPrice)}</dd></div>
-      <div><dt>손절 참고가</dt><dd>{price(strategy.stopLossPrice)}</dd></div>
+      <div><dt>전략 참고 진입가</dt><dd>{price(strategy.entryPrice)}</dd></div>
+      <div><dt>전략 참고 목표가</dt><dd>{price(strategy.takeProfitPrice)}</dd></div>
+      <div><dt>전략 참고 손절가</dt><dd>{price(strategy.stopLossPrice)}</dd></div>
     </dl>}
     <ul className="expanded-card-conditions" aria-label="추천 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>

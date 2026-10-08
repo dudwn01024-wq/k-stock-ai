@@ -21,7 +21,9 @@ async function fixture(t,{fetchNews,now=Date.now,ttlMs,currentVolume=150,average
   const fetchStockNewsBySymbol=async symbol=>{calls.news++;return fetchNews?fetchNews(symbol):[article(calls.news===1?'TEST_ONLY 계약 해지':'TEST_ONLY 수주')];};
   const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol,now,ttlMs});
   const app=express();
-  const context={app,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
+  const holdingGuidanceAccess=require('../services/holdingGuidanceAccess').createHoldingGuidanceAccess({
+    env:{HOLDING_GUIDANCE_ACCESS_SECRET:'TEST_ONLY_ACCESS',HOLDING_GUIDANCE_TOKEN_SECRET:'TEST_ONLY_'.repeat(4)}});
+  const context={app,holdingGuidanceAccess,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
     fetchStockQuoteData:async symbol=>{calls.quote++;return {symbol,stockName:'TEST_ONLY',currentPrice:100,foreignerNet:1,institutionNet:1};},
     fetchKisDailyOHLCV:async()=>{calls.daily++;return Array.from({length:30},(_,i)=>({testOnly:true,high:120,low:90,close:100,
       date:i===29?sourceBusinessDate:'2026-10-01',volume:i===29?currentVolume:averageVolume20,
@@ -36,7 +38,7 @@ async function fixture(t,{fetchNews,now=Date.now,ttlMs,currentVolume=150,average
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const base='http://127.0.0.1:'+server.address().port;
   const get=async path=>{const r=await fetch(base+path);return {status:r.status,body:await r.json()};};
-  return {calls,seen,get,store:stockDetailNews};
+  return {calls,seen,get,store:stockDetailNews,holdingGuidanceAccess};
 }
 
 test('TEST_ONLY detail reads news once and screen, ENTRY_GATE and holder share its assessment even if provider changes',async t=>{
@@ -46,7 +48,7 @@ test('TEST_ONLY detail reads news once and screen, ENTRY_GATE and holder share i
   assert.deepEqual(body.newsAssessment,body.marketContext.newsAssessment);
   assert.equal(body.newsAssessment.newsPassed,false);
   assert.equal(body.strategy.marketAssessment.conditions.news.status,'CAUTION');
-  const {evaluateHoldingGuidance}=await import(pathToFileURL(require.resolve('../frontend/src/utils/holdingGuidance.js')));
+  const {evaluateHoldingGuidance}=require('../services/holdingGuidance');
   const holder=evaluateHoldingGuidance(body.strategy);
   assert.equal(holder.status,'RISK_CAUTION');
   assert.equal(f.calls.news,1,'holder is pure and cannot request another article list');
@@ -75,7 +77,7 @@ for(const [label,fetchNews,assessment,status] of [
   assert.equal(f.calls.news,1);assert.deepEqual(body.news,[]);assert.equal(body.newsStatus,status);
   assert.notEqual(body.newsAssessment?.newsPassed,true);assert.equal(body.newsAssessment?.sentiment??null,assessment);
   assert.equal(body.strategy.marketAssessment.available,false);
-  const {evaluateHoldingGuidance}=await import(pathToFileURL(require.resolve('../frontend/src/utils/holdingGuidance.js')));
+  const {evaluateHoldingGuidance}=require('../services/holdingGuidance');
   assert.equal(evaluateHoldingGuidance(body.strategy).status,'UNKNOWN');
   assert.doesNotMatch(JSON.stringify(body),/TEST_ONLY_MUST_NOT_LEAK/);
 });
@@ -156,4 +158,14 @@ for(const [label,settings,condition,policy] of [
     assert.equal(ai.strategy.finalAssessment.status,'WAIT');assert.equal(detail.strategy.finalAssessment.label,'장중 거래량 확인 중');
     assert.deepEqual(detail.strategy.marketAssessment.pendingRequired,['volume']);assert.deepEqual(detail.strategy.marketAssessment.missingRequired,[]);
   }
+});
+
+test('TEST_ONLY authenticated holder consumes the exact canonical detail response without another provider request',async t=>{
+  const f=await fixture(t),{body}=await f.get('/api/stock/detail-analysis?symbol=005930');
+  const a=f.holdingGuidanceAccess.unlock('TEST_ONLY_ACCESS','TEST_ONLY_PEER');
+  const result=f.holdingGuidanceAccess.evaluate({symbol:'005930',snapshotId:body.newsSnapshotId,averageBuyPrice:80,accessToken:a.accessToken});
+  const expected=require('../services/holdingGuidance').evaluateHoldingGuidance({...body.strategy,currentPrice:body.currentPrice,
+    dataMetadata:{dateConsistency:body.dataMetadata.dateConsistency},averageBuyPrice:80});
+  assert.equal(JSON.stringify(result),JSON.stringify(expected));
+  assert.deepEqual(f.calls,{news:1,quote:1,daily:1,ai:0});
 });

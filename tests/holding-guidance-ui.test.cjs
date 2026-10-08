@@ -33,40 +33,74 @@ const visit=(node,predicate)=>{
   if(predicate(node))return node;
   for(const child of React.Children.toArray(node.props?.children)){const found=visit(child,predicate);if(found)return found;}
 };
-test('TEST_ONLY holder UI shows cost and market strategy separately, zero return distinctly from absent return',()=>{
-  for(const [value,expected] of [['80','+25%'],['100','0%'],['200','-50%'],['','미확인'],['0','미확인'],['-1','미확인']]){
-    const react={...React,useState:()=>[{symbol:'TEST_ONLY_A',value},()=>{}],useEffect:()=>{}};
-    const Component=loader(react)(componentFile).default;
-    const source=strategy(),before=JSON.stringify(source);
-    const html=renderToStaticMarkup(React.createElement(Component,{symbol:'TEST_ONLY_A',strategy:source}));
-    assert.equal(field(html,'현재 손익률'),expected);assert.equal(field(html,'현재 목표 참고가'),'120원');assert.equal(field(html,'현재 손절 참고가'),'90원');
-    assert.equal(JSON.stringify(source),before);assert.match(html,/시장 데이터 기반 참고 판단이며 실제 매수·매도 지시가 아닙니다/);
-    assert.doesNotMatch(html,/매도하세요|반드시 보유하세요/);
-  }
-});
-test('TEST_ONLY all five holder states carry textual judgment and rule reasons',()=>{
-  const source=strategy();
-  for(const [patch,label] of [[{},'보유 유지 참고'],[{currentPrice:90},'손절 고려'],[{currentPrice:120},'익절 고려'],
-    [{technicalAssessment:{...source.technicalAssessment,status:'CAUTION'}},'위험 증가 · 재점검'],[{takeProfitPrice:null},'판단 보류']]){
-    const react={...React,useState:()=>[{symbol:'TEST_ONLY_A',value:'80'},()=>{}],useEffect:()=>{}};
-    const Component=loader(react)(componentFile).default;
-    const html=renderToStaticMarkup(React.createElement(Component,{symbol:'TEST_ONLY_A',strategy:{...source,...patch}}));
-    assert.match(html,new RegExp(label));assert.ok((html.match(/<li>/g)||[]).length>=2);
-  }
-});
-test('TEST_ONLY changing symbol immediately clears the old average and never persists or sends the input',()=>{
-  let state={symbol:'TEST_ONLY_A',value:'80'},effects=[];
-  const react={...React,useState:initial=>[state,v=>{state=v;}],useEffect:fn=>effects.push(fn)};
+function holdingHarness({unlockResult,evaluateResult}={}){
+  const source=fs.readFileSync(componentFile,'utf8');
+  const bindings=[...source.matchAll(/const \[([^,]+),[^\]]+\]\s*=\s*useState\(/g)].map(x=>x[1]);
+  const states=[],refs=[],calls=[];let cursor=0,refCursor=0;
+  const react={...React,useState:initial=>{const i=cursor++;if(!(i in states))states[i]=initial;
+    return [states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];},
+    useEffect:()=>{},useRef:initial=>{const i=refCursor++;return refs[i]??(refs[i]={current:initial});}};
   const Component=loader(react)(componentFile).default;
-  let tree=Component({symbol:'TEST_ONLY_A',strategy:strategy()});effects.splice(0).forEach(fn=>fn());
-  visit(tree,node=>node.type==='input').props.onChange({target:{value:'80'}});
-  assert.equal(state.value,'80');
-  tree=Component({symbol:'TEST_ONLY_B',strategy:strategy()});
-  assert.equal(visit(tree,node=>node.type==='input').props.value,'');
-  assert.equal(field(renderToStaticMarkup(tree),'현재 손익률'),'미확인');effects.splice(0).forEach(fn=>fn());
-  tree=Component({symbol:'TEST_ONLY_A',strategy:strategy()});assert.equal(visit(tree,node=>node.type==='input').props.value,'');
-  for(const file of [componentFile,require.resolve('../frontend/src/utils/holdingGuidance.js')])
-    assert.doesNotMatch(fs.readFileSync(file,'utf8'),/fetch\s*\(|localStorage|sessionStorage|\.getAccount|\.placeOrder|startExpandedRun|collectRecommendationOutcomes/);
+  const service={unlockHoldingGuidance:async password=>{calls.push({action:'unlock',password});
+    return unlockResult?unlockResult():{accessToken:'TEST_ONLY_OPAQUE_TOKEN',expiresAt:new Date(Date.now()+3600000).toISOString()};},
+    evaluateHoldingGuidance:async(body,token)=>{calls.push({action:'evaluate',body,token});return evaluateResult?evaluateResult():{
+      status:'HOLD',label:'보유 유지 참고',reasons:['TEST_ONLY 서버의 기존 판정 이유'],averageBuyPrice:body.averageBuyPrice,
+      currentPrice:100,takeProfitPrice:120,stopLossPrice:90,returnPct:25};}};
+  const props={symbol:'TEST_ONLY_A',strategy:{...strategy(),newsSnapshotId:'TEST_ONLY_SNAPSHOT'},service};
+  const render=()=>{cursor=0;refCursor=0;return Component(props);};
+  const set=(name,value)=>{states[bindings.indexOf(name)]=value;};
+  return {render,props,set,calls,state:name=>states[bindings.indexOf(name)]};
+}
+test('TEST_ONLY public holder is locked and exposes no personal input, return or judgment without authentication',()=>{
+  const h=holdingHarness(),html=renderToStaticMarkup(h.render());
+  for(const text of ['🔒 보유자 참고 판정','비공개 참고 기능입니다. 허용된 사용자만 이용할 수 있습니다.','비밀번호 입력','잠금 해제'])assert.ok(html.includes(text));
+  assert.ok(html.includes('type="password"'));assert.doesNotMatch(html,/평균매수가 \(원\)|현재 손익률|보유 유지 참고|익절 고려|손절 고려/);
+  assert.equal(h.calls.length,0,'render cannot unlock, evaluate, fetch providers or run AI');
+});
+test('TEST_ONLY explicit unlock clears the submitted password and keeps the opaque token in React memory only',async()=>{
+  const h=holdingHarness();h.render();h.set('password','TEST_ONLY_PRIVATE');
+  await visit(h.render(),n=>n.type==='form').props.onSubmit({preventDefault(){}});
+  assert.equal(h.calls.length,1);assert.equal(h.calls[0].action,'unlock');assert.equal(h.state('password'),'');
+  assert.equal(h.state('access').accessToken,'TEST_ONLY_OPAQUE_TOKEN');
+  const html=renderToStaticMarkup(h.render());assert.ok(html.includes('평균매수가 (원)'));
+  assert.doesNotMatch(html,/TEST_ONLY_PRIVATE|TEST_ONLY_OPAQUE_TOKEN/);
+});
+test('TEST_ONLY personal input sends only symbol, opaque detail ID and average; prices stay server-owned',async()=>{
+  const h=holdingHarness();h.render();h.set('access',{accessToken:'TEST_ONLY_TOKEN',expiresAt:new Date(Date.now()+3600000).toISOString()});
+  const tree=h.render();visit(tree,n=>n.type==='input'&&n.props.type==='number').props.onChange({target:{value:'80'}});
+  await visit(h.render(),n=>n.type==='form').props.onSubmit({preventDefault(){}});
+  const call=h.calls[0];assert.equal(call.action,'evaluate');assert.equal(call.token,'TEST_ONLY_TOKEN');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.body)),{symbol:'TEST_ONLY_A',snapshotId:'TEST_ONLY_SNAPSHOT',averageBuyPrice:80});
+  const html=renderToStaticMarkup(h.render());assert.ok(html.includes('+25%'));assert.ok(html.includes('보유 유지 참고'));
+  assert.equal(field(html,'전략 참고 목표가'),'120원');assert.equal(field(html,'전략 참고 손절가'),'90원');
+  assert.doesNotMatch(html,/매도하세요|반드시 보유하세요/);
+});
+test('TEST_ONLY invalid average cannot start a request or generate a return',async()=>{
+  for(const value of ['', '0','-1','bad']){
+    const h=holdingHarness();h.render();h.set('access',{accessToken:'TEST_ONLY_TOKEN',expiresAt:new Date(Date.now()+3600000).toISOString()});
+    h.set('input',{symbol:h.props.symbol,snapshotId:h.props.strategy.newsSnapshotId,value});
+    const tree=h.render();await visit(tree,n=>n.type==='form').props.onSubmit({preventDefault(){}});
+    assert.equal(h.calls.length,0);assert.doesNotMatch(renderToStaticMarkup(h.render()),/当前|현재 손익률|0%/);
+  }
+});
+test('TEST_ONLY changed stock or detail snapshot immediately hides old average and returned judgment',()=>{
+  const h=holdingHarness();h.render();h.set('access',{accessToken:'TEST_ONLY_TOKEN',expiresAt:new Date(Date.now()+3600000).toISOString()});
+  h.set('input',{symbol:h.props.symbol,snapshotId:h.props.strategy.newsSnapshotId,value:'80'});
+  h.set('result',{symbol:h.props.symbol,snapshotId:h.props.strategy.newsSnapshotId,average:80,guidance:{status:'HOLD',label:'TEST_ONLY_OLD'}});
+  for(const patch of [{symbol:'TEST_ONLY_B'},{strategy:{...h.props.strategy,newsSnapshotId:'TEST_ONLY_NEW'}}]){
+    Object.assign(h.props,patch);const tree=h.render();assert.equal(visit(tree,n=>n.type==='input').props.value,'');
+    assert.ok(!renderToStaticMarkup(tree).includes('TEST_ONLY_OLD'));
+  }
+});
+test('TEST_ONLY expired access relocks the public UI instead of exposing cached personal results',()=>{
+  const h=holdingHarness();h.render();h.set('access',{accessToken:'TEST_ONLY_TOKEN',expiresAt:new Date(Date.now()-1).toISOString()});
+  const html=renderToStaticMarkup(h.render());assert.ok(html.includes('잠금 해제'));assert.doesNotMatch(html,/평균매수가 \(원\)|현재 손익률/);
+});
+test('TEST_ONLY frontend cannot evaluate holding rules locally or persist private inputs',()=>{
+  for(const file of [componentFile,require.resolve('../frontend/src/utils/holdingGuidance.js'),require.resolve('../frontend/src/utils/holdingGuidanceAccess.js')]){
+    const code=fs.readFileSync(file,'utf8');assert.doesNotMatch(code,/localStorage|sessionStorage|document\.cookie|console\.|\.getAccount|\.placeOrder|startExpandedRun|collectRecommendationOutcomes|VITE_.*SECRET/);
+    assert.doesNotMatch(code,/currentPrice\s*<=\s*stopLossPrice|currentPrice\s*>=\s*takeProfitPrice|function evaluateHoldingGuidance/);
+  }
 });
 test('TEST_ONLY recommendation stock selection reuses exactly the existing explicit detail requests',async()=>{
   const appFile=require.resolve('../frontend/src/App.jsx'),source=fs.readFileSync(appFile,'utf8');

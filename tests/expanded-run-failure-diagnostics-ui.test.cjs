@@ -19,7 +19,8 @@ function render(run,saved=null){
   let index=0,calls=0;const stub={...React,useState:()=>[index++===0?run:index===2?saved:null,()=>{}],
     useEffect:()=>{},useRef:()=>({current:0}),useCallback:fn=>fn};
   const component={exports:{}};vm.runInNewContext(code,{module:component,exports:component.exports,Intl,Date,Set,Map,Number,
-    require:name=>{if(name==='react')return stub;if(name.endsWith('.css'))return {};
+    require:name=>{if(name==='react')return stub;
+    if(name==='./PublicInformation.jsx')return {InvestmentNotice:()=>null};if(name.endsWith('.css'))return {};
       if(name==='./ExpandedCandidateCard.jsx')return ({item})=>React.createElement('article',null,item.stockName+' '+item.grade+' '+item.score);
       throw Error('TEST_ONLY_UNEXPECTED_IMPORT');}});
   const service=new Proxy({},{get:()=>()=>{calls++;assert.fail('TEST_ONLY_SERVICE_CALL_FORBIDDEN');}});

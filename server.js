@@ -41,6 +41,9 @@ const executionMode=resolveExecutionMode(process.env.KSTOCK_EXECUTION_MODE,proce
 
 // Register private routes only for the explicitly enabled local server.
 installExecutionMode(app,executionMode);
+const {createHoldingGuidanceAccess,registerHoldingGuidanceRoutes}=require('./services/holdingGuidanceAccess');
+const holdingGuidanceAccess=createHoldingGuidanceAccess();
+registerHoldingGuidanceRoutes(app,holdingGuidanceAccess);
 app.use(express.json());
 
 const NAVER_HEADERS = {
@@ -5106,6 +5109,9 @@ const recentLow20 =
         });
 
 
+      // Retain only server-calculated detail data for the private, no-fetch judgment.
+      if(includeNewsSnapshot)holdingGuidanceAccess.rememberStrategy({symbol,snapshotId:newsResult.snapshot?.id,
+        strategy:{...strategy,currentPrice,dataMetadata:{dateConsistency:dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata])}}});
       // ==================================
       // RESULT
       // ==================================

@@ -110,9 +110,9 @@ test('TEST_ONLY frozen saved inputs retain scores/grades/conditions/news and onl
   const item=candidate(),before=JSON.stringify(item);
   const freeze=x=>{if(x&&typeof x==='object'){Object.values(x).forEach(freeze);Object.freeze(x);}return x;};freeze(item);
   const html=render(item);assert.equal(JSON.stringify(item),before);
-  assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);
+  assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
   for(const label of ['추세','거래량','수급','뉴스','장중 확인 중','TEST_ONLY 저장 기사','상세 근거 보기'])assert.ok(html.includes(label));
-  assert.doesNotMatch(html,/분석 당시 조회가|진입 참고가|익절 참고가|손절 참고가/);
+  assert.doesNotMatch(html,/분석 당시 조회가|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가/);
   const helper=fs.readFileSync(require.resolve('../frontend/src/recommendationDataDates.js'),'utf8');
   assert.doesNotMatch(helper,/fetch\(|localStorage|sessionStorage|Date\.now|service\.|currentPrice|score|grade|newsPassed|supplyPassed/);
 });

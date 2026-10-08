@@ -165,7 +165,7 @@ test('TEST_ONLY frontend shows reuse, original timestamps, and no new-analysis c
   const run={runId:'TEST_ONLY',status:'COMPLETED',reused:true,scanStartedAt:'2026-10-03T00:00:00Z',scanCompletedAt:'2026-10-03T00:01:00Z',reuseUntil:'2026-10-03T00:11:00Z',stats:{universeCount:500,fastCompleted:500,fastInsufficient:0,fastFailed:0,deepTargetCount:40,deepCompleted:40,deepFailed:0,finalCandidateCount:0},recommendations:[],aiStatus:'DISABLED'};
   let count=0;const stub={...React,useState:()=>[count++===0?run:null,()=>{}],useEffect:()=>{},useRef:()=>({current:0}),useCallback:fn=>fn};
   const component={exports:{}};
-  vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/ExpandedRecommendation.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code,{module:component,exports:component.exports,require:name=>name==='react'?stub:{},Intl,Date,Set,Number});
+  vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/ExpandedRecommendation.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code,{module:component,exports:component.exports,require:name=>name==='react'?stub:name==='./PublicInformation.jsx'?{InvestmentNotice:()=>null}:{},Intl,Date,Set,Number});
   const html=renderToStaticMarkup(React.createElement(component.exports.default,{service:{}}));
   assert.match(html,/최근 분석 결과 재사용 · 외부 데이터 재조회 없음/);assert.match(html,/원래 분석 완료/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);assert.match(html,/500종목 분석 요청/);
   assert.doesNotMatch(html,/사이트 접속·새로고침·이력 조회|최근 10분/);

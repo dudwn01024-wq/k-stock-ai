@@ -1,3 +1,4 @@
+import {InvestmentNotice} from './PublicInformation.jsx';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import ExpandedCandidateCard from './ExpandedCandidateCard.jsx';
 import './expanded-recommendation.css';
@@ -113,6 +114,7 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
     <div className="expanded-home-toolbar">
       <p className="expanded-risk-note">분석은 참고용이며, 주식 투자는 원금 손실 위험이 있습니다.</p>
       <div className="expanded-home-actions"><button className="home-secondary expanded-start" onClick={start} disabled={starting||Boolean(run&&!terminal.has(run.status))}>500종목 분석 요청</button></div></div>
+    <InvestmentNotice/>
     {storage==='NOT_CONFIGURED'&&<p className="home-warning">이력 저장 미설정 · 완료된 실행은 서버 재시작 후 보존되지 않습니다.</p>}
     {storage==='UNAVAILABLE'&&<p className="home-warning">저장 이력을 읽지 못했습니다. 새 분석을 자동 시작하지 않습니다.</p>}
     {error&&<p role="alert" className="home-warning">{error}</p>}

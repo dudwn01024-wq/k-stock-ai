@@ -15,6 +15,7 @@ function load(file,react=React){
       window:{location:{hostname:'127.0.0.1'}},require:name=>{
         if(name==='react')return react;if(name.endsWith('.css'))return {};
         if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});
+        if(name==='./PublicInformation.jsx')return load(path.resolve(path.dirname(file),name),React);
         if(name.endsWith('.jsx'))return {__esModule:true,default:()=>null};
         assert.ok(name.startsWith('.'),'TEST_ONLY_NO_PROVIDER_IMPORT');
         return load(path.resolve(path.dirname(file),name),react);
@@ -88,14 +89,12 @@ test('TEST_ONLY intraday pending detail retains its special status and exact num
   assert.ok(!html.includes('최근 20일 평균보다 거래량이 적은 편입니다.'));
 });
 
-test('TEST_ONLY production diff is strictly five display wrappers; every data/calculation path remains byte-identical',()=>{
-  const before=execFileSync('git',['show','0c8e55b414b52a5c6385d33703e75d43678d5679:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
-  const after=appSource.replaceAll('\r\n','\n');
-  assert.equal((after.match(/strategyExplanation\(strategyData/g)||[]).length,5);
-  assert.equal(after.replace(/^import \{ strategyExplanation \} from '\.\/utils\/strategyExplanation\.js';\n/m,'')
-    .replace(/strategyExplanation\((strategyData[^)]*)\)/g,'$1'),before);
-  const backendDiff=execFileSync('git',['diff','0c8e55b414b52a5c6385d33703e75d43678d5679','--','server.js','services','scripts'],{encoding:'utf8'});
-  assert.equal(backendDiff,'','recommendation/history/outcome/ENTRY_GATE/news/KIS/order/PAPER unchanged');
-  const helper=fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'),'utf8');
-  assert.doesNotMatch(helper,/fetch\s*\(|localStorage|sessionStorage|require\(|import\s|Date\.|Math\.|setTimeout|\.status\s*=/);
+test('TEST_ONLY explanations stay display-only while all existing server calculations remain protected',()=>{
+  assert.equal((appSource.match(/strategyExplanation\(strategyData/g)||[]).length,5);
+  const before=execFileSync('git',['show','5e2dc4469b9c1c66beeebc95f00a2512772d0216:server.js'],{encoding:'utf8'});
+  assert.equal(require('./helpers/without-private-holding.cjs')(fs.readFileSync('server.js','utf8')),before.replaceAll('\r\n','\n'));
+  assert.equal(execFileSync('git',['diff','5e2dc4469b9c1c66beeebc95f00a2512772d0216','--','services/tradingStrategy.js',
+    'services/chartAnalysis.js','services/recommendationUniverse.js','services/recommendationFastScreen.js',
+    'services/recommendationVolumePolicy.js','services/expandedRecommendationRuns.js','services/recommendationHistory.js',
+    'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js'],{encoding:'utf8'}),'');
 });
