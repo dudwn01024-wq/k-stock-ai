@@ -1,8 +1,9 @@
 import React from 'react';
 import './expanded-recommendation.css';
 import {recommendationDataDates} from './recommendationDataDates.js';
+import {strategyExplanation} from './utils/strategyExplanation.js';
 
-const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
+const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'};
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
 const number=value=>numeric(value)?value.toLocaleString('ko-KR'):'미확인';
 const price=value=>numeric(value)&&value>0?`${number(value)}원`:'미확인';
@@ -29,23 +30,23 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
     <div className="expanded-card-heading">{screening&&onSelect?<button type="button" className="expanded-stock-name" onClick={()=>onSelect({code:item.symbol,name:item.stockName||item.symbol})}>{item.stockName||item.symbol}</button>:<strong>{item.stockName||item.symbol}</strong>}<small>{item.symbol}</small></div>
-    <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · 기존 추천 점수 {number(item.score)} / 4</p>
+    <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · 분석 조건 점수 {number(item.score)} / 4</p>
     {!screening&&<dl className="expanded-card-prices">
       <div className="expanded-card-quote"><dt>분석 당시 조회가</dt><dd>{price(item.currentPrice)}</dd></div>
       <div><dt>등락률</dt><dd>{percent(item.changeRate)}</dd></div>
     </dl>}
     {screening&&<p className="expanded-card-note">손익비 참고 상태: {riskReward?.available===true?
       gradeLabels[riskReward.classification]||'판정 미확인':'손익비 미확인'}
-      {typeof riskReward?.reason==='string'&&riskReward.reason&&<> · {riskReward.reason}</>}
+      {typeof riskReward?.reason==='string'&&riskReward.reason&&<> · {strategyExplanation(riskReward.reason)}</>}
     </p>}
-    <ul className="expanded-card-conditions" aria-label="추천 조건">
+    <ul className="expanded-card-conditions" aria-label="분석 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
         <span>{label}</span><strong>{label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
       </li>)}
     </ul>
     {volumePending&&<p className="expanded-card-note">당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.</p>}
     {screening&&<div className="expanded-selection-reasons">
-      <p><strong>추천 이유 · 통과 조건</strong> {words(item.passedConditions)}</p>
+      <p><strong>분석 근거 · 충족 조건</strong> {words(item.passedConditions)}</p>
       <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>
       {item.pendingConditions?.length>0&&<p><strong>장중 확인 중 조건</strong> {words(item.pendingConditions)}</p>}
       <p><strong>미확인 조건</strong> {words(item.unknownConditions)}</p>
@@ -87,7 +88,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
         <div><dt>하락 위험</dt><dd>{percent(riskReward.currentDownsidePercent)}</dd></div>
         <div><dt>손익비</dt><dd>{number(riskReward.currentRiskRewardRatio)}</dd></div>
       </dl>:<p>손익비 미확인</p>}
-      {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {riskReward.reason}</p>}</>}
+      {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {strategyExplanation(riskReward.reason)}</p>}</>}
       <h4>당시 선정 조건</h4>
       <p>통과: {words(item.passedConditions)}</p><p>미충족: {words(item.failedConditions)}</p><p>미확인: {words(item.unknownConditions)}</p>
       {item.pendingConditions?.length>0&&<p>장중 확인 중: {words(item.pendingConditions)}</p>}

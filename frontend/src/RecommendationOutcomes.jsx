@@ -1,6 +1,6 @@
 import React,{useEffect,useMemo,useState} from 'react';
 import {createOutcomeLoader,outcomeStatusLabel} from './utils/recommendationOutcomes.js';
-const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'}[v]||'등급 미확인');
+const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'}[v]||'등급 미확인');
 const horizon=v=>({T1:'T+1',T5:'T+5',T20:'T+20'}[v]||v);
 const number=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'자료 없음';
 export const outcomePercent=v=>typeof v==='number'&&Number.isFinite(v)?(v>=0?'+':'')+v.toFixed(2)+'%':'자료 없음';

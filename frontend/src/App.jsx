@@ -841,7 +841,7 @@ export default function App() {
                   분석 후보 · 스크리닝
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  후보 등급은 매수 허가가 아닙니다. 추천과 상세는 조회 시점이 다를 수 있으므로 각 기준일·수신시각을 확인하세요. 최종 진입 조건은 별도로 조회한 상세 전략에서 확인합니다. 50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
+                  후보 등급은 매수 허가가 아닙니다. 추천과 상세는 조회 시점이 다를 수 있으므로 각 기준일·수신시각을 확인하세요. 최종 진입 조건은 별도로 조회한 상세 전략에서 확인합니다. 50종목을 추세 · 거래량 · 수급 · 최신 뉴스로 검사한 뒤, 4/4 종목은 현재가 기준 손익비까지 확인합니다. 최우선·가격 추격 주의 후보에만 실제 뉴스 기반 AI 해설을 추가합니다.
                 </p>
                   <InvestmentNotice/>
               </div>
@@ -884,7 +884,7 @@ export default function App() {
                     🟢 조건 우수 후보 = 4/4 + 현재가 손익비 통과
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-orange-950/30 border border-orange-800/40 text-orange-300">
-                    🟠 추격 주의 = 4/4이지만 현재가 손익비 불리
+                    🟠 가격 추격 주의 = 4/4이지만 현재가 손익비 불리
                   </span>
                   <span className="px-2.5 py-1 rounded-full bg-amber-950/30 border border-amber-800/40 text-amber-300">
                     🟡 관심 종목 = 3/4
@@ -913,7 +913,7 @@ export default function App() {
                     최우선 {recommendationData?.priorityCandidateCount ?? 0}개
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
-                    추격 주의 {recommendationData?.chaseCautionCount ?? 0}개
+                    가격 추격 주의 {recommendationData?.chaseCautionCount ?? 0}개
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-slate-950/60 border border-slate-800">
                     관심 {recommendationData?.watchCandidateCount ?? 0}개
@@ -923,7 +923,7 @@ export default function App() {
                 {recommendationAILoading && (
                   <div className="bg-slate-950/60 border border-emerald-900/30 rounded-xl p-3 flex items-center gap-2 text-xs text-slate-300">
                     <div className="w-4 h-4 border-2 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
-                    조건 우수 후보와 추격 주의 후보의 실제 뉴스 및 AI 해설을 불러오는 중입니다...
+                    조건 우수 후보와 가격 추격 주의 후보의 실제 뉴스 및 AI 해설을 불러오는 중입니다...
                   </div>
                 )}
 
@@ -976,7 +976,7 @@ export default function App() {
                                 )}
                                 {isChaseCaution && (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-500/25">
-                                    🟠 추격 주의
+                                    🟠 가격 추격 주의
                                   </span>
                                 )}
                                 {isWatch && (
@@ -1322,7 +1322,7 @@ export default function App() {
         <Clock className="w-3.5 h-3.5" />
       )}
 
-      {({ ENTRY_CANDIDATE: '분석 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '판정 데이터 없음'}
+      {({ ENTRY_CANDIDATE: '분석 조건 충족', CHASE_CAUTION: '가격 추격 주의', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '판정 데이터 없음'}
     </span>
   </div>
 
@@ -1348,7 +1348,7 @@ export default function App() {
                   : 'text-slate-300'
           }`}
         >
-          {({ ENTRY_CANDIDATE: '분석 조건 충족', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '데이터 없음'}
+          {({ ENTRY_CANDIDATE: '분석 조건 충족', CHASE_CAUTION: '가격 추격 주의', WAIT: '대기', DATA_INSUFFICIENT: '판단 보류' })[strategyData?.finalAssessment?.status] || strategyData?.finalAssessment?.label || '데이터 없음'}
         </span>
       </div>
 

@@ -28,6 +28,11 @@ function renderStatus(status,stats){
             vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/recommendationDataDates.js'),'utf8'),{format:'cjs'}).code,
               {module:helper,exports:helper.exports,Intl,Date});return helper.exports;
           }
+          if(name==='./utils/strategyExplanation.js'){
+            const language={exports:{}};
+            vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'),'utf8'),{format:'cjs'}).code,
+              {module:language,exports:language.exports});return language.exports;
+          }
           throw Error('TEST_ONLY_UNEXPECTED_IMPORT');
         }});
       return card.exports;

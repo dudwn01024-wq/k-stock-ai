@@ -8,7 +8,7 @@ import './recommendation-history.css';
 const time=v=>v&&Number.isFinite(Date.parse(v))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(v)):'미확인';
 const number=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'자료 없음';
 const condition=v=>v===true?'통과':v===false?'미충족':'미확인';
-const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보',EXCLUDED:'후보 제외'}[v]??v??'미확인');
+const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보',EXCLUDED:'후보 제외'}[v]??v??'미확인');
 const safeLink=v=>{try{const u=new URL(v);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null;}catch{return null;}};
 const fields=[['ma5','MA5'],['ma20','MA20'],['currentVolume','거래량'],['averageVolume20','20일 평균 거래량'],['volumeRatio','거래량 비율'],['foreignerNet','외국인 순수급'],['institutionNet','기관 순수급'],['recentHigh20','20일 고가'],['recentLow20','20일 저가']];
 export function HistoryEvidence({item,rank,input}){

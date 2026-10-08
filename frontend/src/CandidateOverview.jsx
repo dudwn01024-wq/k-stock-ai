@@ -10,7 +10,7 @@ export function candidateSummary(item) {
   const unknown = conditions.filter(([key]) => typeof conditionValues[key] !== 'boolean').map(([, label]) => label);
   return {
     reason: passed.length ? `${passed.join(' · ')} 조건 통과` : '선정 근거 데이터 없음',
-    risk: [item.grade === 'CHASE_CAUTION' ? '추격 주의' : null,
+    risk: [item.grade === 'CHASE_CAUTION' ? '가격 추격 주의' : null,
       failed.length ? `${failed.join(' · ')} 조건 미충족` : null,
       unknown.length ? `${unknown.join(' · ')} 확인 불가` : null,
       item.riskReward?.available !== true ? (item.riskReward?.reason || '손익비 확인 불가') : null,
@@ -21,7 +21,7 @@ export function candidateSummary(item) {
 }
 
 const runTime=value=>value&&Number.isFinite(Date.parse(value))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value)):'미제공';
-const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
+const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'};
 export default function CandidateOverview({ data, loading, error, aiData, aiLoading, aiError, onSelect, onRefresh, onHistory, historical=false }) {
   const available = ['priority', 'chase', 'watch'].every(key => Array.isArray(data?.[key]));
   const items = available ? data.recommendations : [];
@@ -40,7 +40,7 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
       : error ? <p role="alert" className="home-state home-warning">갱신 실패 · 후보를 확인할 수 없습니다. 잠시 후 다시 조회하세요.</p>
       : !available ? <p role="status" className="home-state">데이터 없음 · 후보 응답이 제공되지 않았습니다.</p>
       : <>
-        <div className="home-counts"><span>조회 대상 <strong>{data.universeSize ?? '미제공'}</strong></span><span>조회 성공 <strong>{data.validCount ?? '미제공'}</strong></span><span>조회 실패 <strong>{data.failedCount ?? '미제공'}</strong></span><span>분석 후보 <strong>{items.length}</strong></span><span>추격 주의 <strong>{data.chase.length}</strong></span></div>
+        <div className="home-counts"><span>조회 대상 <strong>{data.universeSize ?? '미제공'}</strong></span><span>조회 성공 <strong>{data.validCount ?? '미제공'}</strong></span><span>조회 실패 <strong>{data.failedCount ?? '미제공'}</strong></span><span>분석 후보 <strong>{items.length}</strong></span><span>가격 추격 주의 <strong>{data.chase.length}</strong></span></div>
         <div className="home-run-context"><p>조회 실행(KST): {runTime(data.scanStartedAt)} → {runTime(data.scanCompletedAt)}</p><p>조회 실행 시각은 원본 시세 기준시각이 아닙니다. 재사용 기간은 최신성 검증이 아닙니다.</p>
           {data.scanStatus==='PARTIAL'&&<p className="home-warning">일부 종목 조회 실패 · 조회에 성공한 자료에서 계산한 후보입니다.</p>}
           <details><summary>분석 실행 확인</summary><span>scanId: {data.scanId??'없음 · 서버 업데이트 필요'}</span></details>
@@ -57,8 +57,8 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
             return <li className="candidate-card" key={item.symbol}>
               <div className="candidate-name"><button onClick={() => onSelect({ code: item.symbol, name: item.stockName })}>{item.stockName || item.symbol} <span aria-hidden="true">↗</span></button><span>{item.symbol} · {historical?"저장 근거":"상세 분석"}</span></div>
               <div className="candidate-price"><span className="home-label">{historical?"당시 조회가":"현재가"}</span><strong>{price === null ? '데이터 없음' : `${price.toLocaleString('ko-KR')}원`}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
-              <div className="candidate-context"><p><span className="home-label">선정 이유</span>{summary.reason}</p><p className="home-warning"><span className="home-label">주요 위험</span>{summary.risk}</p></div>
-              <div className="candidate-score">후보 점수 {item.score??'미확인'} / {item.maxScore??'미확인'} · {gradeLabels[item.grade]??item.grade??'등급 미확인'}</div>
+              <div className="candidate-context"><p><span className="home-label">선정 이유</span>{summary.reason}</p><p className="home-warning"><span className="home-label">주요 위험</span>{strategyExplanation(summary.risk)}</p></div>
+              <div className="candidate-score">분석 조건 점수 {item.score??'미확인'} / {item.maxScore??'미확인'} · {gradeLabels[item.grade]??item.grade??'등급 미확인'}</div>
               {ai?.summary&&<div className="candidate-ai"><span className="home-label">Gemini 설명 · 동일 scanId</span><p>{strategyExplanation(ai.summary)}</p><details><summary>설명 근거와 주의 사항</summary>
                 {[['차트',ai.chartExplanation],['거래량',ai.volumeExplanation],['수급',ai.supplyDemandExplanation],['제공된 뉴스',ai.newsExplanation],['손익비',ai.riskRewardExplanation]].map(([label,value])=><p key={label}><b>{label}</b> · {strategyExplanation(value)||'설명 미제공'}</p>)}
                 {Array.isArray(ai.riskFactors)&&ai.riskFactors.map((risk,index)=><p className="home-warning" key={index}>{strategyExplanation(risk)}</p>)}

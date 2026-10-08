@@ -75,7 +75,11 @@ export function strategyExplanation(text) {
     .replace(/(?:전략 참고 )?(목표가|손절가)(?=$|[^\p{L}]|보다|는|를|가|의|와|로|에|도|부터|까지)(는|를|가|와|로)?/gu, (_, term, particle = '') =>
       (term === '목표가' ? '상단 가격 기준' : '하단 위험 기준') +
       ({는:'은',를:'을',가:'이',와:'과',로:'으로'}[particle] || particle))
-    .replace(/추격매수/g, '가격 추격');
+    .replace(/추격매수/g, '가격 추격')
+    .replace(/(?:가격\s+)?추격 주의/g, '가격 추격 주의')
+    .replace(/추천 이유 · 통과 조건/g, '분석 근거 · 충족 조건')
+    .replace(/(?:기존 )?추천 점수/g, '분석 조건 점수')
+    .replace(/추천 이유/g, '분석 근거');
   if (/\bMACD\b/.test(display)) {
     display = display
       .replace(/MACD가 (?:Signal|신호선) 위에 있고\s*(?:Histogram(?:이|은)?|(?:MACD와 신호선의 차이(?:인|가|는)?\s*)+)\s*양수(?:입니다\.|임|이다\.?)(?=$|[.,;。!?\n])/g,

@@ -98,7 +98,7 @@ test('4/4 news pass uses assessment, preserves warnings, rank/score/grade and ma
   assert.match(html,/추세 · 거래량 · 수급 · 뉴스 조건 통과/);
   assert.doesNotMatch(component.exports.candidateSummary(first).risk,/뉴스 확인 불가/);
   assert.match(html,/데이터 기준일 불일치/);assert.match(html,/최신 여부 미확인/);assert.match(html,/손익비 근거 부족/);
-  assert.ok(html.includes('후보 점수 4 / 4 · 조건 우수 후보'));assert.ok(html.includes('후보 점수 0 / 4 · 관심 후보'));
+  assert.ok(html.includes('분석 조건 점수 4 / 4 · 조건 우수 후보'));assert.ok(html.includes('분석 조건 점수 0 / 4 · 관심 후보'));
   assert.ok(html.indexOf('합성 첫 후보')<html.indexOf('합성 둘째 후보'));
   assert.match(html,/합성 동일 실행 설명/);assert.equal(JSON.stringify(data),before);
   assert.doesNotMatch(html,/악재 없음|전체 뉴스 확인 완료|최신성 검증 완료/);

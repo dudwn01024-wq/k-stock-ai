@@ -37,10 +37,10 @@ test('TEST_ONLY screening card removes only price strategy presentation and pres
   const item=candidate(),before=JSON.stringify(item);
   const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true,onSelect:()=>assert.fail('RENDER_MUST_NOT_SELECT')}));
   assert.doesNotMatch(html,/분석 당시 조회가|등락률|전략 참고 진입가|전략 참고 목표가|전략 참고 손절가|상승 여력|하락 위험|<dt>손익비<\/dt>|105원|110원|95원/);
-  for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','데이터 기준','제공처','현재 상세 분석 보기'])
+  for(const label of ['분석 근거 · 충족 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','데이터 기준','제공처','현재 상세 분석 보기'])
     assert.ok(html.includes(label),label);
   assert.equal((html.match(/저장된 원문 링크/g)||[]).length,3);
-  assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
+  assert.match(html,/조건 우수 후보 · 분석 조건 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
 });
 test('TEST_ONLY screening selection is explicit and passes only stored stock identity to existing detail flow',()=>{
   const item=candidate(),selected=[];
@@ -62,7 +62,7 @@ test('TEST_ONLY card keeps the stored quote but hides all three strategy prices 
   const item=candidate(),before=JSON.stringify(item),html=render(item);
   assert.equal(field(html,'분석 당시 조회가'),'105원');assert.equal(field(html,'등락률'),'0%');
   assert.doesNotMatch(html,/전략 계산 기준가|상단 가격 기준|하단 위험 기준|100원|110원|95원/);
-  assert.equal(JSON.stringify(item),before);assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
+  assert.equal(JSON.stringify(item),before);assert.match(html,/조건 우수 후보 · 분석 조건 점수 4 \/ 4/);
 });
 for(const value of [null,undefined,NaN,Infinity,'105',{},false,0,-1])
   test('TEST_ONLY invalid quote '+String(value)+' stays unconfirmed without invented zero',()=>{
@@ -135,7 +135,7 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
     const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
     const html=renderToStaticMarkup(React.createElement(component,{service:noService}));
     assert.ok(html.indexOf('TEST_ONLY_FIRST')<html.indexOf('TEST_ONLY_SECOND'));assert.doesNotMatch(html,/TEST_ONLY_EXCLUDED/);
-    assert.match(html,/관심 후보 · 기존 추천 점수 2 \/ 4/);assert.match(html,/조건 우수 후보 · 기존 추천 점수 4 \/ 4/);
+    assert.match(html,/관심 후보 · 분석 조건 점수 2 \/ 4/);assert.match(html,/조건 우수 후보 · 분석 조건 점수 4 \/ 4/);
     assert.match(html,/상세 근거 보기/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   }
   assert.equal(JSON.stringify(items),before);
@@ -157,7 +157,7 @@ test('TEST_ONLY page mount and reread load only saved results and never start a 
     const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
     renderToStaticMarkup(React.createElement(component,{service}));const cleanup=effects.map(fn=>fn());
     await new Promise(setImmediate);assert.equal(states[1],saved);index=0;refIndex=0;
-    const html=renderToStaticMarkup(React.createElement(component,{service}));assert.match(html,/추천 이유 · 통과 조건/);
+    const html=renderToStaticMarkup(React.createElement(component,{service}));assert.match(html,/분석 근거 · 충족 조건/);
     cleanup.forEach(fn=>fn?.());
   }
   assert.deepEqual(calls,{getHistory:2,getHistoryDetail:2});

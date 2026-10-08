@@ -111,5 +111,11 @@ test('TEST_ONLY exact backend diff is limited to two prose blocks; calculation/a
  const old=execFileSync('git',['show',base+':server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(require('./helpers/without-ai-enum-policy.cjs')(fs.readFileSync('server.js','utf8')),old);
  assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services','frontend/src/HoldingGuidance.jsx',
-  'frontend/src/PublicInformation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/App.jsx','frontend/src/CandidateOverview.jsx'],{encoding:'utf8'}),'');
+  'frontend/src/PublicInformation.jsx'],{encoding:'utf8'}),'');
+ const edits=require('./helpers/final-analysis-label-edits.cjs');
+ for(const file of ['frontend/src/ExpandedCandidateCard.jsx','frontend/src/App.jsx','frontend/src/CandidateOverview.jsx']){
+  let expected=execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
+  for(const [before,after] of edits[file])expected=expected.replaceAll(before,after);
+  assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),expected,'exact display-only change: '+file);
+ }
 });

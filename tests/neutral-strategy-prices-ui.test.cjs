@@ -31,13 +31,13 @@ test('TEST_ONLY live and saved candidate cards contain no strategy price set, pr
  for(const screening of [true,false]){const value=item(),before=JSON.stringify(value),html=renderCard(value,screening);
   assert.doesNotMatch(html,/9,517원|12,345원|9,087원|전략 계산 기준가|상단 가격 기준|하단 위험 기준/);
   for(const text of ['조건 우수 후보','4 / 4','추세','거래량','수급','뉴스','상세 근거 보기','데이터 기준'])assert.ok(html.includes(text),text);
-  if(screening){assert.ok(html.includes('현재 상세 분석 보기'));assert.ok(html.includes('손익비 참고 상태: 추격 주의'));assert.ok(html.includes('TEST_ONLY 저장된 손익비 주의'));}
+  if(screening){assert.ok(html.includes('현재 상세 분석 보기'));assert.ok(html.includes('손익비 참고 상태: 가격 추격 주의'));assert.ok(html.includes('TEST_ONLY 저장된 손익비 주의'));}
   assert.equal(JSON.stringify(value),before);
  }
 });
 test('TEST_ONLY stored risk unavailable cannot become a successful assessment from stale fields',()=>{
  const value=item();value.riskReward.available=false;assert.ok(renderCard(value,true).includes('손익비 미확인'));
- assert.ok(!renderCard(value,true).includes('손익비 참고 상태: 추격 주의'));
+ assert.ok(!renderCard(value,true).includes('손익비 참고 상태: 가격 추격 주의'));
 });
 test('TEST_ONLY searched detail preserves exact formatted numeric values and replaces display labels only',()=>{
  const values=detailValues(),before=JSON.stringify(values),html=renderApp(values);
