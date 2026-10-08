@@ -39,8 +39,8 @@ test('TEST_ONLY market snapshots need provable top 500 across KOSPI and KOSDAQ',
   assert.equal(new Set(snapshot.stocks.map(x=>x.symbol)).size,500);
   assert.equal(snapshot.stocks[0].marketValue,1000);
   assert.equal(snapshot.stocks[499].marketValue,751);
-  assert.equal(snapshot.requestCount,6);
-  assert.equal(fixture.requests.length,6);
+  assert.equal(snapshot.requestCount,8);
+  assert.equal(fixture.requests.length,8);
   assert.equal(snapshot.testOnly,true);
   assert.equal(snapshot.sourceBusinessDate,'2026-10-02');
   assert.ok(snapshot.stocks.every(x=>x.securityType==='UNKNOWN'));
@@ -50,7 +50,7 @@ test('TEST_ONLY market snapshots need provable top 500 across KOSPI and KOSDAQ',
   assert.equal(snapshot.universeFingerprint,again.universeFingerprint);
 });
 
-test('incomplete, duplicate, changed order and mismatched market lists fail closed',async()=>{
+test('incomplete, duplicate and mismatched market lists fail closed; live inversions use page coverage',async()=>{
   const incomplete=pages(testOnlyMarket('KOSPI',249),testOnlyMarket('KOSDAQ',250,100000));
   await assert.rejects(createRecommendationUniverse({fetchPage:incomplete.fetchPage,testOnly:true}).load(),
     {code:'UNIVERSE_TOP_500_NOT_PROVEN'});
@@ -73,8 +73,8 @@ test('incomplete, duplicate, changed order and mismatched market lists fail clos
     if(args.market==='KOSPI'&&args.page===1)page.stocks[1]={...page.stocks[1],marketValueRaw:'2000'};
     return page;
   };
-  await assert.rejects(createRecommendationUniverse({fetchPage:reversed.fetchPage,testOnly:true}).load(),
-    {code:'UNIVERSE_ORDER_INVALID'});
+  const inverted=await createRecommendationUniverse({fetchPage:reversed.fetchPage,testOnly:true}).load();
+  assert.equal(inverted.count,500);assert.ok(inverted.universeCoverage.KOSPI.covered&&inverted.universeCoverage.KOSDAQ.covered);
 });
 
 test('unproven top 500 cannot exceed ten market-list HTTP attempts',async()=>{
@@ -237,7 +237,7 @@ test('TEST_ONLY final-letter COMMON classification preserves exact identifier an
   const data=pages(kospi),snapshot=await createRecommendationUniverse({fetchPage:data.fetchPage,testOnly:true,
     officialSecurityTypeRecords:[testOnlyStockType()]}).load();
   const stock=snapshot.stocks.find(x=>x.symbol==='12345K');
-  assert.equal(snapshot.count,500);assert.equal(snapshot.requestCount,6);
+  assert.equal(snapshot.count,500);assert.equal(snapshot.requestCount,8);
   assert.equal(stock.codeSyntax,'VALID');assert.equal(stock.securityType,'COMMON');
   assert.equal(stock.securityTypeEvidence.krxCode,'A12345K');assert.equal(stock.securityTypeEvidence.testOnly,true);
   assert.equal(snapshot.officialTypeChecks,1);assert.equal(snapshot.officialTypeRequests,0);
@@ -253,16 +253,16 @@ test('TEST_ONLY official NON_COMMON is excluded without losing source order or c
   assert.equal(snapshot.excludedSecurities[0].codeSyntax,'VALID');
   assert.equal(snapshot.excludedSecurities[0].exclusionReason,'OFFICIAL_NON_COMMON_SECURITY');
   assert.equal(snapshot.excludedSecurities[0].securityTypeEvidence.testOnly,true);
-  assert.equal(snapshot.requestCount,6);assert.equal(snapshot.officialTypeChecks,1);
+  assert.equal(snapshot.requestCount,8);assert.equal(snapshot.officialTypeChecks,1);
   assert.equal(snapshot.officialTypeRequests,0);
   const duplicate=kospi.map(x=>({...x}));duplicate[1].itemCode='12345K';
   await assert.rejects(createRecommendationUniverse({fetchPage:pages(duplicate).fetchPage,testOnly:true,
     officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load(),
     {code:'UNIVERSE_DUPLICATE_SYMBOL'});
   const reversed=kospi.map(x=>({...x}));reversed[0].marketValueRaw='900';
-  await assert.rejects(createRecommendationUniverse({fetchPage:pages(reversed).fetchPage,testOnly:true,
-    officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load(),
-    {code:'UNIVERSE_ORDER_INVALID'});
+  const inverted=await createRecommendationUniverse({fetchPage:pages(reversed).fetchPage,testOnly:true,
+    officialSecurityTypeRecords:[testOnlyStockType('12345K','NON_COMMON')]}).load();
+  assert.equal(inverted.count,500);assert.equal(inverted.excludedCount,1);assert.ok(inverted.universeCoverage.KOSPI.covered);
 });
 test('TEST_ONLY unknown final-letter type blocks proof rather than rejecting syntax or inferring from name',async()=>{
   for(const stockName of ['TEST_ONLY_ordinary_label','TEST_ONLY_우B_label']){

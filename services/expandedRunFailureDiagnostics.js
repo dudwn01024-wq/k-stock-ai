@@ -1,6 +1,6 @@
 'use strict';
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
-const {safeUniverseOrderViolation}=require('./recommendationUniverseDiagnostics');
+const {safeUniverseCoverage}=require('./recommendationUniverseDiagnostics');
 const stages=new Set(['UNIVERSE_LOAD','UNIVERSE_VALIDATION','FAST_SCREEN','DEEP_REVIEW','HISTORY_WRITE','AI_EXPLANATION']);
 // Never forward arbitrary error codes/messages: an upstream exception can contain secrets.
 const codes=new Set([
@@ -22,17 +22,13 @@ function expandedRunFailureDiagnostic(error,{stage,universeSnapshot}={}){
   const universeStage=stage==='UNIVERSE_LOAD'||stage==='UNIVERSE_VALIDATION';
   const counter=key=>universeStage?(count(error?.[key])??count(universeSnapshot?.[key])):count(universeSnapshot?.[key]);
   const typeBlocked=code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE';
-  const retryCount=counter('orderRetryCount');
-  const orderRetryCount=retryCount!==null&&retryCount<=1?retryCount:null;
   return {
     stage:stages.has(stage)?stage:null,
     code,
     universeRequests:counter('requestCount'),
     officialTypeChecks:counter('officialTypeChecks'),
     officialTypeRequests:counter('officialTypeRequests'),
-    orderRetryAttempted:orderRetryCount===null?null:orderRetryCount>0,
-    orderRetryCount,
-    orderViolation:code==='UNIVERSE_ORDER_INVALID'?safeUniverseOrderViolation(error?.orderViolation):null,
+    universeCoverage:code==='UNIVERSE_TOP_500_NOT_PROVEN'?safeUniverseCoverage(error?.universeCoverage):null,
     blockedSymbol:typeBlocked&&isNaverKrStockItemCode(error?.blockedSymbol)?error.blockedSymbol:null,
     blockedMarket:typeBlocked&&['KOSPI','KOSDAQ'].includes(error?.blockedMarket)?error.blockedMarket:null,
     httpStatus:code==='UNIVERSE_PROVIDER_HTTP_FAILED'&&Number.isInteger(error?.httpStatus)&&

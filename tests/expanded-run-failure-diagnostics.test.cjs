@@ -37,7 +37,7 @@ for(const code of codes)test('TEST_ONLY run preserves safe universe failure '+co
     blockedSymbol:'12345K',blockedMarket:'KOSPI',httpStatus:503});}}),run=await done(f);
   assert.equal(run.status,'FAILED');assert.equal(run.failureStage,'UNIVERSE_LOAD');assert.equal(run.failureReason,code);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code,universeRequests:4,officialTypeChecks:2,officialTypeRequests:0,
-    orderRetryAttempted:null,orderRetryCount:null,orderViolation:null,
+    universeCoverage:null,
     blockedSymbol:code.startsWith('TOP500_')?'12345K':null,blockedMarket:code.startsWith('TOP500_')?'KOSPI':null,
     httpStatus:code==='UNIVERSE_PROVIDER_HTTP_FAILED'?503:null});
   assert.equal(run.stats.universeCount,0);assert.equal(run.stats.fastCompleted,0);assert.equal(run.stats.deepCompleted,0);
@@ -49,7 +49,7 @@ test('TEST_ONLY unknown exception codes, malformed fields and absent counters re
   const f=fixture({loadUniverse:async()=>{throw problem('EXPANDED_'+privateText,{requestCount:'4',officialTypeChecks:-1,officialTypeRequests:NaN});}});
   const run=await done(f);assert.equal(run.failureReason,'EXPANDED_RUN_FAILED');safeLog(f,run);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code:'EXPANDED_RUN_FAILED',universeRequests:null,
-    officialTypeChecks:null,officialTypeRequests:null,orderRetryAttempted:null,orderRetryCount:null,orderViolation:null,blockedSymbol:null,blockedMarket:null,httpStatus:null});
+    officialTypeChecks:null,officialTypeRequests:null,universeCoverage:null,blockedSymbol:null,blockedMarket:null,httpStatus:null});
   for(const httpStatus of [null,'503',0,600,NaN])assert.equal(expandedRunFailureDiagnostic({code:'UNIVERSE_PROVIDER_HTTP_FAILED',httpStatus},{stage:'UNIVERSE_LOAD'}).httpStatus,null);
   const invalid=expandedRunFailureDiagnostic({code:codes.at(-1),blockedSymbol:'<img/>',blockedMarket:'SECRET'},{});
   assert.equal(invalid.blockedSymbol,null);assert.equal(invalid.blockedMarket,null);assert.equal(invalid.stage,null);
@@ -68,7 +68,7 @@ function rows(market,count=100){return Array.from({length:count},(_,i)=>({itemCo
   stockName:'TEST_ONLY_'+market+'_'+i,stockType:'domestic',stockEndType:'stock',sosok:market==='KOSPI'?'0':'1',
   stockExchangeType:{code:market==='KOSPI'?'KS':'KQ'},marketValueRaw:String(10000-i)}));}
 for(const [code,change] of [
-  ['UNIVERSE_DUPLICATE_SYMBOL',r=>{r[1].itemCode=r[0].itemCode;}],['UNIVERSE_ORDER_INVALID',r=>{r[1].marketValueRaw='20000';}],
+  ['UNIVERSE_DUPLICATE_SYMBOL',r=>{r[1].itemCode=r[0].itemCode;}],
   ['UNIVERSE_MARKET_MISMATCH',r=>{r[0].stockExchangeType.code='KQ';}],['UNIVERSE_ROW_INVALID',r=>{r[0].marketValueRaw=null;}],
   ['TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',r=>{r[0].itemCode='12345K';}],['UNIVERSE_TOP_500_NOT_PROVEN',()=>{}],
   ['UNIVERSE_PROVIDER_RESPONSE_INVALID',r=>{r.length=0;}]
@@ -103,7 +103,7 @@ test('TEST_ONLY later HTTP failure keeps cumulative requests and preceding offic
       const r=rows(market);r[0].itemCode='12345K';return {stocks:r,totalCount:100,hasNext:false};}});
   const f=fixture({loadUniverse:()=>universe.load()}),run=await done(f);assert.equal(requests,2);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code:'UNIVERSE_PROVIDER_HTTP_FAILED',universeRequests:2,
-    officialTypeChecks:1,officialTypeRequests:0,orderRetryAttempted:false,orderRetryCount:0,orderViolation:null,blockedSymbol:null,blockedMarket:null,httpStatus:429});safeLog(f,run);
+    officialTypeChecks:1,officialTypeRequests:0,universeCoverage:null,blockedSymbol:null,blockedMarket:null,httpStatus:429});safeLog(f,run);
 });
 test('TEST_ONLY FAST_SCREEN fatal error records its stage without attributing fast counters to universe',async()=>{
   const f=fixture({fastScreen:async stock=>({status:'READY',symbol:stock.symbol,requestCount:1,
@@ -156,7 +156,10 @@ test('TEST_ONLY successful universe cutoff/fingerprints/exclusions exactly match
     return {stocks:all.slice((page-1)*pageSize,page*pageSize),totalCount:400,hasNext:page*pageSize<400};};
   const config={fetchPage,testOnly:true,clock:()=>new Date('2026-10-08T00:00:00Z')};
   const [a,b]=await Promise.all([createRecommendationUniverse(config).load(),old.exports.createRecommendationUniverse(config).load()]);
-  assert.deepEqual(JSON.parse(JSON.stringify(a)),JSON.parse(JSON.stringify(b)));assert.equal(a.count,500);assert.ok(a.requestCount<=10);assert.equal(a.excludedCount,2);
+  const {requestCount,universeProof,universeCoverage,...current}=a;const {requestCount:priorCount,...before}=b;
+  assert.deepEqual(JSON.parse(JSON.stringify(current)),JSON.parse(JSON.stringify(before)));
+  assert.equal(requestCount,8);assert.equal(priorCount,6);assert.equal(universeProof,'PROVIDER_MARKET_VALUE_PAGES_WITH_PAGE_MAX_GUARD');
+  assert.ok(universeCoverage.KOSPI.covered&&universeCoverage.KOSDAQ.covered);assert.equal(a.count,500);assert.ok(a.requestCount<=10);assert.equal(a.excludedCount,2);
 });
 test('TEST_ONLY entry/volume, scoring, official classification, history and outcome policy stay byte-identical',()=>{
   for(const file of ['server.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js','services/tradingStrategy.js',

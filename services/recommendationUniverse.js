@@ -1,7 +1,7 @@
 'use strict';
 const {isNaverKrStockItemCode,requiresOfficialStockType}=require('./naverKrStockItemCode');
 const {createKrxStockSecurityTypeClassifier}=require('./krxStockSecurityType');
-const {safeUniverseOrderViolation}=require('./recommendationUniverseDiagnostics');
+const {safeUniverseCoverage}=require('./recommendationUniverseDiagnostics');
 
 const {createHash}=require('node:crypto');
 
@@ -10,7 +10,6 @@ const MARKETS=Object.freeze(['KOSPI','KOSDAQ']);
 const PAGE_SIZE=100;
 const TARGET_COUNT=500;
 const MAX_REQUESTS=10;
-const MAX_ORDER_RETRIES_PER_RUN=1;
 
 function failure(code,requestCount=0,diagnostic={}){
   const error=new Error(code);
@@ -24,14 +23,9 @@ function failure(code,requestCount=0,diagnostic={}){
     if(isNaverKrStockItemCode(diagnostic?.blockedSymbol))error.blockedSymbol=diagnostic.blockedSymbol;
     if(MARKETS.includes(diagnostic?.blockedMarket))error.blockedMarket=diagnostic.blockedMarket;
   }
-  if(Number.isInteger(diagnostic?.orderRetryCount)&&diagnostic.orderRetryCount>=0&&
-    diagnostic.orderRetryCount<=MAX_ORDER_RETRIES_PER_RUN){
-    error.orderRetryCount=diagnostic.orderRetryCount;
-    error.orderRetryAttempted=diagnostic.orderRetryCount>0;
-  }
-  if(code==='UNIVERSE_ORDER_INVALID'){
-    const violation=safeUniverseOrderViolation(diagnostic?.orderViolation);
-    if(violation)error.orderViolation=violation;
+  if(code==='UNIVERSE_TOP_500_NOT_PROVEN'){
+    const coverage=safeUniverseCoverage(diagnostic?.universeCoverage);
+    if(coverage)error.universeCoverage=coverage;
   }
   return error;
 }
@@ -97,7 +91,7 @@ async function fetchNaverUniversePage({market,page,pageSize=PAGE_SIZE,fetchImpl=
   if(!data||data.stockListSortType!=='MARKET_VALUE'||responsePage!==page||responseSize!==PAGE_SIZE||
      totalCount===null||!Array.isArray(data.stocks)||
      data.stocks.length>PAGE_SIZE||data.stocks.length===0||
-     (page*PAGE_SIZE<totalCount&&data.stocks.length!==PAGE_SIZE))
+     data.stocks.length!==Math.min(PAGE_SIZE,totalCount-(page-1)*PAGE_SIZE))
     throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',1);
   return {stocks:data.stocks,totalCount,hasNext:page*PAGE_SIZE<totalCount};
 }
@@ -111,79 +105,72 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     const typeClassifier=createKrxStockSecurityTypeClassifier({testOnly,
       ...(officialSecurityTypeRecords===undefined?{}:{records:officialSecurityTypeRecords})});
     const excludedSecurities=[];
-    const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,lastValue:Infinity,lastSymbol:null,rows:[]}]));
+    const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,
+      pageMaxMarketValue:null,pageMinMarketValue:null,rows:[]}]));
     const seen=new Set();
-    let requestCount=0,excludedCount=0,orderRetryCount=0,orderRetryViolation=null;
+    let requestCount=0,excludedCount=0,globalCutoff=null;
+    const covered=market=>state[market].done||(globalCutoff!==null&&state[market].pageMaxMarketValue!==null&&
+      state[market].pageMaxMarketValue<globalCutoff);
+    const coverage=()=>({globalCutoff,...Object.fromEntries(MARKETS.map(market=>[market,{
+      lastPageMax:state[market].pageMaxMarketValue,lastPageMin:state[market].pageMinMarketValue,
+      pagesFetched:state[market].page,done:state[market].done,covered:covered(market)}]))});
     const read=async market=>{
       const entry=state[market],page=entry.page+1;
-      while(true){
-        try{
-          if(requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_REQUEST_LIMIT',requestCount);
-          requestCount++;
-          onRequest({market,page,pageSize:PAGE_SIZE,requestCount});
-          let result;
-          try{result=await readPage({market,page,pageSize:PAGE_SIZE});}
-          catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount,error);}
-          if(!result||!Array.isArray(result.stocks)||!Number.isInteger(result.totalCount)||
-            result.totalCount<0||typeof result.hasNext!=='boolean'||result.stocks.length>PAGE_SIZE||
-            result.stocks.length===0||result.hasNext!==(page*PAGE_SIZE<result.totalCount)||
-            (result.hasNext&&result.stocks.length!==PAGE_SIZE)||
-            (entry.totalCount!==null&&entry.totalCount!==result.totalCount))
-            throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',requestCount);
-          const fetchedAt=clock().toISOString();
-          // Stage the whole page. A rejected response must never mutate universe rows,
-          // seen symbols, cutoff state or exclusions, or be mixed into its replacement.
-          const pageSeen=new Set(),pageRows=[],pageExcluded=[];
-          let last=entry.lastValue,previousSymbol=entry.lastSymbol,pageExcludedCount=0;
-          for(const raw of result.stocks){
-            let item;
-            try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
-            if(seen.has(item.stock.symbol)||pageSeen.has(item.stock.symbol))throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount);
-            pageSeen.add(item.stock.symbol);
-            if(item.stock.marketValue>last)throw failure('UNIVERSE_ORDER_INVALID',requestCount,{orderViolation:{
-              market,page,previousSymbol,previousMarketValue:last,currentSymbol:item.stock.symbol,currentMarketValue:item.stock.marketValue}});
-            last=item.stock.marketValue;
-            previousSymbol=item.stock.symbol;
-            if(requiresOfficialStockType(item.stock.symbol)){
-              const classification=typeClassifier.classify(item.stock);
-              Object.assign(item.stock,classification);
-              if(classification.securityType==='UNVERIFIED'){
-                const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount,{
-                  blockedSymbol:item.stock.symbol,blockedMarket:item.stock.market});
-                error.officialTypeRequests=typeClassifier.requestCount();
-                error.officialTypeChecks=typeClassifier.checkCount();
-                throw error;
-              }
-              item.excluded=classification.securityType!=='COMMON';
-              item.exclusionReason=classification.securityType==='NON_COMMON'?
-                'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
-            }
-            if(item.excluded){
-              pageExcludedCount++;
-              if(item.stock.securityTypeEvidence)pageExcluded.push({symbol:item.stock.symbol,
-                market:item.stock.market,codeSyntax:item.stock.codeSyntax,securityType:item.stock.securityType,
-                exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
-            }else pageRows.push(item.stock);
+      if(requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_REQUEST_LIMIT',requestCount);
+      requestCount++;
+      onRequest({market,page,pageSize:PAGE_SIZE,requestCount});
+      let result;
+      try{result=await readPage({market,page,pageSize:PAGE_SIZE});}
+      catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount,error);}
+      if(!result||!Array.isArray(result.stocks)||!Number.isSafeInteger(result.totalCount)||
+        result.totalCount<0||typeof result.hasNext!=='boolean'||result.stocks.length>PAGE_SIZE||
+        result.stocks.length===0||result.hasNext!==(page*PAGE_SIZE<result.totalCount)||
+        result.stocks.length!==Math.min(PAGE_SIZE,result.totalCount-(page-1)*PAGE_SIZE)||
+        (entry.totalCount!==null&&entry.totalCount!==result.totalCount))
+        throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',requestCount);
+      const fetchedAt=clock().toISOString();
+      // Commit only a fully validated page. Bounds include valid excluded securities
+      // too, so filtering cannot make an unproven market appear covered.
+      const pageSeen=new Set(),pageRows=[],pageExcluded=[];
+      let pageMaxMarketValue=null,pageMinMarketValue=null,pageExcludedCount=0;
+      for(const raw of result.stocks){
+        let item;
+        try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
+        if(seen.has(item.stock.symbol)||pageSeen.has(item.stock.symbol))throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount);
+        pageSeen.add(item.stock.symbol);
+        const value=item.stock.marketValue;
+        pageMaxMarketValue=pageMaxMarketValue===null?value:Math.max(pageMaxMarketValue,value);
+        pageMinMarketValue=pageMinMarketValue===null?value:Math.min(pageMinMarketValue,value);
+        if(requiresOfficialStockType(item.stock.symbol)){
+          const classification=typeClassifier.classify(item.stock);
+          Object.assign(item.stock,classification);
+          if(classification.securityType==='UNVERIFIED'){
+            const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount,{
+              blockedSymbol:item.stock.symbol,blockedMarket:item.stock.market});
+            error.officialTypeRequests=typeClassifier.requestCount();
+            error.officialTypeChecks=typeClassifier.checkCount();
+            throw error;
           }
-          for(const symbol of pageSeen)seen.add(symbol);
-          entry.rows.push(...pageRows);
-          excludedSecurities.push(...pageExcluded);
-          excludedCount+=pageExcludedCount;
-          entry.lastValue=last;
-          entry.lastSymbol=previousSymbol;
-          entry.page=page;
-          entry.totalCount=result.totalCount;
-          entry.done=!result.hasNext;
-          return;
-        }catch(error){
-          // Only order mismatches qualify. Budget is global and the same page must
-          // pass every original validation again; no sorting or tolerance is added.
-          if(error?.code!=='UNIVERSE_ORDER_INVALID'||orderRetryCount>=MAX_ORDER_RETRIES_PER_RUN||
-            requestCount>=MAX_REQUESTS)throw error;
-          orderRetryViolation=safeUniverseOrderViolation(error.orderViolation);
-          orderRetryCount++;
+          item.excluded=classification.securityType!=='COMMON';
+          item.exclusionReason=classification.securityType==='NON_COMMON'?
+            'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
         }
+        if(item.excluded){
+          pageExcludedCount++;
+          if(item.stock.securityTypeEvidence)pageExcluded.push({symbol:item.stock.symbol,
+            market:item.stock.market,codeSyntax:item.stock.codeSyntax,securityType:item.stock.securityType,
+            exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
+        }else pageRows.push(item.stock);
       }
+      for(const symbol of pageSeen)seen.add(symbol);
+      entry.rows.push(...pageRows);
+      excludedSecurities.push(...pageExcluded);
+      excludedCount+=pageExcludedCount;
+      entry.pageMaxMarketValue=pageMaxMarketValue;
+      entry.pageMinMarketValue=pageMinMarketValue;
+      entry.page=page;
+      entry.totalCount=result.totalCount;
+      entry.done=!result.hasNext;
     };
     try{
     // Inspect each market before comparing its next unseen page with the global cutoff.
@@ -191,22 +178,24 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     while(true){
       const all=MARKETS.flatMap(market=>state[market].rows);
       all.sort((a,b)=>b.marketValue-a.marketValue||a.symbol.localeCompare(b.symbol));
-      const cutoff=all.length>=TARGET_COUNT?all[TARGET_COUNT-1].marketValue:null;
-      // Strict inequality also resolves market-value ties at the cutoff.
-      const complete=cutoff!==null&&MARKETS.every(market=>state[market].done||state[market].lastValue<cutoff);
+      globalCutoff=all.length>=TARGET_COUNT?all[TARGET_COUNT-1].marketValue:null;
+      // Provider MARKET_VALUE pagination is the rank contract. Require an entire
+      // validated boundary page below cutoff in both markets (or actual market end).
+      // This does not prove that live row values form an atomic market snapshot.
+      const complete=globalCutoff!==null&&MARKETS.every(covered);
       if(complete){
         const stocks=all.slice(0,TARGET_COUNT).map((stock,index)=>({...stock,marketValueRank:index+1}));
         const dates=[...new Set(stocks.map(stock=>stock.sourceBusinessDate))];
         return {stocks,count:stocks.length,provider:PROVIDER,requestCount,excludedCount,excludedSecurities,testOnly,
-          ...(orderRetryCount?{orderRetryAttempted:true,orderRetryCount,orderViolation:orderRetryViolation}:{}),
+          universeProof:'PROVIDER_MARKET_VALUE_PAGES_WITH_PAGE_MAX_GUARD',universeCoverage:coverage(),
           officialTypeRequests:typeClassifier.requestCount(),officialTypeChecks:typeClassifier.checkCount(),
           sourceBusinessDate:dates.length===1?dates[0]:null,
           fetchedAt:clock().toISOString(),snapshotConsistency:'NOT_PROVEN',
           universeFingerprint:hash(stocks.map(stock=>stock.symbol).sort()),
           snapshotFingerprint:hash(stocks.map(({symbol,name,market,marketValue})=>({symbol,name,market,marketValue})))};
       }
-      const choices=MARKETS.filter(market=>!state[market].done)
-        .sort((a,b)=>state[b].lastValue-state[a].lastValue||a.localeCompare(b));
+      const choices=MARKETS.filter(market=>!covered(market))
+        .sort((a,b)=>state[b].pageMaxMarketValue-state[a].pageMaxMarketValue||a.localeCompare(b));
       if(!choices.length||requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_TOP_500_NOT_PROVEN',requestCount);
       await read(choices[0]);
     }
@@ -215,10 +204,10 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       throw failure(error?.code,requestCount,{
         officialTypeChecks:typeClassifier.checkCount(),officialTypeRequests:typeClassifier.requestCount(),
         blockedSymbol:error?.blockedSymbol,blockedMarket:error?.blockedMarket,httpStatus:error?.httpStatus,
-        orderRetryCount,orderViolation:error?.orderViolation});
+        universeCoverage:coverage()});
     }
   }
   return {load};
 }
 
-module.exports={createRecommendationUniverse,fetchNaverUniversePage,PROVIDER,PAGE_SIZE,TARGET_COUNT,MAX_REQUESTS,MAX_ORDER_RETRIES_PER_RUN};
+module.exports={createRecommendationUniverse,fetchNaverUniversePage,PROVIDER,PAGE_SIZE,TARGET_COUNT,MAX_REQUESTS};
