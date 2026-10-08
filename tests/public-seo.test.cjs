@@ -60,10 +60,10 @@ test('TEST_ONLY PageMeta has no visible markup or API/storage calls',()=>{
 });
 test('TEST_ONLY robots allows public routes and points to the generated sitemap only',()=>{
  assert.equal(meta.renderRobots(),'User-agent: *\nAllow: /\n\nSitemap: '+meta.PUBLIC_SITE_URL+'/sitemap.xml\n');
- assert.equal(fs.readFileSync('frontend/public/robots.txt','utf8'),meta.renderRobots());assert.doesNotMatch(meta.renderRobots(),/Disallow|api|admin|private/);
+ assert.equal(fs.readFileSync('frontend/public/robots.txt','utf8').replaceAll('\r\n','\n'),meta.renderRobots());assert.doesNotMatch(meta.renderRobots(),/Disallow|api|admin|private/);
 });
 test('TEST_ONLY sitemap contains only six public routes with no stock, fabricated date or priorities',()=>{
- const xml=meta.renderSitemap();assert.equal(fs.readFileSync('frontend/public/sitemap.xml','utf8'),xml);
+ const xml=meta.renderSitemap();assert.equal(fs.readFileSync('frontend/public/sitemap.xml','utf8').replaceAll('\r\n','\n'),xml);
  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));assert.ok(xml.includes('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'));
  assert.deepEqual(Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g),x=>x[1]),expected.map(([route])=>meta.PUBLIC_SITE_URL+route));
  assert.equal((xml.match(/<url>/g)||[]).length,6);assert.doesNotMatch(xml,/\/stocks\/|lastmod|changefreq|priority/);

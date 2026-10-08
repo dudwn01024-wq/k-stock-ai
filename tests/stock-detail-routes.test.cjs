@@ -9,16 +9,19 @@ const {harness,visit,tick,bindings}=testExports('./shared-detail-news-ui.test.cj
 const paths=h=>Array.from(h.calls,x=>x.pathname),details=h=>Array.from(h.calls).filter(x=>['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis'].includes(x.pathname));
 const makeReady=async symbol=>{const h=harness({symbol});h.render();h.runEffects();await tick();return h;};
 
-for(const symbol of ['005930','000660','035420'])test('TEST_ONLY stock URL delivers only validated symbol to reused App: '+symbol,async()=>{
- let props;const App=value=>{props=value;return React.createElement('p',null,'TEST_ONLY detail '+value.routeSymbol);};
- const navigations=[];const library={...front('react-router-dom'),useNavigate:()=>path=>navigations.push(path)};
- const router=createMemoryRouter(routeModule(App,library).publicRoutes,{initialEntries:['/stocks/'+symbol]});
+for(const symbol of ['005930','000660','035420'])test('TEST_ONLY stock URL starts at guide without mounting data-reading App: '+symbol,async()=>{
+ let mounts=0;const App=()=>{mounts++;assert.fail('STOCK_LANDING_MUST_NOT_MOUNT_APP');};
+ const router=createMemoryRouter(routeModule(App).publicRoutes,{initialEntries:['/stocks/'+symbol]});
  try{await settled(router);const html=renderToStaticMarkup(React.createElement(RouterProvider,{router}));
-  assert.equal(props.routeSymbol,symbol);assert.equal(typeof props.onNavigateStock,'function');assert.equal(router.state.location.pathname,'/stocks/'+symbol);
-  assert.ok(html.includes(symbol));assert.equal(router.state.errors,null);
-  props.onNavigateStock(symbol);props.onNavigateStock('abc');assert.deepEqual(navigations,[]);
-  props.onNavigateStock('000002');assert.deepEqual(navigations,['/stocks/000002']);
+  assert.equal(mounts,0);assert.ok(html.includes(symbol));assert.ok(html.includes('종목 분석 불러오기'));assert.equal(router.state.errors,null);
  }finally{router.dispose();}
+});
+test('TEST_ONLY route selection callback validates and navigates only a different symbol',()=>{
+ const navigations=[],library={...front('react-router-dom'),useParams:()=>({symbol:'005930'}),useNavigate:()=>path=>navigations.push(path)};
+ const element=routeModule(undefined,library).publicRoutes[1].element.type();
+ assert.equal(element.type.name,'StockLandingPage');assert.equal(element.key,'005930');
+ element.props.onNavigateStock('005930');element.props.onNavigateStock('abc');assert.deepEqual(navigations,[]);
+ element.props.onNavigateStock('000660');assert.deepEqual(navigations,['/stocks/000660']);
 });
 for(const symbol of ['abc','123','1234567','005930abc','-005930','%30%30%35%39%33abc'])test('TEST_ONLY invalid code never mounts data-reading App: '+symbol,async()=>{
  let mounts=0;const App=()=>{mounts++;assert.fail('INVALID_SYMBOL_FINANCIAL_FETCH');};
@@ -28,7 +31,7 @@ for(const symbol of ['abc','123','1234567','005930abc','-005930','%30%30%35%39%3
   assert.ok(router.state.location.pathname.startsWith('/stocks/'));assert.equal(router.state.errors,null);
  }finally{router.dispose();}
 });
-for(const symbol of ['005930','000660'])test('TEST_ONLY direct stock read uses URL symbol once per existing endpoint, never auto AI/news/expanded/private reads: '+symbol,async()=>{
+for(const symbol of ['005930','000660'])test('TEST_ONLY explicitly mounted stock detail uses URL symbol once per existing endpoint, never auto AI/news/expanded/private reads: '+symbol,async()=>{
  const h=await makeReady(symbol);assert.deepEqual(paths(h),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
  assert.ok(h.calls.every(x=>x.searchParams.get('symbol')===symbol));assert.equal(h.state('activeSymbol'),symbol);assert.equal(h.state('showDetail'),true);
  assert.equal(h.state('activeName'),'TEST_ONLY '+symbol);assert.equal(h.state('searchQuery'),'TEST_ONLY '+symbol);
@@ -115,7 +118,7 @@ test('TEST_ONLY back/forward selects URL symbols without crashes or query secret
  try{for(const target of ['/stocks/005930','/stocks/000660',-1,1]){await router.navigate(target);await settled(router);
    const html=renderToStaticMarkup(React.createElement(RouterProvider,{router}));assert.ok(html.includes(router.state.location.pathname.split('/').at(-1)));
    assert.equal(router.state.location.search,'');assert.equal(router.state.errors,null);}
-  assert.deepEqual(seen,['005930','000660','005930','000660']);
+  assert.deepEqual(seen,[],'back/forward renders guides, never hidden App');
  }finally{router.dispose();}
 });
 test('TEST_ONLY title uses successful quote stockName and returns to service title on home/exit',async()=>{

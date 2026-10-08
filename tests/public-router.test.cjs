@@ -13,25 +13,17 @@ function routeModule(App=()=>React.createElement('p',null,'TEST_ONLY Existing Ap
   module,exports:module.exports,require:name=>{
    if(name==='react')return React;if(name==='react-router-dom')return routerLibrary;
    if(name==='./components/PageMeta.jsx')return pageModule(require.resolve('../frontend/src/components/PageMeta.jsx'));
-   if(name==='./StockAppRoute.jsx'){
-    const inner={exports:{}};
-    vm.runInNewContext(transformSync(fs.readFileSync('frontend/src/StockAppRoute.jsx','utf8'),{loader:'jsx',format:'cjs'}).code,{
-      module:inner,exports:inner.exports,require:dep=>{
-        if(dep==='react')return React;if(dep==='react-router-dom')return routerLibrary;
-        if(dep==='./App.jsx')return {__esModule:true,default:App};
-        if(dep==='./components/PageMeta.jsx')return pageModule(require.resolve('../frontend/src/components/PageMeta.jsx'));
-        assert.equal(dep,'./components/PublicPageLayout.jsx');return pageModule(require.resolve('../frontend/src/components/PublicPageLayout.jsx'));
-      }});return inner.exports;
-   }
+   if(name==='./StockAppRoute.jsx')return pageModule(require.resolve('../frontend/src/StockAppRoute.jsx'),{App,routerLibrary});
    assert.equal(name,'./pages/PublicPages.jsx');return pageModule();
   }});
  return module.exports;
 }
-function pageModule(entry=require.resolve('../frontend/src/pages/PublicPages.jsx')){
+function pageModule(entry=require.resolve('../frontend/src/pages/PublicPages.jsx'),{App,routerLibrary=front('react-router-dom'),react=React}={}){
  const load=file=>{const module={exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,{
    module,exports:module.exports,fetch:()=>assert.fail('TEST_ONLY_PAGE_FETCH_FORBIDDEN'),require:name=>{
-    if(name==='react')return React;if(name.endsWith('.css'))return {};
+    if(name==='react')return react;if(name==='react-router-dom')return routerLibrary;if(name.endsWith('.css'))return {};
+    if(name==='./App.jsx'&&App)return {__esModule:true,default:App};
     assert.ok(name.startsWith('.'));return load(path.resolve(path.dirname(file),name));
    }});return module.exports;};
  return load(entry);
@@ -92,7 +84,7 @@ test('TEST_ONLY StrictMode retained and browser router instantiated outside the 
 });
 test('TEST_ONLY home App/theme, API, security, provider policy and stored files stay unchanged',()=>{
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src',
-  ':!frontend/src/App.jsx',':!frontend/src/StockAppRoute.jsx',':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages',':!frontend/src/seo','render.yaml','package.json'],{encoding:'utf8'}),'');
+  ':!frontend/src/App.jsx',':!frontend/src/StockAppRoute.jsx',':!frontend/src/StockLandingPage.jsx',':!frontend/src/stockCatalog.js',':!frontend/src/stockLandingContent.js',':!frontend/src/stock-landing.css',':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages',':!frontend/src/seo','render.yaml','package.json'],{encoding:'utf8'}),'');
  assert.equal(require('./helpers/without-stock-routing.cjs')(fs.readFileSync('frontend/src/App.jsx','utf8')),execFileSync('git',['show','2e731ee1ca0d80e952a6d8b46a75f60f37f2df7e:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  require('./helpers/assert-router-package-boundary.cjs')(base);
  const lock=JSON.parse(fs.readFileSync('frontend/package-lock.json','utf8'));

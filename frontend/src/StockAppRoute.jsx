@@ -1,6 +1,7 @@
 import React from 'react';
 import {useParams,useNavigate} from 'react-router-dom';
 import App from './App.jsx';
+import StockLandingPage from './StockLandingPage.jsx';
 import PublicPageLayout from './components/PublicPageLayout.jsx';
 import PageMeta from './components/PageMeta.jsx';
 
@@ -13,7 +14,8 @@ export default function StockAppRoute(){
     <a href="/" className="public-page-home">메인으로 돌아가기</a>
   </PublicPageLayout>;
   const selectSymbol=next=>{if(/^\d{6}$/.test(next)&&next!==symbol)navigate('/stocks/'+next);};
-  // A stock change remounts detail state, so prices, news, AI and holder memory cannot
-  // appear under another symbol's URL. Same-symbol selection does not navigate.
-  return <App key={symbol||'home'} routeSymbol={symbol??null} onNavigateStock={selectSymbol}/>;
+  // Each symbol starts behind its own explicit load gate. Leaving the route drops
+  // detail state and holder memory; returning/back/forward starts at the guide.
+  if(symbol!==undefined)return <StockLandingPage key={symbol} symbol={symbol} onNavigateStock={selectSymbol}/>;
+  return <App key="home" onNavigateStock={selectSymbol}/>;
 }

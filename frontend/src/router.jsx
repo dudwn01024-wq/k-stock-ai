@@ -4,7 +4,7 @@ import StockAppRoute from './StockAppRoute.jsx';
 import PageMeta from './components/PageMeta.jsx';
 import {AboutPage,AnalysisMethodPage,DataSourcesPage,InvestmentNoticePage,PrivacyPage} from './pages/PublicPages.jsx';
 
-// Explanation pages mount static content only; stock routes reuse the existing detail UI.
+// Static guides do not mount analysis. Stock detail loads only after an explicit click.
 const staticPage=(path,page)=><><PageMeta path={path}/>{page}</>;
 export const publicRoutes = [
   { path: '/', element: <StockAppRoute /> },

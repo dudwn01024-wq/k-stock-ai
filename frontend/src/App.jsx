@@ -15,6 +15,7 @@ import './public-home.css';
 import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
 import PageMeta from './components/PageMeta.jsx';
+import { POPULAR_STOCKS } from './stockCatalog.js';
 import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -38,15 +39,6 @@ import {
 const API_BASE_URL = typeof window !== 'undefined' && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
   ? '/api' : 'https://k-stock-ai.onrender.com/api';
 
-const POPULAR_STOCKS = [
-  { name: '삼성전자', code: '005930' },
-  { name: 'SK하이닉스', code: '000660' },
-  { name: 'LG에너지솔루션', code: '373220' },
-  { name: 'NAVER', code: '035420' },
-  { name: '현대차', code: '005380' },
-  { name: '카카오', code: '035720' },
-  { name: '셀트리온', code: '068270' }
-];
 const TIMEFRAMES = [
   { label: '일봉', code: '1D' },
   { label: '1주', code: '1W' },
