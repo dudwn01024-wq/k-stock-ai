@@ -1,7 +1,8 @@
+import {formatKRW} from './utils/numbers.js';
 import React,{useEffect,useRef,useState} from 'react';
 import {parseAverageBuyPrice} from './utils/holdingGuidance.js';
 import './holding-guidance.css';
-const price=value=>typeof value==='number'&&Number.isFinite(value)&&value>0?value.toLocaleString('ko-KR')+'원':'미확인';
+const price=value=>typeof value==='number'&&Number.isFinite(value)&&value>0?formatKRW(value):'미확인';
 
 export default function HoldingGuidance({symbol,strategy,service}){
   const snapshotId=strategy?.newsSnapshotId;

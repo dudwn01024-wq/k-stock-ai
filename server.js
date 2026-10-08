@@ -54,16 +54,20 @@ const NAVER_HEADERS = {
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const PRIMARY_GEMINI_MODEL =
   process.env.GEMINI_MODEL ||
-  'gemini-3.6-flash';
+  'gemini-3.8-flash';
 
+// Official model IDs; unavailable 2.5 is excluded. Existing successful/503/timeout models remain fallback choices.
 const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.6-flash',
   'gemini-3.1-flash-lite',
   'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-2.5-flash'
+  'gemini-3.5-flash-lite'
 ];
 
 const GEMINI_REQUEST_TIMEOUT_MS = 15000;
+const MAX_GEMINI_CALLS = 5;
+const GEMINI_UNAVAILABLE_MESSAGE =
+  'AI 해설 서비스를 일시적으로 이용하기 어렵습니다. 잠시 후 다시 시도해 주세요.';
 
 const RECOMMENDATION_WATCHLIST = [
   { symbol: '005930', name: '삼성전자' },
@@ -2216,10 +2220,7 @@ const callGeminiModelOnce =
       ) {
         const error =
           new Error(
-            `Gemini API error HTTP ${response.status}: ${rawText.slice(
-              0,
-              500
-            )}`
+            `Gemini API error HTTP ${response.status} for ${model}`
           );
 
         error.status =
@@ -2347,6 +2348,7 @@ const callGeminiPromptWithRetry =
       ]);
 
     const errors = [];
+    let calls = 0;
 
     for (
       const model of models
@@ -2360,10 +2362,11 @@ const callGeminiPromptWithRetry =
       for (
         let attempt = 1;
         attempt <=
-        maxAttempts;
+        maxAttempts && calls < MAX_GEMINI_CALLS;
         attempt += 1
       ) {
         try {
+          calls += 1;
           console.log(
             `[K-Stock AI] Gemini request model=${model} attempt=${attempt}/${maxAttempts}`
           );
@@ -2390,15 +2393,12 @@ const callGeminiPromptWithRetry =
 
             status:
               error.status ||
-              null,
-
-            message:
-              error.message
+              null
           });
 
           console.warn(
             `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
-            error.message
+            { status: error.status || null }
           );
 
           const shouldRetrySameModel =
@@ -2407,6 +2407,8 @@ const callGeminiPromptWithRetry =
             ) &&
             error.status !==
               503 &&
+            error.status !== 504 &&
+            calls < MAX_GEMINI_CALLS &&
             attempt <
               maxAttempts;
 
@@ -2432,9 +2434,10 @@ const callGeminiPromptWithRetry =
 
     const finalError =
       new Error(
-        'All Gemini models failed'
+        GEMINI_UNAVAILABLE_MESSAGE
       );
 
+    finalError.code = 'GEMINI_ALL_MODELS_FAILED';
     finalError.details =
       errors;
 
@@ -2650,7 +2653,8 @@ app.get(
           .status(503)
           .json({
             error:
-              'Gemini API key가 설정되어 있지 않습니다.'
+              'GEMINI_UNAVAILABLE',
+            message: GEMINI_UNAVAILABLE_MESSAGE
           });
       }
 
@@ -3211,22 +3215,18 @@ app.get(
 
       console.error(
         '[K-Stock AI] AI analysis API error:',
-        error
+        { code: error?.code || null, status: error?.status || null }
       );
 
+      if (error?.code === 'GEMINI_ALL_MODELS_FAILED') {
+        return res.status(503).json({ error: error.code, message: GEMINI_UNAVAILABLE_MESSAGE });
+      }
 
       return res
         .status(500)
         .json({
           error:
-            'AI 종합 분석을 완료하지 못했습니다.',
-
-          details:
-            Array.isArray(
-              error?.details
-            )
-              ? error.details
-              : undefined
+            'AI 종합 분석을 완료하지 못했습니다.'
         });
     }
   }

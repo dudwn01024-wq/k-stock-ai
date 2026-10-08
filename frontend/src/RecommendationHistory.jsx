@@ -1,3 +1,4 @@
+import {formatKRWNumber} from './utils/numbers.js';
 import React,{useEffect,useMemo,useState} from 'react';
 import CandidateOverview from './CandidateOverview.jsx';
 import ExpandedCandidateCard from './ExpandedCandidateCard.jsx';
@@ -15,11 +16,11 @@ export function HistoryEvidence({item,rank,input}){
   const supplied=input?.candidates?.find(x=>x.symbol===item.symbol)?.news;
   return <article className="history-evidence" id={'history-'+item.symbol}>
     <h3>{rank}위 · {item.stockName||item.symbol} <small>{item.symbol}</small></h3>
-    <p>당시 조회가 {number(item.currentPrice)} · 점수 {number(item.score)}/{number(item.maxScore)} · {grade(item.grade)}</p>
+    <p>당시 조회가 {formatKRWNumber(item.currentPrice,'자료 없음')} · 점수 {number(item.score)}/{number(item.maxScore)} · {grade(item.grade)}</p>
     <p>통과: {item.passedConditions?.join(' · ')||'기록 없음'} / 미충족: {item.failedConditions?.join(' · ')||'기록 없음'} / 미확인: {item.unknownConditions?.join(' · ')||'기록 없음'}</p>
     <details><summary>계산에 사용한 자료·뉴스 근거 펼치기</summary>
       <p className="home-warning">당시 정규화·계산 자료입니다. 제공처 원본 응답 전체는 저장하지 않았습니다. 수급 단위·확정 여부를 추가로 증명하지 않습니다.</p>
-      <dl className="history-facts">{fields.map(([key,label])=><div key={key}><dt>{label}</dt><dd>{number(item.strategy?.[key])}</dd></div>)}</dl>
+      <dl className="history-facts">{fields.map(([key,label])=><div key={key}><dt>{label}</dt><dd>{['ma5','ma20','recentHigh20','recentLow20'].includes(key)?formatKRWNumber(item.strategy?.[key],'자료 없음'):number(item.strategy?.[key])}</dd></div>)}</dl>
       <p>자료 기준일: {item.dataMetadata?.price?.sourceBusinessDate||'미확인'} · 제공처 표기 시각: {item.dataMetadata?.price?.sourceTimestamp||'미확인'}</p>
       <p>원본 수신 시각(KST): {time(item.dataMetadata?.price?.receivedAt)} · 최신성: {item.dataMetadata?.price?.freshnessStatus||'미확인'} · 날짜 일치: {item.dataMetadata?.dateConsistency||'미확인'}</p>
       <p>뉴스 조건: {condition(item.newsAssessment?.newsPassed)} · 뉴스 필터 사용 {item.news.length}건 / Gemini 입력 {supplied?supplied.length+'건':'기록 없음'}</p>
@@ -63,7 +64,7 @@ export function ExpandedHistoryRecord({detail,service}){
     </ul></details>}
     {selected.length?<ol className="expanded-candidates">{selected.map(x=><li key={x.symbol}>
       <ExpandedCandidateCard item={x}>
-        <p>성과 추적 기준: {x.outcomeBaseline?x.outcomeBaseline.businessDate+' 종가 '+number(x.outcomeBaseline.price):'저장된 기준 자료 없음'}</p>
+        <p>성과 추적 기준: {x.outcomeBaseline?x.outcomeBaseline.businessDate+' 종가 '+formatKRWNumber(x.outcomeBaseline.price,'자료 없음'):'저장된 기준 자료 없음'}</p>
       </ExpandedCandidateCard>
     </li>)}</ol>:<p>당시 저장된 최종 후보가 없습니다.</p>}
     {detail.failures?.length>0&&<p className="home-warning">2단계 조회 실패: {detail.failures.map(x=>x.symbol).join(', ')}. 정책상 탈락으로 해석하지 않습니다.</p>}

@@ -75,11 +75,11 @@ test('TEST_ONLY all changed production source matches the exact label-only allow
  for(const [file,edits] of Object.entries(require('./helpers/final-analysis-label-edits.cjs'))){
   let expected=execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
   for(const [before,after] of edits){assert.ok(expected.includes(before),'known display boundary: '+file);expected=expected.replaceAll(before,after);}
-  const current=fs.readFileSync(file,'utf8').replaceAll('\r\n','\n');
+  const current=require('./helpers/without-gemini-price-refresh.cjs')(fs.readFileSync(file,'utf8'),file);
   if(file==='frontend/src/App.jsx')require('./helpers/public-light-boundaries.cjs').assertApp(current,expected);
   else assert.equal(current,expected,'only approved labels: '+file);
  }
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/services','frontend/src/HoldingGuidance.jsx',
+ assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services',
   'frontend/src/PublicInformation.jsx','frontend/src/recommendationDataDates.js','frontend/src/utils/holdingGuidanceAccess.js',
   'package.json','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
 });

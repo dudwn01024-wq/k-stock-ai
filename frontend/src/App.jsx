@@ -14,7 +14,7 @@ import { strategyExplanation } from './utils/strategyExplanation.js';
 import './public-home.css';
 import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
-import { toNullableNumber, hasNumber } from './utils/numbers.js';
+import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Search,
@@ -56,9 +56,7 @@ const TIMEFRAMES = [
 ];
 
 const formatKRW = (num) => {
-  const value = toNullableNumber(num);
-  if (value === null) return '데이터 없음';
-  return `${value.toLocaleString('ko-KR')}원`;
+  return formatKRWDisplay(num);
 };
 
 const formatNumberWithUnit = (num, unit = '') => {
@@ -1240,7 +1238,7 @@ export default function App() {
                       ) : null}
                       <span>
                         {hasNumber(quoteData.priceChange)
-                          ? `${Number(quoteData.priceChange) > 0 ? '+' : ''}${Number(quoteData.priceChange).toLocaleString('ko-KR')}원`
+                          ? `${Number(quoteData.priceChange) > 0 ? '+' : ''}${formatKRW(quoteData.priceChange)}`
                           : '데이터 없음'}
                       </span>
                       <span>

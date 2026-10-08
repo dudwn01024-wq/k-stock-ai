@@ -1,6 +1,6 @@
 'use strict';
 const assert=require('node:assert/strict');
-const strip=source=>source.replaceAll('\r\n','\n').replace("import './light-theme.css';\n",'').replace("import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';\n",'');
+const strip=source=>require('./without-gemini-price-refresh.cjs')(source,'frontend/src/App.jsx').replaceAll('\r\n','\n').replace("import './light-theme.css';\n",'').replace("import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';\n",'');
 module.exports={strip,assertApp(current,expected){
  current=strip(current);expected=strip(expected);
  const boundary='  return (\n    <div className={`public-home';

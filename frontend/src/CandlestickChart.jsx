@@ -1,7 +1,7 @@
 import React,{useId,useMemo,useState} from 'react';
 import {BarChart,Bar,XAxis,YAxis,Tooltip,CartesianGrid,ResponsiveContainer} from 'recharts';
 import {prepareCandles,candleDomain,candleGeometry,candleState} from './utils/candles.js';
-import {toNullableNumber} from './utils/numbers.js';
+import {toNullableNumber,formatKRWNumber} from './utils/numbers.js';
 import './candlestick-chart.css';
 
 const colors={상승:'var(--ui-candle-up)',하락:'var(--ui-candle-down)',보합:'var(--ui-muted)'};
@@ -9,7 +9,7 @@ const number=value=>{const n=toNullableNumber(value);return n===null?'미확인'
 export function CandleValues({row}){
   if(!row)return null;
   return <div className="candle-values"><strong>{row.date} · {candleState(row)}</strong><dl>
-    {['open','high','low','close','volume'].map((key,i)=><div key={key}><dt>{['시가','고가','저가','종가','거래량'][i]}</dt><dd>{number(row[key])}</dd></div>)}
+    {['open','high','low','close','volume'].map((key,i)=><div key={key}><dt>{['시가','고가','저가','종가','거래량'][i]}</dt><dd>{key==='volume'?number(row[key]):formatKRWNumber(row[key],'미확인')}</dd></div>)}
   </dl></div>;
 }
 export function CandleTooltip({active,payload}){
@@ -20,7 +20,7 @@ export function CandleShape(props){
   const geometry=candleGeometry(props);if(!geometry)return null;
   const {center,wickTop,wickBottom,bodyX,bodyY,bodyWidth,bodyHeight}=geometry;
   const row=props.payload,state=candleState(row),select=()=>props.onSelect?.(row);
-  return <g className="candle-shape" role="button" tabIndex={0} aria-label={`${row.date} ${state} 시가 ${number(row.open)} 고가 ${number(row.high)} 저가 ${number(row.low)} 종가 ${number(row.close)} 거래량 ${number(row.volume)}`}
+  return <g className="candle-shape" role="button" tabIndex={0} aria-label={`${row.date} ${state} 시가 ${formatKRWNumber(row.open,'미확인')} 고가 ${formatKRWNumber(row.high,'미확인')} 저가 ${formatKRWNumber(row.low,'미확인')} 종가 ${formatKRWNumber(row.close,'미확인')} 거래량 ${number(row.volume)}`}
     onClick={select} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();select();}}}>
     <rect x={center-Math.max(props.width,10)/2} y={wickTop-3} width={Math.max(props.width,10)} height={Math.max(wickBottom-wickTop+6,10)} fill="transparent"/>
     <line className="candle-wick" x1={center} x2={center} y1={wickTop} y2={wickBottom} stroke={colors[state]} strokeWidth={1.4}/>
@@ -42,7 +42,7 @@ export default function CandlestickChart({rows}){
         <BarChart data={candles} syncId={syncId} margin={{top:12,right:8,left:0,bottom:0}} accessibilityLayer>
           <CartesianGrid stroke="var(--ui-border)" strokeDasharray="3 3" vertical={false}/>
           <XAxis dataKey="date" hide padding={{left:4,right:4}}/>
-          <YAxis domain={candleDomain(candles)} width={56} fontSize={10} stroke="var(--ui-muted)" tickLine={false} tickFormatter={number}/>
+          <YAxis domain={candleDomain(candles)} width={56} fontSize={10} stroke="var(--ui-muted)" tickLine={false} tickFormatter={v=>formatKRWNumber(v,'미확인')}/>
           <Tooltip content={<CandleTooltip/>} cursor={{fill:'var(--ui-muted)',fillOpacity:.15}} isAnimationActive={false}/>
           <Bar dataKey="candleRange" name="일봉" shape={props=><CandleShape {...props} onSelect={onSelect}/>} activeBar={false} isAnimationActive={false}/>
         </BarChart>

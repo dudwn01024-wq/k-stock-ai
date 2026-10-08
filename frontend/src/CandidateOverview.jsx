@@ -1,6 +1,6 @@
 import React from 'react';
 import { strategyExplanation } from './utils/strategyExplanation.js';
-import { toNullableNumber } from './utils/numbers.js';
+import { toNullableNumber, formatKRW } from './utils/numbers.js';
 
 const conditions = [['trendPassed', '추세'], ['volumePassed', '거래량'], ['supplyPassed', '수급'], ['newsPassed', '뉴스']];
 export function candidateSummary(item) {
@@ -56,7 +56,7 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
             const ai=explanations.find(entry=>entry.symbol===item.symbol);
             return <li className="candidate-card" key={item.symbol}>
               <div className="candidate-name"><button onClick={() => onSelect({ code: item.symbol, name: item.stockName })}>{item.stockName || item.symbol} <span aria-hidden="true">↗</span></button><span>{item.symbol} · {historical?"저장 근거":"상세 분석"}</span></div>
-              <div className="candidate-price"><span className="home-label">{historical?"당시 조회가":"현재가"}</span><strong>{price === null ? '데이터 없음' : `${price.toLocaleString('ko-KR')}원`}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
+              <div className="candidate-price"><span className="home-label">{historical?"당시 조회가":"현재가"}</span><strong>{price === null ? '데이터 없음' : formatKRW(price)}</strong><span className={change > 0 ? 'home-up' : change < 0 ? 'home-down' : ''}>{change === null ? '등락률 없음' : `${change > 0 ? '+' : ''}${change}% · ${change > 0 ? '상승' : change < 0 ? '하락' : '보합'}`}</span></div>
               <div className="candidate-context"><p><span className="home-label">선정 이유</span>{summary.reason}</p><p className="home-warning"><span className="home-label">주요 위험</span>{strategyExplanation(summary.risk)}</p></div>
               <div className="candidate-score">분석 조건 점수 {item.score??'미확인'} / {item.maxScore??'미확인'} · {gradeLabels[item.grade]??item.grade??'등급 미확인'}</div>
               {ai?.summary&&<div className="candidate-ai"><span className="home-label">Gemini 설명 · 동일 scanId</span><p>{strategyExplanation(ai.summary)}</p><details><summary>설명 근거와 주의 사항</summary>

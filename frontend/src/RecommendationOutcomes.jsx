@@ -1,3 +1,4 @@
+import {formatKRWNumber} from './utils/numbers.js';
 import React,{useEffect,useMemo,useState} from 'react';
 import {createOutcomeLoader,outcomeStatusLabel} from './utils/recommendationOutcomes.js';
 const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'}[v]||'등급 미확인');
@@ -13,12 +14,12 @@ export function OutcomeResults({data}){
     {data.storage?.outcomeCapacityStatus==='UNKNOWN'&&<p className="home-warning">성과 저장 상태 미확인 · 손상 기록을 정상 결과로 해석하지 마세요.</p>}
     <ul className="outcome-candidates">{data.candidates.map(item=><li key={item.symbol}>
       <h4>{item.stockName||item.symbol} <small>{item.symbol}</small></h4>
-      <p>{grade(item.originalGrade)} · 당시 조회가 {number(item.currentPrice)}</p>
-      <p>성과 추적 기준: {item.baselinePrice!=null&&item.baselineBusinessDate?item.baselineBusinessDate+' 종가 '+number(item.baselinePrice):'저장된 기준 자료 없음'}</p>
+      <p>{grade(item.originalGrade)} · 당시 조회가 {formatKRWNumber(item.currentPrice,'자료 없음')}</p>
+      <p>성과 추적 기준: {item.baselinePrice!=null&&item.baselineBusinessDate?item.baselineBusinessDate+' 종가 '+formatKRWNumber(item.baselinePrice,'자료 없음'):'저장된 기준 자료 없음'}</p>
       <div className="outcome-horizons">{item.horizons.map(value=><article key={value.horizon}>
         <strong>{horizon(value.horizon)} · {outcomeStatusLabel(value.status)}</strong>
         {value.status==='READY'?<>
-          <p>실제 거래일 {value.targetBusinessDate}</p><p>종가 {number(value.closePrice)}</p>
+          <p>실제 거래일 {value.targetBusinessDate}</p><p>종가 {formatKRWNumber(value.closePrice,'자료 없음')}</p>
           <p className="outcome-return">{outcomePercent(value.returnPct)}</p><small>수집 {clock(value.collectedAt)} KST · 제공처 일봉</small>
         </>:<p>{value.status==='TRACKING_BLOCKED_NO_BASELINE'?'저장된 가격·가격 기준일을 확정할 수 없습니다.':value.status==='BACKFILL_WINDOW_UNAVAILABLE'?'30행 일봉 범위에서 기준일을 확인할 수 없습니다.':'가격은 추정하지 않으며, 이 화면은 수집을 실행하지 않습니다.'}</p>}
       </article>)}</div>

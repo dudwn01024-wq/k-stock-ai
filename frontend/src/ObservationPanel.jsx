@@ -53,7 +53,7 @@ function EodResult({result}) {
     {r.reasonCodes?.includes('DATA_FETCH_FAILED')&&<p role="alert" className="text-amber-300">조회 실패 · 자료를 대체하지 않았습니다.</p>}
     {r.reasonCodes?.includes('LIVE_DATA_NOT_AUTHORIZED')&&<p className="text-amber-300">실제 조회 미연결 · 별도 승인 없이 외부 요청하지 않습니다.</p>}
     <p>정책 {e.policy.id} v{e.policy.version} · Asia/Seoul</p>
-    <p>대상 거래일: {show(e.targetBusinessDate)} · 분석 기준 종가: {e.analysisClose===null?'확인 불가':`${e.analysisClose.toLocaleString('ko-KR')}원`}</p>
+    <p>대상 거래일: {show(e.targetBusinessDate)} · 분석 기준 종가: {typeof e.analysisClose==='number'&&Number.isFinite(e.analysisClose)?`${Math.round(e.analysisClose).toLocaleString('ko-KR')}원`:'확인 불가'}</p>
     <p>{e.postCloseObservation?'사후 장마감 관찰':'장마감·자료 완성 근거 확인 필요'} · {e.asOfCaveat}</p>
     {r.dailySelection&&<p>일봉 수집 {r.dailySelection.selectedCount}/{r.dailySelection.goal}개 · 계산 입력 {r.dailySelection.calculationCount}개 · 최대 {r.dailySelection.maxRequests}회 조회 · {r.dailySelection.issueCodes.length?r.dailySelection.issueCodes.join(" / "):"수량 확보 (완성·정확성 확인과 별개)"}</p>}
     <p>뉴스 구간: {when(e.newsWindow?.start)} 초과 ~ {when(e.newsWindow?.end)} 이하</p>
@@ -72,7 +72,7 @@ function EodResult({result}) {
     </section>
     <section className="border border-amber-700 rounded p-3"><strong>전체 판단 보류 · 기존 전략과의 적용 제한</strong><ul>{e.compatibilityConflicts.map(c=><li key={c.code}>{c.reason}</li>)}</ul></section>
     <details className="border border-slate-700 rounded p-3"><summary>원본 근거·수치와 선택된 뉴스</summary>
-      <p>원본 종가 참고: {i.daily.close==null?'확인 불가':`${i.daily.close}원`} · 가격 구분 {show(i.daily.priceBasis)} · 거래량: {i.daily.volume==null?'확인 불가':`${i.daily.volume}주`} · 계산값(20일 평균): {i.daily.averageVolume20==null?'확인 불가':`${i.daily.averageVolume20}주`}</p>
+      <p>원본 종가 참고: {typeof i.daily.close==='number'&&Number.isFinite(i.daily.close)?`${Math.round(i.daily.close).toLocaleString('ko-KR')}원`:'확인 불가'} · 가격 구분 {show(i.daily.priceBasis)} · 거래량: {i.daily.volume==null?'확인 불가':`${i.daily.volume}주`} · 계산값(20일 평균): {i.daily.averageVolume20==null?'확인 불가':`${i.daily.averageVolume20}주`}</p>
       <p>수급 참고: 외국인 {show(i.supply.foreignerNet)} / 기관 {show(i.supply.institutionNet)} · 단위 {show(i.supply.unit)} · 확정 여부 {i.supply.finality} · 시장 {show(i.supply.market)}</p>
       <p>구간 내 {e.news.selected.length}건 / 구간 밖 참고 {e.news.reference.length}건 / 시각·구간 미확인 {e.news.unknown.length}건 — 미확인을 뉴스 없음으로 해석하지 않습니다.</p>
       {[...e.news.selected.map(a=>({...a,group:'구간 내'})),...e.news.reference.map(a=>({...a,group:'구간 밖 참고'})),...e.news.unknown.map(a=>({...a,group:'시각·구간 미확인'}))].map((a,index)=><p key={index}>{a.group} · 기사 {a.id} · 원본 {show(a.originalTime)} · 발행 {when(a.publishedAt)} · 수신 {when(a.receivedAt)}</p>)}

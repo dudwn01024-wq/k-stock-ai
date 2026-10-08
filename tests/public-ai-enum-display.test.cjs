@@ -110,13 +110,13 @@ test('TEST_ONLY exact backend diff is limited to two prose blocks; calculation/a
  const base='b05342650a25b741c98607b35e9615402be58e45';
  const old=execFileSync('git',['show',base+':server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(require('./helpers/without-ai-enum-policy.cjs')(fs.readFileSync('server.js','utf8')),old);
- assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services','frontend/src/HoldingGuidance.jsx',
+ assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services',
   'frontend/src/PublicInformation.jsx'],{encoding:'utf8'}),'');
  const edits=require('./helpers/final-analysis-label-edits.cjs');
  for(const file of ['frontend/src/ExpandedCandidateCard.jsx','frontend/src/App.jsx','frontend/src/CandidateOverview.jsx']){
   let expected=execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
   for(const [before,after] of edits[file])expected=expected.replaceAll(before,after);
-  const current=fs.readFileSync(file,'utf8').replaceAll('\r\n','\n');
+  const current=require('./helpers/without-gemini-price-refresh.cjs')(fs.readFileSync(file,'utf8'),file);
   if(file==='frontend/src/App.jsx')require('./helpers/public-light-boundaries.cjs').assertApp(current,expected);
   else assert.equal(current,expected,'exact display-only change: '+file);
  }

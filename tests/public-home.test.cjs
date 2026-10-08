@@ -9,7 +9,7 @@ const { renderToStaticMarkup } = frontendRequire('react-dom/server');
 const numbers = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/numbers.js'), 'utf8'), {format:'cjs'}).code, {module:numbers,exports:numbers.exports});
 const language = { exports: {} };
-vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'), 'utf8'), {format:'cjs'}).code, {module:language,exports:language.exports});
+vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'), 'utf8'), {format:'cjs'}).code, {module:language,exports:language.exports,require:name=>{assert.equal(name,'./numbers.js');return numbers.exports;}});
 const component = { exports: {} };
 vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/CandidateOverview.jsx'), 'utf8'), {loader:'jsx',format:'cjs'}).code,
   { module:component, exports:component.exports, require:name=>name==='react'?React:name==='./utils/strategyExplanation.js'?language.exports:numbers.exports });

@@ -67,7 +67,7 @@ test('TEST_ONLY all server/API/math/security modules and detail request code rem
  const before=execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  const presentationSource=require('./helpers/public-light-boundaries.cjs').strip(source);
  assert.equal(presentationSource.slice(0,presentationSource.indexOf('export default function App')),before.slice(0,before.indexOf('export default function App')));
- const holder=fs.readFileSync('frontend/src/HoldingGuidance.jsx','utf8').replaceAll('\r\n','\n');
+ const holder=require('./helpers/without-gemini-price-refresh.cjs')(fs.readFileSync('frontend/src/HoldingGuidance.jsx','utf8'),'frontend/src/HoldingGuidance.jsx');
  const oldHolder=execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:frontend/src/HoldingGuidance.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(holder.slice(0,holder.indexOf('  return <section')),oldHolder.slice(0,oldHolder.indexOf('  return <section')));
  assert.ok(holder.includes('현재 상단 가격 기준'));assert.ok(holder.includes('현재 하단 위험 기준'));

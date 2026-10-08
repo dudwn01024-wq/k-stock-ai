@@ -89,13 +89,13 @@ test('TEST_ONLY holder remains locked, policy text unchanged and no token/passwo
 test('TEST_ONLY request/state/calculation source and every handler are unchanged from latest main',()=>{
  const base='68879573e7f41c95094aa3ec42ed04d2eb4b2a73';
  require('./helpers/public-light-boundaries.cjs').assertApp(appSource,execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}));
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/PublicInformation.jsx',
-  'frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/recommendationDataDates.js','frontend/src/utils/candles.js','package.json','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js','frontend/src/PublicInformation.jsx',
+  'frontend/src/ExpandedRecommendation.jsx','frontend/src/recommendationDataDates.js','frontend/src/utils/candles.js','package.json','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
 });
 test('TEST_ONLY candlestick change consists exclusively of SVG colors, retaining geometry, domain and tooltip',()=>{
  let before=execFileSync('git',['show','68879573e7f41c95094aa3ec42ed04d2eb4b2a73:frontend/src/CandlestickChart.jsx'],{encoding:'utf8'});
  before=before.replace("const colors={상승:'#fb7185',하락:'#60a5fa',보합:'#cbd5e1'};","const colors={상승:'var(--ui-candle-up)',하락:'var(--ui-candle-down)',보합:'var(--ui-muted)'};")
   .replaceAll('stroke="#334155"','stroke="var(--ui-border)"').replaceAll('stroke="#94a3b8"','stroke="var(--ui-muted)"').replace("fill:'#64748b'","fill:'var(--ui-muted)'").replace('fill="#769dbf"','fill="var(--ui-volume)"');
- assert.equal(fs.readFileSync('frontend/src/CandlestickChart.jsx','utf8').replaceAll('\r\n','\n'),before.replaceAll('\r\n','\n'));
+ assert.equal(require('./helpers/without-gemini-price-refresh.cjs')(fs.readFileSync('frontend/src/CandlestickChart.jsx','utf8'),'frontend/src/CandlestickChart.jsx'),before.replaceAll('\r\n','\n'));
 });
 module.exports={renderPage,syntheticStrategy,syntheticCandidate,loader};

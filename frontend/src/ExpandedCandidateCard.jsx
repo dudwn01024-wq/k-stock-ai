@@ -1,3 +1,4 @@
+import {formatKRW} from './utils/numbers.js';
 import React from 'react';
 import './expanded-recommendation.css';
 import {recommendationDataDates} from './recommendationDataDates.js';
@@ -6,7 +7,7 @@ import {strategyExplanation} from './utils/strategyExplanation.js';
 const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'};
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
 const number=value=>numeric(value)?value.toLocaleString('ko-KR'):'미확인';
-const price=value=>numeric(value)&&value>0?`${number(value)}원`:'미확인';
+const price=value=>numeric(value)&&value>0?formatKRW(value,'미확인'):'미확인';
 const percent=value=>numeric(value)?`${value>0?'+':''}${number(value)}%`:'미확인';
 const text=value=>typeof value==='string'&&value.trim()?value:'미확인';
 const count=value=>Number.isSafeInteger(value)&&value>=0?number(value):'미확인';

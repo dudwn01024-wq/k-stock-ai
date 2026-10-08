@@ -1,3 +1,4 @@
+import {formatKRWText} from './numbers.js';
 // Display-only wording: never modify the strategy, its values, or its decision.
 const explanations = new Map([
   ['MACD가 Signal 위에 있고 Histogram이 양수입니다.', 'MACD가 상승 신호를 보이고 있어 단기 흐름은 비교적 긍정적입니다.'],
@@ -89,5 +90,5 @@ export function strategyExplanation(text) {
       .replace(/\bSignal\b/g, '신호선').replace(/\bHistogram\b/g, 'MACD와 신호선의 차이');
   }
   // Unrecognized clauses and missing/pending meanings are otherwise unchanged.
-  return display;
+  return formatKRWText(display);
 }

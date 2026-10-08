@@ -6,6 +6,7 @@ const {createRequire}=require('node:module');
 const frontendRequire=createRequire(require.resolve('../frontend/package.json'));
 const {transformSync}=createRequire(require.resolve('../frontend/node_modules/vite/package.json'))('esbuild');
 const React=frontendRequire('react'),{renderToStaticMarkup}=frontendRequire('react-dom/server');
+const numbers={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/numbers.js'),'utf8'),{format:'cjs'}).code,{module:numbers,exports:numbers.exports});
 const source=fs.readFileSync(path.resolve(__dirname,'../frontend/src/ExpandedRecommendation.jsx'),'utf8');
 const code=transformSync(source,{loader:'jsx',format:'cjs'}).code;
 function renderStatus(status,stats){
@@ -28,10 +29,11 @@ function renderStatus(status,stats){
             vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/recommendationDataDates.js'),'utf8'),{format:'cjs'}).code,
               {module:helper,exports:helper.exports,Intl,Date});return helper.exports;
           }
+          if(name==='./utils/numbers.js')return numbers.exports;
           if(name==='./utils/strategyExplanation.js'){
             const language={exports:{}};
             vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'),'utf8'),{format:'cjs'}).code,
-              {module:language,exports:language.exports});return language.exports;
+              {module:language,exports:language.exports,require:name=>{assert.equal(name,'./numbers.js');return numbers.exports;}});return language.exports;
           }
           throw Error('TEST_ONLY_UNEXPECTED_IMPORT');
         }});

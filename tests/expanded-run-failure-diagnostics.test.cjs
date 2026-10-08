@@ -167,7 +167,7 @@ test('TEST_ONLY entry/volume, scoring, official classification, history and outc
     'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js',
     'scripts/collectRecommendationOutcomes.js']){
     const normalize = value => file==='server.js'?require('./helpers/without-private-holding.cjs')(require('./helpers/without-public-language-policy.cjs')(value)):value.replaceAll('\r\n','\n');
-    const current = normalize(fs.readFileSync(file,'utf8'));
+    const current = normalize(require('./helpers/without-gemini-price-refresh.cjs')(fs.readFileSync(file,'utf8'),file));
     // Later UI copy changes leave the original data and decision code intact.
     const displayOnly = file === 'frontend/src/App.jsx' ? current
       .replace(/^import \{ strategyExplanation \} from '\.\/utils\/strategyExplanation\.js';\n/m, '')

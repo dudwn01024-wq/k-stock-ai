@@ -73,5 +73,5 @@ test('TEST_ONLY backend changes are restricted to exact prompt text; security, p
  const old=execFileSync('git',['show','cd45ea31966ae00bf392a4dd27a72e88b56c39e6:server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  assert.equal(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8')),old);
  assert.equal(execFileSync('git',['diff','cd45ea31966ae00bf392a4dd27a72e88b56c39e6','--','services','scripts',
-  'frontend/src/services','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/HoldingGuidance.jsx','frontend/src/PublicInformation.jsx'],{encoding:'utf8'}),'');
+  'frontend/src/services','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/PublicInformation.jsx'],{encoding:'utf8'}),'');
 });

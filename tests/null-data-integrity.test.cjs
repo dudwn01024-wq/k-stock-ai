@@ -37,6 +37,7 @@ async function frontend(file, marketContext = {}) {
   const source = read(file);
   const context = vm.createContext({
     ...await helpers,
+    formatKRWDisplay: (await helpers).formatKRW,
     // Synthetic fixture data is confined to this test; no real API calls.
     fetch: async () => ({ ok: true, json: async () => ({ marketContext }) })
   });
