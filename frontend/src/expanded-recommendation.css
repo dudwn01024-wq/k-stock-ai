@@ -60,3 +60,13 @@
 .expanded-run-details>div{display:grid;gap:.35rem;margin-top:.55rem;font-size:.85rem;line-height:1.65;overflow-wrap:anywhere}
 .expanded-result-notes{margin-top:1rem;font-size:.85rem;line-height:1.65}.expanded-result-notes p{margin-top:.5rem}
 @media(max-width:600px){.expanded-home-toolbar{gap:.7rem}.expanded-home-toolbar .expanded-home-actions{width:100%;display:grid;grid-template-columns:minmax(0,1fr)}.expanded-recommendation .home-secondary{padding:.7rem .5rem;font-size:.85rem}.expanded-recommendation .expanded-counts{gap:.6rem;margin-bottom:.8rem}.expanded-recommendation .expanded-candidates{gap:.8rem}.expanded-recommendation .expanded-candidates>li{padding:1rem}.expanded-risk-note{font-size:.78rem}}
+
+/* Stored per-condition provenance; no single source represents all inputs. */
+.expanded-data-dates{min-width:0;border-top:1px solid #7087a0;padding-top:.55rem;color:#cfdeed;font-size:.8rem;line-height:1.5}
+.expanded-data-dates h4{margin:0 0 .35rem;font-size:.8rem;font-weight:600;color:#dce7f3}
+.expanded-data-dates dl{display:grid;gap:.35rem;margin:0}
+.expanded-data-dates dl>div{display:grid;grid-template-columns:3.5rem minmax(0,1fr);gap:.4rem;min-width:0}
+.expanded-data-dates dt{color:#cfdeed}.expanded-data-dates dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.expanded-data-dates dd small{display:block;font-size:.72rem;color:#b9cde2}
+.expanded-data-date-warning{margin:0 0 .45rem;color:#ffdbab;font-size:.78rem}
+@media(min-width:700px){.expanded-data-dates dl{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:.8rem}}

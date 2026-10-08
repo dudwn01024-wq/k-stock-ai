@@ -22,6 +22,11 @@ function renderStatus(status,stats){
       vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/ExpandedCandidateCard.jsx'),'utf8'),{loader:'jsx',format:'cjs'}).code,
         {module:card,exports:card.exports,URL,require:name=>{
           if(name==='react')return React;if(name==='./expanded-recommendation.css')return {};
+          if(name==='./recommendationDataDates.js'){
+            const helper={exports:{}};
+            vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/recommendationDataDates.js'),'utf8'),{format:'cjs'}).code,
+              {module:helper,exports:helper.exports,Intl,Date});return helper.exports;
+          }
           throw Error('TEST_ONLY_UNEXPECTED_IMPORT');
         }});
       return card.exports;

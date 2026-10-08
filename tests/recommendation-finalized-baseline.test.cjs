@@ -186,7 +186,7 @@ test('TEST_ONLY score/ranking/volume outputs exactly match previous code; only b
   }
   assert.deepEqual(rankFastScreenResults(current).map(x=>x.symbol),Array.from(old.rankFastScreenResults(prior),x=>x.symbol));
   for(const file of ['services/recommendationVolumePolicy.js',
-    'services/chartAnalysis.js','frontend/src/ExpandedCandidateCard.jsx']){
+    'services/chartAnalysis.js']){
     const before=execFileSync('git',['show',previous+':'+file],{encoding:'utf8'});
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),before.replaceAll('\r\n','\n'),file);
   }

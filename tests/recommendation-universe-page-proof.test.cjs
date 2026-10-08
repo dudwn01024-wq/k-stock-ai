@@ -205,7 +205,7 @@ test('TEST_ONLY recommendation/ENTRY_GATE/outcome V3/history/frontend remain byt
     'services/tradingStrategy.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/recommendationHistory.js',
     'services/expandedRecommendationReuse.js','services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js',
     'services/recommendationOutcomeCollector.js','scripts/collectRecommendationOutcomes.js','services/chartAnalysis.js',
-    'frontend/src/App.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx']){
+    'frontend/src/App.jsx','frontend/src/ExpandedRecommendation.jsx']){
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
   }
   const source=fs.readFileSync('services/recommendationUniverse.js','utf8');

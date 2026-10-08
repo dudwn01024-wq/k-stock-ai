@@ -165,7 +165,7 @@ test('TEST_ONLY entry/volume, scoring, official classification, history and outc
   for(const file of ['server.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js','services/tradingStrategy.js',
     'services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/recommendationHistory.js','services/expandedRecommendationReuse.js',
     'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js',
-    'scripts/collectRecommendationOutcomes.js','frontend/src/App.jsx','frontend/src/ExpandedCandidateCard.jsx']){
+    'scripts/collectRecommendationOutcomes.js','frontend/src/App.jsx']){
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
   }
 });

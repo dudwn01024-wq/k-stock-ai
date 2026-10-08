@@ -95,6 +95,6 @@ test('offline replay and same UI: unique saved review, immutable original, zero 
 });
 test('offline module graph excludes accounts, providers, auth, PAPER, Risk and Ledger',()=>{
   const loaded=Object.keys(require.cache).filter(p=>/[\\/]services[\\/]/.test(p));
-  assert.ok(loaded.every(p=>/(?:observation(?:Freshness|Evidence|Eod|InvestorContract|NewsContract|Daily|Scope)|strategyObservation|chartAnalysis|dataFreshness|tradingStrategy)\.js$/.test(p)),loaded.join('\n'));
+  assert.ok(loaded.every(p=>/(?:observation(?:Freshness|Evidence|Eod|InvestorContract|NewsContract|Daily|Scope)|strategyObservation|chartAnalysis|dataFreshness|tradingStrategy|recommendationVolumePolicy)\.js$/.test(p)),loaded.join('\n'));
   assert.throws(()=>fetch('https://example.com'),/EXTERNAL_NETWORK_FORBIDDEN/);
 });

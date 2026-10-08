@@ -37,7 +37,7 @@ test('TEST_ONLY screening card removes only price strategy presentation and pres
   const item=candidate(),before=JSON.stringify(item);
   const html=renderToStaticMarkup(React.createElement(Card,{item,screening:true,onSelect:()=>assert.fail('RENDER_MUST_NOT_SELECT')}));
   assert.doesNotMatch(html,/분석 당시 조회가|등락률|진입 참고가|익절 참고가|손절 참고가|상승 여력|하락 위험|손익비|105원|110원|95원/);
-  for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','자료 기준일','제공처','현재 상세 분석 보기'])
+  for(const label of ['추천 이유 · 통과 조건','미충족 조건','미확인 조건','추세','거래량','수급','뉴스','데이터 기준','제공처','현재 상세 분석 보기'])
     assert.ok(html.includes(label),label);
   assert.equal((html.match(/저장된 원문 링크/g)||[]).length,3);
   assert.match(html,/최우선 후보 · 기존 추천 점수 4 \/ 4/);assert.equal(JSON.stringify(item),before);
@@ -116,12 +116,13 @@ test('TEST_ONLY unavailable risk reward never uses numeric fields to fabricate a
   const html=render(candidate());assert.equal(field(html,'상승 여력'),'+5%');assert.equal(field(html,'하락 위험'),'+2%');
   assert.equal(field(html,'손익비'),'2.5');
 });
-test('TEST_ONLY stored price metadata and date/staleness warnings are preserved even for passed news',()=>{
-  const item=candidate();item.newsAssessment.newsPassed=true;const html=render(item);
-  assert.equal(field(html,'자료 기준일'),'2026-10-02');assert.equal(field(html,'제공처'),'TEST_ONLY');
-  assert.match(html,/데이터 기준일 불일치/);assert.match(html,/오래된 자료 · 최신성 재확인 필요/);
-  const missing=render({...item,dataMetadata:null});assert.equal(field(missing,'자료 기준일'),'미확인');
-  assert.equal(field(missing,'제공처'),'미확인');assert.match(missing,/실시간 시세가 아닙니다/);
+test('TEST_ONLY stored per-source dates and staleness remain visible without inferring absent dates',()=>{
+  const item=candidate();item.newsAssessment.newsPassed=true;
+  item.strategy.dataMetadata={supply:{source:'TEST_ONLY_INTEGRATION',sourceBusinessDate:'2026-10-01'}};
+  const html=render(item);assert.match(html,/10\/02 기준/);assert.match(html,/10\/01 기준/);assert.match(html,/제공처: TEST_ONLY/);
+  assert.match(html,/데이터 기준일이 서로 다릅니다/);assert.match(html,/오래된 자료 · 최신성 재확인 필요/);
+  const missing=render({...item,dataMetadata:null});assert.match(missing,/기준일 미확인/);
+  assert.match(missing,/제공처: 미확인/);assert.match(missing,/실시간 시세가 아닙니다/);
 });
 test('TEST_ONLY live and saved cards preserve candidate order, grades and scores without service calls',()=>{
   const items=[{...candidate(),symbol:'000003',stockName:'TEST_ONLY_FIRST',grade:'WATCH_CANDIDATE',score:2},

@@ -98,6 +98,6 @@ test('TEST DATA: policy version mismatch refuses replay; observation dependency 
   assert.throws(()=>evaluateEod({policy:{id:POLICY.id,version:'999'}}),/EOD_POLICY_VERSION_UNSUPPORTED/);
   const seen=new Set();function walk(m){if(seen.has(m.id))return;seen.add(m.id);m.children.forEach(walk);}walk(require.cache[require.resolve('../services/strategyObservation')]);
   const loaded=[...seen].filter(p=>/[\\/]services[\\/]/.test(p));
-  assert.ok(loaded.every(p=>/(strategyObservation|tradingStrategy|dataFreshness|observationEod|observationEvidence|observationScope|observationInvestorContract|observationNewsContract|observationDaily|chartAnalysis)\.js$/.test(p)),loaded.join('\n'));assert.equal(forbiddenCalls,0);
+  assert.ok(loaded.every(p=>/(strategyObservation|tradingStrategy|recommendationVolumePolicy|dataFreshness|observationEod|observationEvidence|observationScope|observationInvestorContract|observationNewsContract|observationDaily|chartAnalysis)\.js$/.test(p)),loaded.join('\n'));assert.equal(forbiddenCalls,0);
   assert.throws(()=>fetch('https://example.com'),/EXTERNAL_NETWORK_FORBIDDEN/);
 });

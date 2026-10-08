@@ -1,5 +1,6 @@
 import React from 'react';
 import './expanded-recommendation.css';
+import {recommendationDataDates} from './recommendationDataDates.js';
 
 const gradeLabels={PRIORITY_CANDIDATE:'최우선 후보',CHASE_CAUTION:'추격 주의',WATCH_CANDIDATE:'관심 후보'};
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
@@ -22,6 +23,7 @@ const volumeFields=[['currentVolume','거래량'],['averageVolume20','20일 평�
 export default function ExpandedCandidateCard({item,children,screening=false,onSelect}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
+  const dataDates=recommendationDataDates(item);
   const volumePending=strategy.volumePassed===null&&strategy.volumeAssessment?.status==='INTRADAY_PENDING';
   const news=Array.isArray(item.news)?item.news.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).slice(0,3):null;
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
@@ -46,9 +48,14 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>
       {item.pendingConditions?.length>0&&<p><strong>장중 확인 중 조건</strong> {words(item.pendingConditions)}</p>}
       <p><strong>미확인 조건</strong> {words(item.unknownConditions)}</p>
-      <p className="expanded-card-note">자료 기준일: {text(metadata?.sourceBusinessDate)} · 제공처: {text(metadata?.source)}</p>
     </div>}
-    {item.dataMetadata?.dateConsistency==='MISMATCH'&&<p className="home-warning">데이터 기준일 불일치 · 당시 자료의 날짜가 서로 다릅니다.</p>}
+    <section className="expanded-data-dates" aria-label="데이터 기준">
+      <h4>데이터 기준</h4>
+      {dataDates.mismatch&&<p className="expanded-data-date-warning">데이터 기준일이 서로 다릅니다. 아래 항목별 기준을 확인하세요.</p>}
+      <dl>{dataDates.rows.map(row=><div key={row.key}>
+        <dt>{row.label}</dt><dd><span>{row.value}</span><small>제공처: {row.source}{row.lookup&&<> · {row.lookup}</>}</small></dd>
+      </div>)}</dl>
+    </section>
     <details className="expanded-card-evidence"><summary>상세 근거 보기</summary>
       <p className="expanded-card-note">{screening?'분석 당시 저장된 선정 근거이며, 시세 최신성과 매수 허가를 뜻하지 않습니다.':'분석 당시 자료입니다. 참고 가격은 주문 지시가 아니며, 시세 최신성을 보장하지 않습니다.'}</p>
       <h4>거래량·수급</h4>
@@ -83,13 +90,6 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       <h4>당시 선정 조건</h4>
       <p>통과: {words(item.passedConditions)}</p><p>미충족: {words(item.failedConditions)}</p><p>미확인: {words(item.unknownConditions)}</p>
       {item.pendingConditions?.length>0&&<p>장중 확인 중: {words(item.pendingConditions)}</p>}
-      <h4>자료 기준</h4>
-      <dl className="expanded-card-facts">
-        <div><dt>자료 기준일</dt><dd>{text(metadata?.sourceBusinessDate)}</dd></div>
-        <div><dt>제공처</dt><dd>{text(metadata?.source)}</dd></div>
-        <div><dt>제공처 기준 시각</dt><dd>{text(metadata?.sourceTimestamp)}</dd></div>
-        <div><dt>자료 수신 시각</dt><dd>{text(metadata?.receivedAt)}</dd></div>
-      </dl>
       <p className={metadata?.freshnessStatus==='STALE'?'home-warning':'expanded-card-note'}>
         {metadata?.freshnessStatus==='STALE'?'오래된 자료 · 최신성 재확인 필요':'최신성 미확인 · 실시간 시세가 아닙니다.'}
       </p>

@@ -95,7 +95,7 @@ test('TEST_ONLY recommendation, finalized outcome V3, news, holder and chart cal
   for(const file of ['services/recommendationVolumePolicy.js','services/recommendationFastScreen.js',
     'services/recommendationHistory.js','services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js',
     'services/recommendationOutcomeCollector.js','scripts/collectRecommendationOutcomes.js','services/chartAnalysis.js',
-    'services/stockDetailNews.js','services/naverMarketData.js','frontend/src/ExpandedCandidateCard.jsx','frontend/src/utils/holdingGuidance.js']){
+    'services/stockDetailNews.js','services/naverMarketData.js','frontend/src/utils/holdingGuidance.js']){
     const before=execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),before,file);
   }
