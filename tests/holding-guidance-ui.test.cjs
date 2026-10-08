@@ -102,27 +102,15 @@ test('TEST_ONLY frontend cannot evaluate holding rules locally or persist privat
     assert.doesNotMatch(code,/currentPrice\s*<=\s*stopLossPrice|currentPrice\s*>=\s*takeProfitPrice|function evaluateHoldingGuidance/);
   }
 });
-test('TEST_ONLY recommendation stock selection reuses exactly the existing explicit detail requests',async()=>{
+test('TEST_ONLY recommendation stock selection routes to exactly the existing explicit detail requests',async()=>{
   const appFile=require.resolve('../frontend/src/App.jsx'),source=fs.readFileSync(appFile,'utf8');
-  const bindings=[...source.slice(source.indexOf('export default function App')).matchAll(/const \[([^,]+),[^\]]+\]\s*=\s*useState\(/g)].map(match=>match[1]);
-  const states=[],effects=[],calls=[];let cursor=0;
-  const react={...React,useState:initial=>{const index=cursor++;states[index]=bindings[index]==='recommendationMode'?'expanded500':initial;
-      return [states[index],value=>{states[index]=value;}];},useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn,useRef:()=>({current:0})};
-  const fetch=async value=>{
-    const url=new URL(value,'http://127.0.0.1');calls.push(url.pathname);
-    assert.ok(['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis','/api/stock/recommendation-mode'].includes(url.pathname));
-    return {ok:true,json:async()=>url.pathname.endsWith('/quote')?{stockName:'TEST_ONLY',symbol:'000001',currentPrice:100}:
-      url.pathname.endsWith('/detail-analysis')?{symbol:'000001',newsSnapshotId:'TEST_ONLY_SNAPSHOT',news:[],strategy:strategy(),chart:{},dataPoints:30}:{chart:[],news:[],universeMode:'expanded500'}};
-  };
-  const tree=loader(react,{fetch})(appFile).default();
-  const expanded=visit(tree,node=>node.type?.name==='ExpandedRecommendation');assert.ok(expanded,'expanded main mounted');
-  assert.equal(calls.length,0,'render alone has no provider calls');
-  // Mount effects read mode; expanded mode never invokes the legacy recommendation or detail loaders.
-  effects.forEach(fn=>fn());await new Promise(setImmediate);
-  assert.deepEqual(calls,['/api/stock/recommendation-mode']);calls.length=0;
-  expanded.props.onSelect({code:'000001',name:'TEST_ONLY'});await new Promise(setImmediate);
-  assert.deepEqual(calls,['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
-  assert.equal(states[bindings.indexOf('activeSymbol')],'000001');
+  const file=require.resolve('./shared-detail-news-ui.test.cjs'),actual=createRequire(file),req=name=>name==='node:test'?{test:()=>{}}:actual(name);req.resolve=actual.resolve;
+  const context={require:req,module:{exports:{}},console,URL,setImmediate};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+  const h=context.module.exports.harness();h.render();h.runEffects();await new Promise(setImmediate);
+  assert.deepEqual(Array.from(h.calls,x=>x.pathname),['/api/stock/recommendation-mode']);h.calls.length=0;
+  await h.select('000001');assert.deepEqual(Array.from(h.navigations),['/stocks/000001']);
+  assert.deepEqual(Array.from(h.calls,x=>x.pathname),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+  assert.equal(h.state('activeSymbol'),'000001');
   assert.doesNotMatch(source,/HoldingGuidance[^\n]*(?:quoteData|entryPrice=)/);
   assert.match(source,/<HoldingGuidance key=\{activeSymbol\} symbol=\{activeSymbol\} strategy=\{strategyData\}/);
 });

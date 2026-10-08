@@ -19,21 +19,25 @@ const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'
   news:[{title:'TEST_ONLY '+symbol,summary:'TEST_ONLY',url:null}],strategy:strategy(),chartAnalysis:{},
   newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1},
   marketContext:{newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1}}});
-function harness({ai,aiStatus=200,detailResponse}={}){
-  const states=[],refs=[],effects=[],calls=[];let stateCursor=0,refCursor=0;
-  const react={...React,useState:initial=>{const i=stateCursor++;if(!(i in states))states[i]=bindings[i]==='recommendationMode'?'expanded500':initial;
-    return [states[i],value=>{states[i]=typeof value==='function'?value(states[i]):value;}];},
+function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode='expanded500'}={}){
+  let states=[],refs=[],effects=[],cleanups=[];const calls=[],navigations=[],document={title:'K-Stock AI',getElementById:()=>null};let stateCursor=0,refCursor=0;
+  let props={routeSymbol:symbol,onNavigateStock:next=>navigate(next)};
+  const react={...React,useState:initial=>{const store=states,i=stateCursor++;if(!(i in store))store[i]=bindings[i]==='recommendationMode'?mode:initial;
+    return [store[i],value=>{store[i]=typeof value==='function'?value(store[i]):value;}];},
     useRef:initial=>{const i=refCursor++;return refs[i]??(refs[i]={current:initial});},
     useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn};
-  const fetch=async value=>{
+  const fetch=async (value,init={})=>{
+    if(init.method&&init.method!=='GET')throw Error('TEST_ONLY_MUTATION_FORBIDDEN');
     const url=new URL(value,'http://127.0.0.1');calls.push(url);
     const symbol=url.searchParams.get('symbol');let body;
     switch(url.pathname){
-      case '/api/stock/quote':body={symbol,stockName:'TEST_ONLY '+symbol,currentPrice:100};break;
+      case '/api/stock/search':body={symbol:'005930',name:'TEST_ONLY 삼성전자'};break;
+      case '/api/stock/quote':body=quoteResponse?await quoteResponse(symbol):{symbol,stockName:'TEST_ONLY '+symbol,currentPrice:100};break;
       case '/api/stock/chart':body={chart:[],supported:false};break;
       case '/api/stock/detail-analysis':body=detailResponse?await detailResponse(symbol):detail(symbol);break;
       case '/api/stock/ai-analysis':body=ai?await ai(url):{symbol,newsSnapshotId:url.searchParams.get('newsSnapshotId'),analysis:{summary:'TEST_ONLY 해설'}};break;
-      case '/api/stock/recommendation-mode':body={universeMode:'expanded500',settings:{aiEnabled:false}};break;
+      case '/api/stock/recommendation-mode':body={universeMode:mode,settings:{aiEnabled:false}};break;
+      case '/api/stock/recommendations':body={scanId:'TEST_ONLY_SCAN',recommendations:[]};break;
       default:throw Error('TEST_ONLY_FORBIDDEN_REQUEST '+url.pathname);
     }
     const status=url.pathname==='/api/stock/ai-analysis'?aiStatus:200;
@@ -43,7 +47,7 @@ function harness({ai,aiStatus=200,detailResponse}={}){
     if(cache.has(file))return cache.get(file);
     const module={exports:{}};
     vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,
-      {module,exports:module.exports,URL,Intl,Date,Number,Set,Map,console:{error(){}},fetch,
+      {module,exports:module.exports,URL,Intl,Date,Number,Set,Map,document,console:{error(){}},fetch,
         window:{location:{hostname:'127.0.0.1'},sessionStorage:{}},require:name=>{
           if(name==='react')return react;if(name.endsWith('.css'))return {};
           if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});
@@ -54,11 +58,27 @@ function harness({ai,aiStatus=200,detailResponse}={}){
     cache.set(file,module.exports);return module.exports;
   };
   const App=load(appFile).default;
-  const render=()=>{stateCursor=0;refCursor=0;effects.length=0;return App();};
+  const render=()=>{stateCursor=0;refCursor=0;effects=[];return App(props);};
+  const unmount=()=>{cleanups.forEach(fn=>fn?.());cleanups=[];};
+  const runEffects=(strict=false)=>{
+    const setups=effects.slice();cleanups=setups.map(fn=>fn());
+    if(strict){unmount();cleanups=setups.map(fn=>fn());}
+  };
+  const navigate=next=>{
+    if(next===props.routeSymbol)return;
+    navigations.push(next===null?'/':'/stocks/'+next);unmount();states=[];refs=[];
+    props={...props,routeSymbol:next};render();runEffects();
+  };
   const state=name=>states[bindings.indexOf(name)];
-  const select=async symbol=>{visit(render(),n=>n.type?.name==='ExpandedRecommendation').props.onSelect({code:symbol,name:'TEST_ONLY'});await tick();};
+  const select=async symbol=>{
+    const tree=render(),candidate=visit(tree,n=>n.type?.name==='ExpandedRecommendation');
+    if(candidate)candidate.props.onSelect({code:symbol,name:'TEST_ONLY'});
+    else visit(tree,n=>n.type==='button'&&String(n.key).endsWith(symbol)).props.onClick();
+    await tick();
+  };
   const button=()=>visit(render(),n=>n.type==='button'&&n.props.onClick?.name==='requestAIAnalysis');
-  return {render,state,select,button,calls,effects,states};
+  return {render,state,select,button,calls,navigations,runEffects,navigate,unmount,document,
+    get effects(){return effects;},get states(){return states;}};
 }
 
 test('TEST_ONLY search, render, news view and holder consume one detail response, never auto AI',async()=>{
@@ -209,3 +229,5 @@ test('TEST_ONLY detail mapper keeps FAVORABLE/CAUTION booleans and PENDING/NEUTR
     assert.equal(h.state('strategyData').volumeConditionStatus,status);assert.equal(h.calls.length,3);
   }
 });
+
+module.exports={harness,visit,tick,detail,bindings};

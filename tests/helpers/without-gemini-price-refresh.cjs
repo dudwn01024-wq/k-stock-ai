@@ -158,4 +158,4 @@ const edits={
     ]
   ]
 };
-module.exports=(source,file='server.js')=>{let s=source.replaceAll('\r\n','\n');for(const [before,after] of edits[file]||[])if(s.includes(after))s=s.replace(after,before);return s;};
+module.exports=(source,file='server.js')=>{let s=(file==='frontend/src/App.jsx'?require('./without-stock-routing.cjs')(source):source).replaceAll('\r\n','\n');for(const [before,after] of edits[file]||[])if(s.includes(after))s=s.replace(after,before);return s;};

@@ -12,19 +12,27 @@ function routeModule(App=()=>React.createElement('p',null,'TEST_ONLY Existing Ap
  vm.runInNewContext(transformSync(fs.readFileSync('frontend/src/router.jsx','utf8'),{loader:'jsx',format:'cjs'}).code,{
   module,exports:module.exports,require:name=>{
    if(name==='react')return React;if(name==='react-router-dom')return routerLibrary;
-   if(name==='./App.jsx')return {__esModule:true,default:App};
+   if(name==='./StockAppRoute.jsx'){
+    const inner={exports:{}};
+    vm.runInNewContext(transformSync(fs.readFileSync('frontend/src/StockAppRoute.jsx','utf8'),{loader:'jsx',format:'cjs'}).code,{
+      module:inner,exports:inner.exports,require:dep=>{
+        if(dep==='react')return React;if(dep==='react-router-dom')return routerLibrary;
+        if(dep==='./App.jsx')return {__esModule:true,default:App};
+        assert.equal(dep,'./components/PublicPageLayout.jsx');return pageModule(require.resolve('../frontend/src/components/PublicPageLayout.jsx'));
+      }});return inner.exports;
+   }
    assert.equal(name,'./pages/PublicPages.jsx');return pageModule();
   }});
  return module.exports;
 }
-function pageModule(){
+function pageModule(entry=require.resolve('../frontend/src/pages/PublicPages.jsx')){
  const load=file=>{const module={exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,{
    module,exports:module.exports,fetch:()=>assert.fail('TEST_ONLY_PAGE_FETCH_FORBIDDEN'),require:name=>{
     if(name==='react')return React;if(name.endsWith('.css'))return {};
     assert.ok(name.startsWith('.'));return load(path.resolve(path.dirname(file),name));
    }});return module.exports;};
- return load(require.resolve('../frontend/src/pages/PublicPages.jsx'));
+ return load(entry);
 }
 async function settled(router){
  for(let i=0;i<20;i++){
@@ -33,8 +41,8 @@ async function settled(router){
  }
  assert.fail('router did not settle');
 }
-test('TEST_ONLY root App, five static explanation routes and unknown redirect are registered',()=>{
- const {publicRoutes}=routeModule();assert.deepEqual(Array.from(publicRoutes,x=>x.path),['/','/about','/analysis-method','/data-sources','/investment-notice','/privacy','*']);
+test('TEST_ONLY root App, stock detail, five static explanation routes and unknown redirect are registered',()=>{
+ const {publicRoutes}=routeModule();assert.deepEqual(Array.from(publicRoutes,x=>x.path),['/','/stocks/:symbol','/about','/analysis-method','/data-sources','/investment-notice','/privacy','*']);
  assert.equal(publicRoutes[0].element.type.name.length>0,true);
  assert.equal(publicRoutes.at(-1).loader().headers.get('Location'),'/');
  assert.equal(publicRoutes.at(-1).loader().headers.get('X-Remix-Replace'),'true');
@@ -53,7 +61,7 @@ test('TEST_ONLY / renders existing App unchanged inside router with zero network
  try{assert.equal(renderToStaticMarkup(React.createElement(RouterProvider,{router})),direct);assert.ok(direct.includes('K-Stock AI'));}
  finally{router.dispose();}
 });
-for(const url of ['/stocks/005930','/random-path'])
+for(const url of ['/random-path'])
 test('TEST_ONLY unregistered client route safely replaces to /: '+url,async()=>{
  const router=createMemoryRouter(routeModule().publicRoutes,{initialEntries:[url]});
  try{await settled(router);assert.equal(router.state.location.pathname,'/');assert.equal(router.state.historyAction,'REPLACE');
@@ -82,7 +90,8 @@ test('TEST_ONLY StrictMode retained and browser router instantiated outside the 
 });
 test('TEST_ONLY home App/theme, API, security, provider policy and stored files stay unchanged',()=>{
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src',
-  ':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages','frontend/index.html','frontend/vite.config.js','render.yaml','package.json'],{encoding:'utf8'}),'');
+  ':!frontend/src/App.jsx',':!frontend/src/StockAppRoute.jsx',':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages','frontend/index.html','frontend/vite.config.js','render.yaml','package.json'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/without-stock-routing.cjs')(fs.readFileSync('frontend/src/App.jsx','utf8')),execFileSync('git',['show','2e731ee1ca0d80e952a6d8b46a75f60f37f2df7e:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  require('./helpers/assert-router-package-boundary.cjs')(base);
  const lock=JSON.parse(fs.readFileSync('frontend/package-lock.json','utf8'));
  assert.equal(lock.lockfileVersion,3);

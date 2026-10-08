@@ -498,10 +498,11 @@ const describeDataMetadata = (metadata) => {
   return `출처: ${metadata?.source ?? '미확인'} · 기준일: ${metadata?.sourceBusinessDate ?? '미확인'} · 원본 시각: ${metadata?.sourceTimestamp ?? '미확인'} · 수신(KST): ${time} · 최신 여부 확인 필요`;
 };
 
-export default function App() {
-  const [searchQuery, setSearchQuery] = useState('삼성전자');
-  const [activeSymbol, setActiveSymbol] = useState('005930');
-  const [activeName, setActiveName] = useState('삼성전자');
+export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
+  const isStockRoute=routeSymbol!==null;
+  const [searchQuery, setSearchQuery] = useState(routeSymbol || '삼성전자');
+  const [activeSymbol, setActiveSymbol] = useState(routeSymbol || '005930');
+  const [activeName, setActiveName] = useState(routeSymbol || '삼성전자');
 
   const [quoteData, setQuoteData] = useState(null);
   const [chartData, setChartData] = useState([]);
@@ -514,6 +515,8 @@ export default function App() {
   const [aiError, setAiError] = useState(null);
   const aiErrorView=aiAnalysisError(aiError);
   const detailRequestRef=useRef(0);
+  const detailFlightsRef=useRef(new Map());
+  const searchRequestRef=useRef(0);
   const aiRequestRef=useRef(0);
   const detailSnapshotRef=useRef(null);
   const aiPendingRef=useRef(false);
@@ -527,12 +530,12 @@ export default function App() {
   const [recommendationModeError,setRecommendationModeError]=useState(null);
   const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(Boolean(routeSymbol));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
   const [chartTimeframe, setChartTimeframe] = useState('1D');
   const [activeTab, setActiveTab] = useState('detail');
-  const [showDetail, setShowDetail] = useState(false);
+  const [showDetail, setShowDetail] = useState(Boolean(routeSymbol));
 
   useEffect(() => {
     if (showDetail && !loading && activeTab === 'detail') {
@@ -542,6 +545,7 @@ export default function App() {
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
   useEffect(()=>{
+    if(isStockRoute)return;
     let active=true;
     backendService.getRecommendationMode().then(result=>{
       if(active){
@@ -550,7 +554,7 @@ export default function App() {
       }
     }).catch(error=>{if(active)setRecommendationModeError(error.message);});
     return()=>{active=false;};
-  },[backendService]);
+  },[backendService,isStockRoute]);
 
   const loadRealStockData = useCallback(
     async (symbol, name, timeframe = '1D', refresh = false) => {
@@ -564,16 +568,29 @@ export default function App() {
       setAiLoading(false);
       setAiError(null);
       setAiAnalysis(null);
+      setQuoteData(null);
+      setChartData([]);
       setNewsList([]);
       setStrategyData(null);
       setErrorMsg(null);
 
       try {
-        const [quote, chartResult, detail] = await Promise.all([
-          backendService.getStockQuote(symbol),
-          backendService.getStockChart(symbol, timeframe),
-          backendService.getStockDetail(symbol)
-        ]);
+        // StrictMode effect replay subscribes to the same in-flight detail read.
+        // No completed-result cache: back/forward and explicit refresh read fresh data.
+        const key=symbol+':'+timeframe;
+        let flight=detailFlightsRef.current.get(key);
+        if(!flight){
+          flight=Promise.all([
+            backendService.getStockQuote(symbol),
+            backendService.getStockChart(symbol, timeframe),
+            backendService.getStockDetail(symbol)
+          ]);
+          detailFlightsRef.current.set(key,flight);
+          const clear=()=>{if(detailFlightsRef.current.get(key)===flight)detailFlightsRef.current.delete(key);};
+          flight.then(clear,clear);
+        }
+        const [quote, chartResult, detail] = await flight;
+        if(quote?.symbol!==symbol)throw Error('종목 데이터를 불러오지 못했습니다.');
 
         if(request!==detailRequestRef.current)return;
         detailSnapshotRef.current={symbol,id:detail.newsSnapshotId};
@@ -615,53 +632,72 @@ export default function App() {
     }
   };
 
+  const initialDetailSymbol=routeSymbol || (recommendationMode==='legacy50'?'005930':null);
   useEffect(() => {
-    if(recommendationMode==='legacy50')loadRealStockData('005930', '삼성전자', '1D');
-  }, [loadRealStockData,recommendationMode]);
+    if(initialDetailSymbol)loadRealStockData(initialDetailSymbol,isStockRoute?routeSymbol:'삼성전자','1D');
+    return()=>{
+      // Invalidate late detail, search and manual AI responses on route exit/replay.
+      ++detailRequestRef.current;
+      ++searchRequestRef.current;
+      ++aiRequestRef.current;
+      detailSnapshotRef.current=null;
+      aiPendingRef.current=false;
+    };
+  }, [initialDetailSymbol,isStockRoute,routeSymbol,loadRealStockData]);
+
+  useEffect(()=>{
+    document.title=routeSymbol&&quoteData?.symbol===routeSymbol
+      ? (quoteData.stockName||routeSymbol)+' 주식 분석 | K-Stock AI':'K-Stock AI';
+    return()=>{document.title='K-Stock AI';};
+  },[routeSymbol,quoteData?.symbol,quoteData?.stockName]);
 
   const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
     patch=>setRecommendationRun(previous=>({...previous,...patch}))),[backendService]);
   const loadRecommendations=useCallback(()=>recommendationLoader.load(),[recommendationLoader]);
   useEffect(()=>{
-    if(recommendationMode==='legacy50')loadRecommendations();
+    if(!isStockRoute&&recommendationMode==='legacy50')loadRecommendations();
     return ()=>recommendationLoader.cancel();
-  },[loadRecommendations,recommendationLoader,recommendationMode]);
+  },[loadRecommendations,recommendationLoader,recommendationMode,isStockRoute]);
 
   const handleSearch = async (event) => {
     event.preventDefault();
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
 
+    const request=++searchRequestRef.current;
     setLoading(true);
     setErrorMsg(null);
 
     try {
       let targetSymbol = trimmed;
-      let targetName = trimmed;
       if (!/^\d{6}$/.test(trimmed)) {
         const searchResult = await backendService.searchStock(trimmed);
         if (!searchResult || !searchResult.symbol) {
           throw new Error('종목을 찾을 수 없습니다.');
         }
         targetSymbol = searchResult.symbol;
-        targetName = searchResult.name || trimmed;
       }
 
-      await loadRealStockData(targetSymbol, targetName, '1D');
-      setShowDetail(true);
-      setActiveTab('detail');
+      if(request!==searchRequestRef.current)return;
+      if(!/^\d{6}$/.test(targetSymbol))throw Error('올바른 6자리 종목코드가 아닙니다.');
+      setLoading(detailFlightsRef.current.size>0);
+      if(targetSymbol!==routeSymbol)onNavigateStock(targetSymbol);
+      else setSearchQuery(activeName);
     } catch (error) {
       console.error(error);
-      setErrorMsg(error?.message || '종목을 찾을 수 없습니다.');
-      setLoading(false);
+      if(request===searchRequestRef.current){
+        setErrorMsg(error?.message || '종목을 찾을 수 없습니다.');
+        setLoading(false);
+      }
     }
   };
 
   const handlePopularStock = (stock) => {
-    setShowDetail(true);
-    setActiveTab('detail');
-    setSearchQuery(stock.name);
-    loadRealStockData(stock.code, stock.name, '1D');
+    if(!/^\d{6}$/.test(stock?.code))return;
+    if(stock.code===routeSymbol)return;
+    ++searchRequestRef.current;
+    setLoading(false);
+    onNavigateStock(stock.code);
   };
 
   const handleTimeframeChange = async (newTimeframe) => {
@@ -707,7 +743,7 @@ export default function App() {
   };
 
   return (
-    <div className={`public-home public-light-theme ${recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
+    <div className={`public-home public-light-theme ${!isStockRoute&&recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
         <div className="home-brand flex items-center gap-3">
           <div className="home-brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -782,11 +818,12 @@ export default function App() {
       </div>
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-        {activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
-        {activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
-        {activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
+        {isStockRoute&&<a href="/" className="home-secondary inline-flex items-center">메인으로</a>}
+        {!isStockRoute && activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
+        {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
           error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
-        {activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
+        {!isStockRoute && activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
         {!historyOpen && <>
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
@@ -825,12 +862,14 @@ export default function App() {
 
         </div>
 
+        {!isStockRoute&&<>
         <PaperAccess apiBase={API_BASE_URL} active={activeTab==='paper'} onOpen={()=>setActiveTab('paper')}>
           <PaperPanel apiBase={API_BASE_URL+'/paper'} />
         </PaperAccess>
         <ObservationPanel apiBase={API_BASE_URL} stocks={POPULAR_STOCKS} />
+        </>}
 
-        {!recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
+        {!isStockRoute && !recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
           <details className="home-expanded">
             <summary>후보 조건·가격·AI 해설 펼쳐보기</summary>
           <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
@@ -1197,7 +1236,7 @@ export default function App() {
                 )}
               </div>
             )}
-{recommendationData && !recommendationsCollapsed && (
+{!isStockRoute && recommendationData && !recommendationsCollapsed && (
   <div className="pt-4 text-center">
     <button
       type="button"
