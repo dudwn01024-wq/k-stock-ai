@@ -37,6 +37,7 @@ for(const code of codes)test('TEST_ONLY run preserves safe universe failure '+co
     blockedSymbol:'12345K',blockedMarket:'KOSPI',httpStatus:503});}}),run=await done(f);
   assert.equal(run.status,'FAILED');assert.equal(run.failureStage,'UNIVERSE_LOAD');assert.equal(run.failureReason,code);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code,universeRequests:4,officialTypeChecks:2,officialTypeRequests:0,
+    orderRetryAttempted:null,orderRetryCount:null,orderViolation:null,
     blockedSymbol:code.startsWith('TOP500_')?'12345K':null,blockedMarket:code.startsWith('TOP500_')?'KOSPI':null,
     httpStatus:code==='UNIVERSE_PROVIDER_HTTP_FAILED'?503:null});
   assert.equal(run.stats.universeCount,0);assert.equal(run.stats.fastCompleted,0);assert.equal(run.stats.deepCompleted,0);
@@ -48,7 +49,7 @@ test('TEST_ONLY unknown exception codes, malformed fields and absent counters re
   const f=fixture({loadUniverse:async()=>{throw problem('EXPANDED_'+privateText,{requestCount:'4',officialTypeChecks:-1,officialTypeRequests:NaN});}});
   const run=await done(f);assert.equal(run.failureReason,'EXPANDED_RUN_FAILED');safeLog(f,run);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code:'EXPANDED_RUN_FAILED',universeRequests:null,
-    officialTypeChecks:null,officialTypeRequests:null,blockedSymbol:null,blockedMarket:null,httpStatus:null});
+    officialTypeChecks:null,officialTypeRequests:null,orderRetryAttempted:null,orderRetryCount:null,orderViolation:null,blockedSymbol:null,blockedMarket:null,httpStatus:null});
   for(const httpStatus of [null,'503',0,600,NaN])assert.equal(expandedRunFailureDiagnostic({code:'UNIVERSE_PROVIDER_HTTP_FAILED',httpStatus},{stage:'UNIVERSE_LOAD'}).httpStatus,null);
   const invalid=expandedRunFailureDiagnostic({code:codes.at(-1),blockedSymbol:'<img/>',blockedMarket:'SECRET'},{});
   assert.equal(invalid.blockedSymbol,null);assert.equal(invalid.blockedMarket,null);assert.equal(invalid.stage,null);
@@ -102,7 +103,7 @@ test('TEST_ONLY later HTTP failure keeps cumulative requests and preceding offic
       const r=rows(market);r[0].itemCode='12345K';return {stocks:r,totalCount:100,hasNext:false};}});
   const f=fixture({loadUniverse:()=>universe.load()}),run=await done(f);assert.equal(requests,2);
   assert.deepEqual(run.failureDiagnostic,{stage:'UNIVERSE_LOAD',code:'UNIVERSE_PROVIDER_HTTP_FAILED',universeRequests:2,
-    officialTypeChecks:1,officialTypeRequests:0,blockedSymbol:null,blockedMarket:null,httpStatus:429});safeLog(f,run);
+    officialTypeChecks:1,officialTypeRequests:0,orderRetryAttempted:false,orderRetryCount:0,orderViolation:null,blockedSymbol:null,blockedMarket:null,httpStatus:429});safeLog(f,run);
 });
 test('TEST_ONLY FAST_SCREEN fatal error records its stage without attributing fast counters to universe',async()=>{
   const f=fixture({fastScreen:async stock=>({status:'READY',symbol:stock.symbol,requestCount:1,

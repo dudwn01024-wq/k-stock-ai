@@ -1,6 +1,7 @@
 'use strict';
 const {isNaverKrStockItemCode,requiresOfficialStockType}=require('./naverKrStockItemCode');
 const {createKrxStockSecurityTypeClassifier}=require('./krxStockSecurityType');
+const {safeUniverseOrderViolation}=require('./recommendationUniverseDiagnostics');
 
 const {createHash}=require('node:crypto');
 
@@ -9,6 +10,7 @@ const MARKETS=Object.freeze(['KOSPI','KOSDAQ']);
 const PAGE_SIZE=100;
 const TARGET_COUNT=500;
 const MAX_REQUESTS=10;
+const MAX_ORDER_RETRIES_PER_RUN=1;
 
 function failure(code,requestCount=0,diagnostic={}){
   const error=new Error(code);
@@ -21,6 +23,15 @@ function failure(code,requestCount=0,diagnostic={}){
   if(code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE'){
     if(isNaverKrStockItemCode(diagnostic?.blockedSymbol))error.blockedSymbol=diagnostic.blockedSymbol;
     if(MARKETS.includes(diagnostic?.blockedMarket))error.blockedMarket=diagnostic.blockedMarket;
+  }
+  if(Number.isInteger(diagnostic?.orderRetryCount)&&diagnostic.orderRetryCount>=0&&
+    diagnostic.orderRetryCount<=MAX_ORDER_RETRIES_PER_RUN){
+    error.orderRetryCount=diagnostic.orderRetryCount;
+    error.orderRetryAttempted=diagnostic.orderRetryCount>0;
+  }
+  if(code==='UNIVERSE_ORDER_INVALID'){
+    const violation=safeUniverseOrderViolation(diagnostic?.orderViolation);
+    if(violation)error.orderViolation=violation;
   }
   return error;
 }
@@ -100,57 +111,79 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     const typeClassifier=createKrxStockSecurityTypeClassifier({testOnly,
       ...(officialSecurityTypeRecords===undefined?{}:{records:officialSecurityTypeRecords})});
     const excludedSecurities=[];
-    const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,lastValue:Infinity,rows:[]}]));
+    const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,lastValue:Infinity,lastSymbol:null,rows:[]}]));
     const seen=new Set();
-    let requestCount=0,excludedCount=0;
+    let requestCount=0,excludedCount=0,orderRetryCount=0,orderRetryViolation=null;
     const read=async market=>{
       const entry=state[market],page=entry.page+1;
-      if(requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_REQUEST_LIMIT',requestCount);
-      requestCount++;
-      onRequest({market,page,pageSize:PAGE_SIZE,requestCount});
-      let result;
-      try{result=await readPage({market,page,pageSize:PAGE_SIZE});}
-      catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount,error);}
-      if(!result||!Array.isArray(result.stocks)||!Number.isInteger(result.totalCount)||
-        result.totalCount<0||typeof result.hasNext!=='boolean'||result.stocks.length>PAGE_SIZE||
-        result.stocks.length===0||result.hasNext!==(page*PAGE_SIZE<result.totalCount)||
-        (result.hasNext&&result.stocks.length!==PAGE_SIZE)||
-        (entry.totalCount!==null&&entry.totalCount!==result.totalCount))
-        throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',requestCount);
-      const fetchedAt=clock().toISOString();
-      let last=entry.lastValue;
-      for(const raw of result.stocks){
-        let item;
-        try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
-        if(seen.has(item.stock.symbol))throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount);
-        seen.add(item.stock.symbol);
-        if(item.stock.marketValue>last)throw failure('UNIVERSE_ORDER_INVALID',requestCount);
-        last=item.stock.marketValue;
-        if(requiresOfficialStockType(item.stock.symbol)){
-          const classification=typeClassifier.classify(item.stock);
-          Object.assign(item.stock,classification);
-          if(classification.securityType==='UNVERIFIED'){
-            const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount,{
-              blockedSymbol:item.stock.symbol,blockedMarket:item.stock.market});
-            error.officialTypeRequests=typeClassifier.requestCount();
-            error.officialTypeChecks=typeClassifier.checkCount();
-            throw error;
+      while(true){
+        try{
+          if(requestCount>=MAX_REQUESTS)throw failure('UNIVERSE_REQUEST_LIMIT',requestCount);
+          requestCount++;
+          onRequest({market,page,pageSize:PAGE_SIZE,requestCount});
+          let result;
+          try{result=await readPage({market,page,pageSize:PAGE_SIZE});}
+          catch(error){throw failure(error?.code??'UNIVERSE_PROVIDER_REQUEST_FAILED',requestCount,error);}
+          if(!result||!Array.isArray(result.stocks)||!Number.isInteger(result.totalCount)||
+            result.totalCount<0||typeof result.hasNext!=='boolean'||result.stocks.length>PAGE_SIZE||
+            result.stocks.length===0||result.hasNext!==(page*PAGE_SIZE<result.totalCount)||
+            (result.hasNext&&result.stocks.length!==PAGE_SIZE)||
+            (entry.totalCount!==null&&entry.totalCount!==result.totalCount))
+            throw failure('UNIVERSE_PROVIDER_RESPONSE_INVALID',requestCount);
+          const fetchedAt=clock().toISOString();
+          // Stage the whole page. A rejected response must never mutate universe rows,
+          // seen symbols, cutoff state or exclusions, or be mixed into its replacement.
+          const pageSeen=new Set(),pageRows=[],pageExcluded=[];
+          let last=entry.lastValue,previousSymbol=entry.lastSymbol,pageExcludedCount=0;
+          for(const raw of result.stocks){
+            let item;
+            try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
+            if(seen.has(item.stock.symbol)||pageSeen.has(item.stock.symbol))throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount);
+            pageSeen.add(item.stock.symbol);
+            if(item.stock.marketValue>last)throw failure('UNIVERSE_ORDER_INVALID',requestCount,{orderViolation:{
+              market,page,previousSymbol,previousMarketValue:last,currentSymbol:item.stock.symbol,currentMarketValue:item.stock.marketValue}});
+            last=item.stock.marketValue;
+            previousSymbol=item.stock.symbol;
+            if(requiresOfficialStockType(item.stock.symbol)){
+              const classification=typeClassifier.classify(item.stock);
+              Object.assign(item.stock,classification);
+              if(classification.securityType==='UNVERIFIED'){
+                const error=failure('TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE',requestCount,{
+                  blockedSymbol:item.stock.symbol,blockedMarket:item.stock.market});
+                error.officialTypeRequests=typeClassifier.requestCount();
+                error.officialTypeChecks=typeClassifier.checkCount();
+                throw error;
+              }
+              item.excluded=classification.securityType!=='COMMON';
+              item.exclusionReason=classification.securityType==='NON_COMMON'?
+                'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
+            }
+            if(item.excluded){
+              pageExcludedCount++;
+              if(item.stock.securityTypeEvidence)pageExcluded.push({symbol:item.stock.symbol,
+                market:item.stock.market,codeSyntax:item.stock.codeSyntax,securityType:item.stock.securityType,
+                exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
+            }else pageRows.push(item.stock);
           }
-          item.excluded=classification.securityType!=='COMMON';
-          item.exclusionReason=classification.securityType==='NON_COMMON'?
-            'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
+          for(const symbol of pageSeen)seen.add(symbol);
+          entry.rows.push(...pageRows);
+          excludedSecurities.push(...pageExcluded);
+          excludedCount+=pageExcludedCount;
+          entry.lastValue=last;
+          entry.lastSymbol=previousSymbol;
+          entry.page=page;
+          entry.totalCount=result.totalCount;
+          entry.done=!result.hasNext;
+          return;
+        }catch(error){
+          // Only order mismatches qualify. Budget is global and the same page must
+          // pass every original validation again; no sorting or tolerance is added.
+          if(error?.code!=='UNIVERSE_ORDER_INVALID'||orderRetryCount>=MAX_ORDER_RETRIES_PER_RUN||
+            requestCount>=MAX_REQUESTS)throw error;
+          orderRetryViolation=safeUniverseOrderViolation(error.orderViolation);
+          orderRetryCount++;
         }
-        if(item.excluded){
-          excludedCount++;
-          if(item.stock.securityTypeEvidence)excludedSecurities.push({symbol:item.stock.symbol,
-            market:item.stock.market,codeSyntax:item.stock.codeSyntax,securityType:item.stock.securityType,
-            exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
-        }else entry.rows.push(item.stock);
       }
-      entry.lastValue=last;
-      entry.page=page;
-      entry.totalCount=result.totalCount;
-      entry.done=!result.hasNext;
     };
     try{
     // Inspect each market before comparing its next unseen page with the global cutoff.
@@ -165,6 +198,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
         const stocks=all.slice(0,TARGET_COUNT).map((stock,index)=>({...stock,marketValueRank:index+1}));
         const dates=[...new Set(stocks.map(stock=>stock.sourceBusinessDate))];
         return {stocks,count:stocks.length,provider:PROVIDER,requestCount,excludedCount,excludedSecurities,testOnly,
+          ...(orderRetryCount?{orderRetryAttempted:true,orderRetryCount,orderViolation:orderRetryViolation}:{}),
           officialTypeRequests:typeClassifier.requestCount(),officialTypeChecks:typeClassifier.checkCount(),
           sourceBusinessDate:dates.length===1?dates[0]:null,
           fetchedAt:clock().toISOString(),snapshotConsistency:'NOT_PROVEN',
@@ -180,10 +214,11 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       // Copy only public identifiers/status and measured counters; discard raw exceptions.
       throw failure(error?.code,requestCount,{
         officialTypeChecks:typeClassifier.checkCount(),officialTypeRequests:typeClassifier.requestCount(),
-        blockedSymbol:error?.blockedSymbol,blockedMarket:error?.blockedMarket,httpStatus:error?.httpStatus});
+        blockedSymbol:error?.blockedSymbol,blockedMarket:error?.blockedMarket,httpStatus:error?.httpStatus,
+        orderRetryCount,orderViolation:error?.orderViolation});
     }
   }
   return {load};
 }
 
-module.exports={createRecommendationUniverse,fetchNaverUniversePage,PROVIDER,PAGE_SIZE,TARGET_COUNT,MAX_REQUESTS};
+module.exports={createRecommendationUniverse,fetchNaverUniversePage,PROVIDER,PAGE_SIZE,TARGET_COUNT,MAX_REQUESTS,MAX_ORDER_RETRIES_PER_RUN};

@@ -41,7 +41,9 @@ export function expandedRunFailureMessage(run){
   const symbol=run?.failureDiagnostic?.blockedSymbol,market=run?.failureDiagnostic?.blockedMarket;
   const blocked=code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE';
   return {
-    message:failureMessages.get(code)||'분석을 완료하지 못했습니다. 새 분석은 자동으로 시작하지 않습니다.',
+    message:code==='UNIVERSE_ORDER_INVALID'&&run?.failureDiagnostic?.orderRetryAttempted===true&&run.failureDiagnostic.orderRetryCount===1
+      ?'시가총액 순서를 재확인했지만 일관된 목록을 확인하지 못했습니다.'
+      :failureMessages.get(code)||'분석을 완료하지 못했습니다. 새 분석은 자동으로 시작하지 않습니다.',
     stageLabel:failureStages.get(run?.failureStage)||'미확인',
     blockedSymbol:blocked&&typeof symbol==='string'&&symbol.length===6&&
       /^(?:\d{6}|\d{4}[A-HJ-NP-TV-Z]\d|\d{5}[A-Z])$/.test(symbol)?symbol:null,

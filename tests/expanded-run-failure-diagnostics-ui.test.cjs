@@ -58,3 +58,11 @@ test('TEST_ONLY previous saved results are explicitly labeled and remain in the 
   const completed={...saved,status:'COMPLETED',recommendations:saved.all};
   assert.doesNotMatch(render(completed,saved).html,/아래 목록은 이전에 저장된 분석 결과|종목 목록의 필수 정보/);
 });
+
+test('TEST_ONLY exhausted order retry has a clear message without exposing market values or raw diagnostics',()=>{
+  const r=failed('UNIVERSE_ORDER_INVALID');r.failureDiagnostic={orderRetryAttempted:true,orderRetryCount:1,
+    orderViolation:{previousMarketValue:123456789,currentMarketValue:987654321},rawResponse:privateText};
+  const {html}=render(r);assert.match(html,/시가총액 순서를 재확인했지만 일관된 목록을 확인하지 못했습니다/);
+  assert.doesNotMatch(html,/123456789|987654321|TEST_ONLY_PRIVATE|rawResponse/);
+  r.failureDiagnostic.orderRetryCount=0;assert.match(render(r).html,/종목 목록의 시가총액 순서를 확인하지 못했습니다/);
+});
