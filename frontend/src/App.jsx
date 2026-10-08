@@ -8,6 +8,7 @@ import HoldingGuidance from './HoldingGuidance.jsx';
 import CandlestickChart from './CandlestickChart.jsx';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import {aiAnalysisError} from './utils/aiAnalysisError.js';
+import { strategyExplanation } from './utils/strategyExplanation.js';
 import './public-home.css';
 import { toNullableNumber, hasNumber } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -1376,7 +1377,7 @@ export default function App() {
 
     {strategyData?.finalAssessment?.reason && (
       <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-        {strategyData.finalAssessment.reason}
+        {strategyExplanation(strategyData.finalAssessment.reason)}
       </p>
     )}
   </div>
@@ -1572,7 +1573,7 @@ export default function App() {
 
     {strategyData?.technicalAssessment?.conditions?.trend?.detail && (
       <p className="text-xs text-slate-400 bg-slate-950/40 border border-slate-800 rounded-lg p-3">
-        {strategyData.technicalAssessment.conditions.trend.detail}
+        {strategyExplanation(strategyData.technicalAssessment.conditions.trend.detail)}
       </p>
     )}
   </div>
@@ -1648,7 +1649,7 @@ export default function App() {
             RSI 해석
           </span>
           <p className="text-xs text-slate-300 leading-relaxed">
-            {strategyData.technicalAssessment.conditions.rsi.detail}
+            {strategyExplanation(strategyData.technicalAssessment.conditions.rsi.detail)}
           </p>
         </div>
       )}
@@ -1659,7 +1660,7 @@ export default function App() {
             MACD 해석
           </span>
           <p className="text-xs text-slate-300 leading-relaxed">
-            {strategyData.technicalAssessment.conditions.macd.detail}
+            {strategyExplanation(strategyData.technicalAssessment.conditions.macd.detail)}
           </p>
         </div>
       )}
@@ -1752,7 +1753,7 @@ export default function App() {
             : `${toNullableNumber(strategyData.volumeRatio).toFixed(2)}배`}
         </p>
         <p className="text-[11px] text-slate-500 mt-1">
-          {strategyData?.marketAssessment?.conditions?.volume?.detail ||
+          {strategyExplanation(strategyData?.marketAssessment?.conditions?.volume?.detail) ||
             '데이터 없음'}
         </p>
         {strategyData?.volumeConditionStatus === 'PENDING' && (

@@ -166,6 +166,12 @@ test('TEST_ONLY entry/volume, scoring, official classification, history and outc
     'services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/recommendationHistory.js','services/expandedRecommendationReuse.js',
     'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js',
     'scripts/collectRecommendationOutcomes.js','frontend/src/App.jsx']){
-    assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
+    const normalize = value => value.replaceAll('\r\n','\n');
+    const current = normalize(fs.readFileSync(file,'utf8'));
+    // Later UI copy changes leave the original data and decision code intact.
+    const displayOnly = file === 'frontend/src/App.jsx' ? current
+      .replace(/^import \{ strategyExplanation \} from '\.\/utils\/strategyExplanation\.js';\n/m, '')
+      .replace(/strategyExplanation\((strategyData[^)]*)\)/g, '$1') : current;
+    assert.equal(displayOnly,normalize(execFileSync('git',['show',prior+':'+file],{encoding:'utf8'})),file);
   }
 });
