@@ -16,6 +16,7 @@ function load(file,react=React){
         if(name==='react')return react;if(name.endsWith('.css'))return {};
         if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});
         if(name==='./PublicInformation.jsx')return load(path.resolve(path.dirname(file),name),React);
+  if(name.startsWith('./components/'))return load(path.resolve(path.dirname(file),name),React);
         if(name.endsWith('.jsx'))return {__esModule:true,default:()=>null};
         assert.ok(name.startsWith('.'),'TEST_ONLY_NO_PROVIDER_IMPORT');
         return load(path.resolve(path.dirname(file),name),react);

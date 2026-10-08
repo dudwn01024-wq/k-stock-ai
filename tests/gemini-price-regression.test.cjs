@@ -85,7 +85,8 @@ test('TEST_ONLY all changed production code stays inside exact transport/display
  const files=['server.js','frontend/src/App.jsx','frontend/src/CandidateOverview.jsx','frontend/src/CandlestickChart.jsx','frontend/src/HoldingGuidance.jsx','frontend/src/ObservationPanel.jsx','frontend/src/RecommendationHistory.jsx','frontend/src/RecommendationOutcomes.jsx','frontend/src/utils/numbers.js','frontend/src/utils/aiAnalysisError.js','frontend/src/utils/strategyExplanation.js','frontend/src/ExpandedCandidateCard.jsx'];
  for(const file of files)assert.equal(strip(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
  require('./helpers/assert-router-package-boundary.cjs')(base);
- assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services','frontend/src/ExpandedRecommendation.jsx','frontend/src/CurrentAnalysisSummary.jsx','frontend/src/light-theme.css','frontend/src/PublicInformation.jsx','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js','package.json','render.yaml'],{encoding:'utf8'}),'');
+ require('./helpers/public-information-boundary.cjs')(base);
+ assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services','frontend/src/ExpandedRecommendation.jsx','frontend/src/CurrentAnalysisSummary.jsx','frontend/src/light-theme.css','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js','package.json','render.yaml'],{encoding:'utf8'}),'');
 });
 module.exports={uiHarness};
 
