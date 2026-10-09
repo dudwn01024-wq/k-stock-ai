@@ -6,6 +6,7 @@ export const publicPageLinks = [
   {path:'/data-sources',label:'데이터 출처'},
   {path:'/investment-notice',label:'투자정보 이용안내'},
   {path:'/privacy',label:'개인정보처리방침'},
+  {path:'/privacy#contact',label:'문의 안내'},
 ];
 
 export default function PublicPageNavigation({currentPath}){

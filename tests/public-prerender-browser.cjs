@@ -106,7 +106,7 @@ async function loadRepeatedly(page,symbol){
   for(const width of [1440,390]){
    await page.setViewportSize({width,height:1000});
    for(const route of paths){await assertGuide(page,origin+route,api.length);cases.push({route,width,result:'PASS',initialApiCalls:0,hydration:'retained'});}
-   for(const route of ['/stocks/005930','/about','/analysis-method']){
+   for(const route of ['/stocks/005930','/about','/analysis-method','/privacy']){
     await assertGuide(page,origin+route,api.length);
     await page.screenshot({path:path.join(output,route.slice(1).replaceAll('/','-')+'-'+width+'.png'),fullPage:true});
    }
@@ -135,6 +135,13 @@ async function loadRepeatedly(page,symbol){
   await page.goForward({waitUntil:'networkidle'});assert.equal(new URL(page.url()).pathname,'/analysis-method');
   assert.equal(api.length,count);
   await page.locator('.public-page-navigation a[href="/privacy"]').click();await page.waitForURL('**/privacy');
+  await page.locator('.public-page-navigation a[href="/privacy#contact"]').click();await page.waitForURL('**/privacy#contact');
+  await page.waitForLoadState('networkidle');
+  assert.equal(await page.locator('#contact').isVisible(),true);
+  assert.ok((await page.locator('article').innerText()).includes('서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다.'));
+  assert.ok((await page.locator('article').innerText()).includes('개인정보 관련 문의 이메일은 준비 후 안내할 예정입니다.'));
+  await page.reload({waitUntil:'networkidle'});assert.equal(await page.locator('#contact').isVisible(),true);assert.equal(api.length,count);
+  cases.push({case:'contact anchor, confirmed display name/pending email, refresh with fragment',result:'PASS',initialApiCalls:0});
   await page.locator('.public-page-home').click();await page.waitForURL(origin+'/');await page.waitForLoadState('networkidle');
   assert.equal((await page.locator('h1').count())>0,true);
   await page.getByRole('button',{name:/SK하이닉스/}).click();await page.waitForURL('**/stocks/000660');

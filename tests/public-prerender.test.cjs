@@ -70,9 +70,10 @@ test('TEST_ONLY build, safety and fallback invariants: no env, no provider impor
 });
 
 test('TEST_ONLY all financial, security, policy, router, styling and dependency files unchanged from approved HEAD',()=>{
+ require('./helpers/public-contact-boundary.cjs')();
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','pnpm-lock.yaml',
   'frontend/package.json','frontend/package-lock.json','frontend/public','frontend/index.html','frontend/vite.config.js','frontend/src',
-  ':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/main.jsx'],{encoding:'utf8'}),'');
+  ':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/main.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/components/PublicPageNavigation.jsx'],{encoding:'utf8'}),'');
 });
 
 
