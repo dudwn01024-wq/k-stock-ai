@@ -1,6 +1,6 @@
 import React from 'react';
 import PublicPageLayout from '../components/PublicPageLayout.jsx';
-import {InvestmentNoticeContent,PrivacyContent,AdvertisingNoticeContent} from '../components/PublicPolicyContent.jsx';
+import {InvestmentNoticeContent,PrivacyContent,AdvertisingNoticeContent,PublicContactContent} from '../components/PublicPolicyContent.jsx';
 
 export function AboutPage(){
   return <PublicPageLayout title="K-Stock AI 소개" currentPath="/about">
@@ -12,6 +12,8 @@ export function AboutPage(){
     <p>AI 해설은 사용자가 요청할 때 기존 데이터와 서버의 계산 결과를 설명하는 보조 기능입니다. AI가 가격이나 분석 조건 점수, 판정을 대신 정하지 않습니다. 원 데이터와 자료 부족 표시를 함께 확인해야 합니다.</p>
     <h2>투자 결정은 이용자가 직접 합니다</h2>
     <p>공개 서비스는 실제 주문을 대신 실행하지 않습니다. 분석은 미래 가격이나 수익을 보장하지 않으며, 주식 투자는 원금 손실 위험이 있습니다. 최종 투자 결정과 주문은 이용자가 직접 판단하여 진행합니다.</p>
+    <h2>운영 및 문의</h2>
+    <p><PublicContactContent/></p>
   </PublicPageLayout>;
 }
 

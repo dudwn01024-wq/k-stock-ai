@@ -1,10 +1,24 @@
-import {renderDefaultHead,renderRobots,renderSitemap} from './src/seo/publicMetadata.js';
+import {PUBLIC_PAGE_METADATA,renderDefaultHead,renderRobots,renderSitemap} from './src/seo/publicMetadata.js';
+import {POPULAR_STOCKS} from './src/stockCatalog.js';
+
+const guidePaths=new Set([...Object.keys(PUBLIC_PAGE_METADATA),...POPULAR_STOCKS.map(({code})=>'/stocks/'+code)]);
+const guideAliases=new Set([...guidePaths].filter(path=>path!=='/').flatMap(path=>[path+'.html',path+'/index.html']));
 
 export function publicSearchMetadata(){
   let root;
   return {
     name:'public-search-metadata',
     configResolved(config){root=config.root;},
+    configurePreviewServer(server){
+      // Match the documented Render exact-route rewrites plus safe SPA fallback.
+      server.middlewares.use((req,res,next)=>{
+        const path=new URL(req.url,'http://preview.local').pathname.replace(/\/+$/,'')||'/';
+        if(!['GET','HEAD'].includes(req.method)||guidePaths.has(path)||guideAliases.has(path)||
+          path.startsWith('/assets/')||path.startsWith('/api/')||
+          ['/index.html','/robots.txt','/sitemap.xml','/favicon.ico','/spa-fallback.html'].includes(path))return next();
+        req.url='/spa-fallback.html';next();
+      });
+    },
     transformIndexHtml(html){
       if(!html.includes('<!-- PUBLIC_PAGE_META -->'))throw Error('PUBLIC_PAGE_META_MARKER_MISSING');
       return html.replace('<!-- PUBLIC_PAGE_META -->',renderDefaultHead());

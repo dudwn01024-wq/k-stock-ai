@@ -17,7 +17,7 @@ module.exports=base=>{
  const current=load(file),render=(Component,props)=>renderToStaticMarkup(React.createElement(Component,props));
  require('./public-contact-boundary.cjs')();
  const html=render(current.default).replace(/<nav class="public-page-navigation"[^>]*>[\s\S]*?<\/nav>/g,'');
- const normalized=html.replace('<h3 id="contact">','<h3>').replace('서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다. 개인정보 관련 문의 이메일은 준비 후 안내할 예정입니다.','운영자 표시명과 개인정보 전용 문의창구는 확인 후 안내할 예정입니다.');
+ const normalized=require('./public-contact-boundary.cjs').restoreHtml(html).replace('<h3 id="contact">','<h3>').replace('서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다. 개인정보 관련 문의 이메일은 준비 후 안내할 예정입니다.','운영자 표시명과 개인정보 전용 문의창구는 확인 후 안내할 예정입니다.');
  assert.equal(normalized,render(original.default),'existing policy text/panels unchanged except confirmed operator/pending contact and navigation');
  for(const context of ['public','strategy','ai'])assert.equal(render(current.InvestmentNotice,{context}),render(original.InvestmentNotice,{context}));
 };

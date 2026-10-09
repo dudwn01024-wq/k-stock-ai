@@ -88,11 +88,12 @@ async function loadRepeatedly(page,symbol){
  app.use('/api',(req,res)=>{serverApiCalls++;res.status(403).json({error:'TEST_ONLY_API_NETWORK_FORBIDDEN'});});
  app.use((req,res,next)=>{
   const clean=req.path.replace(/\/+$/,'');
-  if(paths.includes(clean))return res.sendFile(path.join(dist,'.'+clean,'index.html'));
+  if(req.path==='/')return res.sendFile(path.join(dist,'index.html'));
+  if(paths.includes(clean))return res.sendFile(path.join(dist,'.'+clean+'.html'));
   next();
  });
  app.use(express.static(dist,{index:false,redirect:false}));
- app.use((req,res)=>res.sendFile(path.join(dist,'index.html')));
+ app.use((req,res)=>res.sendFile(path.join(dist,'spa-fallback.html')));
  const server=await new Promise(resolve=>{const handle=app.listen(0,'127.0.0.1',()=>resolve(handle));});
  const origin='http://127.0.0.1:'+server.address().port;
  let browser,dev;
@@ -111,10 +112,23 @@ async function loadRepeatedly(page,symbol){
     await page.screenshot({path:path.join(output,route.slice(1).replaceAll('/','-')+'-'+width+'.png'),fullPage:true});
    }
   }
-  for(const route of ['/stocks/123456','/stocks/abc']){
+  for(const width of [1440,390]){
+   await page.setViewportSize({width,height:1000});const before=api.length;
+   await page.goto(origin+'/',{waitUntil:'networkidle'});await page.locator('.public-home').waitFor();
+   assert.equal(await page.locator('#stock-search').isVisible(),true);
+   const state=await page.evaluate(()=>({canonical:document.querySelector('link[rel="canonical"]')?.href,robots:document.querySelector('meta[name="robots"]')?.content,
+    retained:window.__testInitialRoot===document.querySelector('#root').firstElementChild,staticHome:document.querySelector('#root').dataset.staticHome,
+    overflow:document.documentElement.scrollWidth>innerWidth,metadata:['title','meta[name="description"]','meta[name="robots"]','link[rel="canonical"]'].map(x=>document.querySelectorAll(x).length)}));
+   assert.equal(state.canonical,'https://k-stock-ai-1.onrender.com/');assert.equal(state.robots,'index,follow');assert.deepEqual(state.metadata,[1,1,1,1]);
+   assert.equal(state.retained,false,'home deliberately preserves existing createRoot CSR initialization');assert.equal(state.staticHome,'true');assert.equal(state.overflow,false);
+   assert.deepEqual(api.slice(before).map(x=>x.path).sort(),['/api/runtime-config','/api/runtime-config','/api/stock/recommendation-history','/api/stock/recommendation-mode'].sort());
+   await page.screenshot({path:path.join(output,'home-client-'+width+'.png'),fullPage:true});
+   cases.push({route:'/',width,result:'PASS',initialization:'existing CSR',mockStartupCalls:4,realApiCalls:0});
+  }
+  for(const route of ['/stocks/123456','/stocks/999999','/stocks/abc','/stocks/abc.js']){
    await assertGuide(page,origin+route,api.length,{generated:false});
    const text=await page.locator('main').innerText();
-   assert.ok(text.includes(route.endsWith('abc')?'올바른 6자리 종목코드가 아닙니다.':'실제 종목 존재 여부와 이름은 자료를 조회하기 전까지 확인되지 않습니다.'));
+   assert.ok(text.includes(/^\/stocks\/\d{6}$/.test(route)?'실제 종목 존재 여부와 이름은 자료를 조회하기 전까지 확인되지 않습니다.':'올바른 6자리 종목코드가 아닙니다.'));
    cases.push({route,result:'PASS',initialApiCalls:0});
   }
   await assertGuide(page,origin+'/stocks/005930?testOnly=1#public-page-content',api.length);
@@ -139,9 +153,9 @@ async function loadRepeatedly(page,symbol){
   await page.waitForLoadState('networkidle');
   assert.equal(await page.locator('#contact').isVisible(),true);
   assert.ok((await page.locator('article').innerText()).includes('서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다.'));
-  assert.ok((await page.locator('article').innerText()).includes('개인정보 관련 문의 이메일은 준비 후 안내할 예정입니다.'));
+  assert.equal(await page.locator('article a[href="mailto:kstockaiunyeongja@gmail.com"]').count(),1);
   await page.reload({waitUntil:'networkidle'});assert.equal(await page.locator('#contact').isVisible(),true);assert.equal(api.length,count);
-  cases.push({case:'contact anchor, confirmed display name/pending email, refresh with fragment',result:'PASS',initialApiCalls:0});
+  cases.push({case:'contact anchor, confirmed display name/public mailto, refresh with fragment',result:'PASS',initialApiCalls:0});
   await page.locator('.public-page-home').click();await page.waitForURL(origin+'/');await page.waitForLoadState('networkidle');
   assert.equal((await page.locator('h1').count())>0,true);
   await page.getByRole('button',{name:/SK하이닉스/}).click();await page.waitForURL('**/stocks/000660');
@@ -153,6 +167,18 @@ async function loadRepeatedly(page,symbol){
   await protect(noJS,origin);const staticPage=await noJS.newPage();
   for(const route of paths){const before=api.length;await staticPage.goto(origin+route,{waitUntil:'networkidle'});
    assert.ok(await staticPage.locator('.public-page h1').isVisible());assert.equal(api.length,before);}
+  await staticPage.goto(origin+'/',{waitUntil:'networkidle'});assert.ok(await staticPage.locator('.public-page h1').isVisible());
+  assert.equal(await staticPage.locator('meta[name="robots"]').getAttribute('content'),'index,follow');
+  assert.equal(await staticPage.locator('link[rel="canonical"]').getAttribute('href'),'https://k-stock-ai-1.onrender.com/');
+  assert.ok((await staticPage.locator('main').innerText()).includes('원금 손실 위험'));
+  await staticPage.screenshot({path:path.join(output,'home-static-390.png'),fullPage:true});
+  cases.push({case:'raw home body/risks/index/canonical with JavaScript disabled',result:'PASS',initialApiCalls:0});
+  for(const route of ['/stocks/999999','/stocks/abc','/stocks/abc.js']){
+   const before=api.length;await staticPage.goto(origin+route,{waitUntil:'networkidle'});
+   assert.equal(await staticPage.locator('meta[name="robots"]').getAttribute('content'),'noindex,follow');
+   assert.equal(await staticPage.locator('link[rel="canonical"]').count(),0);assert.equal(await staticPage.locator('h1').count(),0);assert.equal(api.length,before);
+  }
+  cases.push({case:'unknown/invalid raw fallback noindex, no false home canonical with JavaScript disabled',result:'PASS',initialApiCalls:0});
   await noJS.close();cases.push({case:'all 12 routes with JavaScript disabled',result:'PASS',initialApiCalls:0});
   // Actual development StrictMode effect replay, still with every API mocked.
   const {createServer}=await import(pathToFileURL(require.resolve('../frontend/node_modules/vite/dist/node/index.js')).href);

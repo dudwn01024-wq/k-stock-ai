@@ -83,7 +83,7 @@ test('TEST_ONLY failed-run diagnostic and prior-results warning remain visible',
 });
 test('TEST_ONLY holder remains locked, confirmed operator/pending contact is shown and no token/password storage is added',()=>{
  const html=renderPage();for(const text of ['비공개 참고 기능입니다.','허용된 사용자만 이용할 수 있습니다.','비밀번호 입력','잠금 해제',
-  '투자정보 이용안내','개인정보처리방침','광고 및 쿠키 안내','서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다. 개인정보 관련 문의 이메일은 준비 후 안내할 예정입니다.'])assert.ok(html.includes(text),text);
+  '투자정보 이용안내','개인정보처리방침','광고 및 쿠키 안내','서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다. 개인정보 및 서비스 문의:'])assert.ok(html.includes(text),text);
  assert.doesNotMatch(html,/평균매수가 \(원\)|현재 손익률|보유 유지 참고/);
 });
 test('TEST_ONLY request/state/calculation source and every handler are unchanged from latest main',()=>{

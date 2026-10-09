@@ -1,7 +1,12 @@
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,dirname} from 'node:path';
 import {createServer} from 'vite';
-import {escapeHtml,renderDefaultHead} from './src/seo/publicMetadata.js';
+import {escapeHtml,getPageMeta,renderDefaultHead} from './src/seo/publicMetadata.js';
+
+const renderHead=meta=>'<title>'+escapeHtml(meta.title)+'</title>\n    '+
+  '<meta name="description" content="'+escapeHtml(meta.description)+'" />\n    '+
+  '<meta name="robots" content="'+meta.robots+'" />'+
+  (meta.canonical?'\n    <link rel="canonical" href="'+escapeHtml(meta.canonical)+'" />':'');
 
 export async function writePublicGuides(root,outDir,template){
   // A middleware-only SSR loader: no listener, proxy, env files or analysis App.
@@ -18,16 +23,17 @@ export async function writePublicGuides(root,outDir,template){
     const {renderPublicGuides}=await server.ssrLoadModule('/prerender.jsx');
     if(!template.includes(renderDefaultHead())||!template.includes('<div id="root"></div>'))
       throw Error('PRERENDER_TEMPLATE_MARKER_MISSING');
-    for(const {path,meta,body} of renderPublicGuides()){
-      const head='<title>'+escapeHtml(meta.title)+'</title>\n    '+
-        '<meta name="description" content="'+escapeHtml(meta.description)+'" />\n    '+
-        '<meta name="robots" content="'+meta.robots+'" />\n    '+
-        '<link rel="canonical" href="'+escapeHtml(meta.canonical)+'" />';
-      const html=template.replace(renderDefaultHead(),head).replace('<div id="root"></div>',
-        '<div id="root" data-prerendered="'+escapeHtml(path)+'">'+body+'</div>');
+    // Unknown routes must never inherit the indexable home body/canonical.
+    await writeFile(resolve(outDir,'spa-fallback.html'),template.replace(renderDefaultHead(),
+      renderHead({...getPageMeta('/'),robots:'noindex,follow',canonical:null})),'utf8');
+    for(const {path,meta,body,hydrate=true} of renderPublicGuides()){
+      const marker=hydrate?' data-prerendered="'+escapeHtml(path)+'"':' data-static-home="true"';
+      const html=template.replace(renderDefaultHead(),renderHead(meta)).replace('<div id="root"></div>',
+        '<div id="root"'+marker+'>'+body+'</div>');
       // Vite resolves /guide via guide.html; directory hosts use guide/index.html.
       // Both are generated from the same canonical route and identical markup.
-      for(const target of [resolve(outDir,'.'+path+'.html'),resolve(outDir,'.'+path,'index.html')]){
+      const targets=path==='/'?[resolve(outDir,'index.html')]:[resolve(outDir,'.'+path+'.html'),resolve(outDir,'.'+path,'index.html')];
+      for(const target of targets){
         await mkdir(dirname(target),{recursive:true});
         await writeFile(target,html,'utf8');
       }

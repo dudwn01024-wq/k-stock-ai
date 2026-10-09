@@ -20,16 +20,16 @@ const meta=load(require.resolve('../frontend/src/seo/publicMetadata.js'));
 const guides=load(require.resolve('../frontend/prerender.jsx')).renderPublicGuides();
 const stocks=load(require.resolve('../frontend/src/stockCatalog.js')).POPULAR_STOCKS;
 
-test('TEST_ONLY prerender covers only five public guides and seven existing stocks, never home analysis',()=>{
+test('TEST_ONLY prerender covers static home, five public guides and seven existing stocks, never analysis App',()=>{
  assert.deepEqual(Array.from(guides,x=>x.path),[
-  '/about','/analysis-method','/data-sources','/investment-notice','/privacy',...Array.from(stocks,x=>'/stocks/'+x.code)]);
- assert.equal(guides.length,12);
+  '/','/about','/analysis-method','/data-sources','/investment-notice','/privacy',...Array.from(stocks,x=>'/stocks/'+x.code)]);
+ assert.equal(guides.length,13);
  for(const guide of guides){assert.match(guide.body,/<main[^>]*>[\s\S]*<article/);assert.equal((guide.body.match(/<h1>/g)||[]).length,1);}
 });
 for(const guide of guides)test('TEST_ONLY built initial HTML contains exact shared body and unique route metadata: '+guide.path,()=>{
- const html=fs.readFileSync('frontend/dist'+guide.path+'/index.html','utf8');
- assert.equal(fs.readFileSync('frontend/dist'+guide.path+'.html','utf8'),html,'identical pretty-URL aliases');
- assert.ok(html.includes('data-prerendered="'+guide.path+'"'));assert.ok(html.includes(guide.body));
+ const html=fs.readFileSync(guide.path==='/'?'frontend/dist/index.html':'frontend/dist'+guide.path+'/index.html','utf8');
+ if(guide.path!=='/')assert.equal(fs.readFileSync('frontend/dist'+guide.path+'.html','utf8'),html,'identical pretty-URL aliases');
+ assert.ok(html.includes(guide.path==='/'?'data-static-home="true"':'data-prerendered="'+guide.path+'"'));assert.ok(html.includes(guide.body));
  assert.ok(html.includes('<title>'+meta.escapeHtml(guide.meta.title)+'</title>'));
  assert.ok(html.includes('name="description" content="'+meta.escapeHtml(guide.meta.description)+'"'));
  assert.ok(html.includes('rel="canonical" href="'+guide.meta.canonical+'"'));
@@ -64,7 +64,7 @@ test('TEST_ONLY build, safety and fallback invariants: no env, no provider impor
  const builder=fs.readFileSync('frontend/prerender-build.js','utf8');
  assert.match(builder,/configFile:false,envDir:false/);assert.match(builder,/middlewareMode:true,watch:null,ws:false/);
  assert.match(builder,/PRERENDER_ANALYSIS_IMPORT_FORBIDDEN/);assert.match(builder,/finally\{await server.close\(\);\}/);
- const fallback=fs.readFileSync('frontend/dist/index.html','utf8');assert.ok(fallback.includes('<div id="root"></div>'));assert.doesNotMatch(fallback,/data-prerendered|rel="canonical"/);
+ const fallback=fs.readFileSync('frontend/dist/spa-fallback.html','utf8');assert.ok(fallback.includes('<div id="root"></div>'));assert.doesNotMatch(fallback,/data-prerendered|rel="canonical"/);
  for(const file of ['robots.txt','sitemap.xml'])assert.equal(fs.readFileSync('frontend/dist/'+file,'utf8'),fs.readFileSync('frontend/public/'+file,'utf8').replaceAll('\r\n','\n'));
  assert.equal((fs.readFileSync('frontend/dist/sitemap.xml','utf8').match(/<loc>/g)||[]).length,6);
 });
@@ -73,22 +73,23 @@ test('TEST_ONLY all financial, security, policy, router, styling and dependency 
  require('./helpers/public-contact-boundary.cjs')();
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','pnpm-lock.yaml',
   'frontend/package.json','frontend/package-lock.json','frontend/public','frontend/index.html','frontend/vite.config.js','frontend/src',
-  ':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/main.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/components/PublicPageNavigation.jsx'],{encoding:'utf8'}),'');
+  ':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/main.jsx',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/pages/PublicPages.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/components/PublicPageNavigation.jsx'],{encoding:'utf8'}),'');
 });
 
 
 test('TEST_ONLY actual Vite preview serves all generated route files before SPA fallback with zero API requests',async()=>{
  const {preview}=await import(require('node:url').pathToFileURL(front.resolve('vite')).href);
- const server=await preview({root:path.resolve('frontend'),configFile:false,envDir:false,
+ const {publicSearchMetadata}=await import(require('node:url').pathToFileURL(path.resolve('frontend/seo-build.js')).href);
+ const server=await preview({root:path.resolve('frontend'),configFile:false,envDir:false,plugins:[publicSearchMetadata()],
   preview:{host:'127.0.0.1',port:0,strictPort:true,proxy:{}}});
  const origin='http://127.0.0.1:'+server.httpServer.address().port;
  const api=[];server.httpServer.on('request',req=>{if(req.url.startsWith('/api/'))api.push(req.url);});
  try{
   for(const {path:route,body,meta:head} of guides){
-   for(const suffix of ['', '/?testOnly=1']){
+   for(const suffix of route==='/'?['','?testOnly=1']:['','/?testOnly=1']){
     const response=await fetch(origin+route+suffix);assert.equal(response.status,200);
     const html=await response.text();assert.ok(html.includes(body),route+suffix);
-    assert.ok(html.includes('data-prerendered="'+route+'"'));
+    assert.ok(html.includes(route==='/'?'data-static-home="true"':'data-prerendered="'+route+'"'));
     assert.ok(html.includes('rel="canonical" href="'+head.canonical+'"'));
    }
   }
