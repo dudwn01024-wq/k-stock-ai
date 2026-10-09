@@ -18,12 +18,12 @@ const expected=[
  ['/investment-notice','투자정보 이용안내 | K-Stock AI'],['/privacy','개인정보처리방침 | K-Stock AI']
 ];
 const one=(doc,selector)=>{const nodes=doc.head.querySelectorAll(selector);assert.equal(nodes.length,1);return nodes[0];};
-for(const [route,title] of expected)test('TEST_ONLY public page title, description, canonical and index policy: '+route,()=>{
+for(const [route,title] of expected)test('TEST_ONLY public page title, description, canonical and site noindex policy: '+route,()=>{
  const doc=testDocument(),value=meta.getPageMeta(route);applyPageMeta(doc,value);
  assert.equal(doc.title,title);assert.equal(one(doc,'link[rel="canonical"]').getAttribute('href'),meta.PUBLIC_SITE_URL+route);
  assert.equal(one(doc,'meta[name="description"]').getAttribute('content'),value.description);
  assert.ok(value.description.length>30);assert.doesNotMatch(value.description,/수익 보장|정확한 주가 예측|최고의 종목|성공률/);
- assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'index,follow');
+ assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');
 });
 test('TEST_ONLY /about -> /analysis-method replaces all head values and removes duplicates',()=>{
  const doc=testDocument();for(const [tag,key,value] of [['meta','name','description'],['meta','name','robots'],['link','rel','canonical']]){
@@ -41,7 +41,7 @@ test('TEST_ONLY stock metadata retains successful stock name and is noindex,foll
  assert.equal(doc.title,'삼성전자 주식 분석 | K-Stock AI');assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');
  assert.equal(one(doc,'link[rel="canonical"]').getAttribute('href'),meta.PUBLIC_SITE_URL+'/stocks/005930');
  applyPageMeta(doc,meta.getPageMeta('/stocks/000660','SK하이닉스'));assert.equal(doc.title,'SK하이닉스 주식 분석 | K-Stock AI');
- applyPageMeta(doc,meta.getPageMeta('/privacy'));assert.equal(doc.title,expected[5][1]);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'index,follow');
+ applyPageMeta(doc,meta.getPageMeta('/privacy'));assert.equal(doc.title,expected[5][1]);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');
 });
 test('TEST_ONLY unresolved/invalid stock metadata contains no alternate or invented stock name',()=>{
  for(const route of ['/stocks/999999','/stocks/012345']){const value=meta.getPageMeta(route);assert.equal(value.title,'종목 상세 분석 | K-Stock AI');assert.equal(value.robots,'noindex,follow');assert.equal(value.canonical,meta.PUBLIC_SITE_URL+route);}
@@ -79,7 +79,7 @@ test('TEST_ONLY Vite head fallback includes description but no misleading home c
  const plugin=load(require.resolve('../frontend/seo-build.js')).publicSearchMetadata(),html=plugin.transformIndexHtml(fs.readFileSync('frontend/index.html','utf8'));
  assert.equal((html.match(/<title>/g)||[]).length,1);assert.ok(html.includes(meta.getPageMeta('/').title));
  assert.equal((html.match(/name="description"/g)||[]).length,1);assert.ok(html.includes('#F6F8FB'));assert.doesNotMatch(html,/rel="canonical"|PUBLIC_PAGE_META/);
- assert.ok(html.includes('content="index,follow"'));assert.throws(()=>plugin.transformIndexHtml('<html></html>'),/MARKER_MISSING/);
+ assert.ok(html.includes('content="noindex,follow"'));assert.throws(()=>plugin.transformIndexHtml('<html></html>'),/MARKER_MISSING/);
 });
 test('TEST_ONLY Vite emits only the two static crawler assets from the same metadata source',()=>{
  const plugin=load(require.resolve('../frontend/seo-build.js')).publicSearchMetadata(),assets=[];plugin.generateBundle.call({emitFile:asset=>assets.push(asset)});
@@ -97,7 +97,7 @@ for(const route of ['/unknown-path','/stocks/123','/stocks/abc','/stocks/005930/
  const extra=doc.createElement('link');extra.setAttribute('rel','canonical');extra.setAttribute('href','https://test-only.invalid/stale');doc.head.appendChild(extra);
  applyPageMeta(doc,meta.getPageMeta(route));assert.equal(doc.head.querySelectorAll('link[rel="canonical"]').length,0);
  assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');
- for(const normal of ['/','/about','/stocks/005930','/stocks/012345']){applyPageMeta(doc,meta.getPageMeta(normal));assert.equal(one(doc,'link[rel="canonical"]').getAttribute('href'),meta.PUBLIC_SITE_URL+normal);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),normal.startsWith('/stocks/')?'noindex,follow':'index,follow');}
+ for(const normal of ['/','/about','/stocks/005930','/stocks/012345']){applyPageMeta(doc,meta.getPageMeta(normal));assert.equal(one(doc,'link[rel="canonical"]').getAttribute('href'),meta.PUBLIC_SITE_URL+normal);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');}
 });
 test('TEST_ONLY error StrictMode setup/replay remains noindex without any canonical or home cleanup',()=>{
  const document=testDocument(),effects=[];const {default:PageMeta}=load(componentFile,{document,react:{useEffect:fn=>effects.push(fn)}});

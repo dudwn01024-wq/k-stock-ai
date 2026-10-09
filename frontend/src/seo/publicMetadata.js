@@ -23,9 +23,9 @@ export function getPageMeta(path='/',stockName=null){
     title:stockName?stockName+' 주식 분석 | K-Stock AI':'종목 상세 분석 | K-Stock AI',
     description:'선택한 국내주식의 시장 데이터와 분석 기준을 확인하는 상세 공유 화면입니다. 분석 정보는 투자 참고용입니다.'
   }:PUBLIC_PAGE_METADATA[canonicalPath];
-  // Stock indexing is deferred until crawler-safe data reads are designed.
+  // Keep every page excluded from search while direct URLs remain available.
   // noindex is an indexing instruction, not a provider-request/crawling limit.
-  return {...content,canonical:PUBLIC_SITE_URL+canonicalPath,robots:stock?'noindex,follow':'index,follow'};
+  return {...content,canonical:PUBLIC_SITE_URL+canonicalPath,robots:'noindex,follow'};
 }
 export const escapeHtml=value=>String(value).replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
 export function renderDefaultHead(){

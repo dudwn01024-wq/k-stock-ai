@@ -33,11 +33,10 @@ for(const guide of guides)test('TEST_ONLY built initial HTML contains exact shar
  assert.ok(html.includes('<title>'+meta.escapeHtml(guide.meta.title)+'</title>'));
  assert.ok(html.includes('name="description" content="'+meta.escapeHtml(guide.meta.description)+'"'));
  assert.ok(html.includes('rel="canonical" href="'+guide.meta.canonical+'"'));
- assert.ok(html.includes('name="robots" content="'+guide.meta.robots+'"'));
+ assert.equal(guide.meta.robots,'noindex,follow');assert.ok(html.includes('name="robots" content="'+guide.meta.robots+'"'));
  for(const pattern of [/<title>/g,/name="description"/g,/name="robots"/g,/rel="canonical"/g])assert.equal((html.match(pattern)||[]).length,1);
  assert.doesNotMatch(html,/src.main|PUBLIC_PAGE_META|iframe|googlesyndication|googletagmanager/);
  if(guide.path.startsWith('/stocks/')){
-  assert.equal(guide.meta.robots,'noindex,follow');
   for(const text of ['아직 시장 자료를 조회하지 않았습니다','종목 분석 불러오기','원금 손실 위험','자료의 기준과 한계'])assert.ok(html.includes(text));
  }
 });

@@ -15,7 +15,7 @@ test('TEST_ONLY raw home contains real static description, existing risk notice 
  const head=html.match(/<head>([\s\S]*?)<\/head>/)[1];
  assert.equal((html.match(/name="google-site-verification"/g)||[]).length,1);
  assert.match(head,/<meta name="google-site-verification" content="1__oMF1AfA9fD1JOQqhj_DkpHHBxir3E79bzDqeBwRA"\s*\/?>/);
- assert.match(html,/name="robots" content="index,follow"/);assert.ok(html.includes('rel="canonical" href="'+origin+'/"'));
+ assert.match(html,/name="robots" content="noindex,follow"/);assert.ok(html.includes('rel="canonical" href="'+origin+'/"'));
  for(const pattern of [/<title>/g,/name="description"/g,/name="robots"/g,/rel="canonical"/g])assert.equal((html.match(pattern)||[]).length,1);
 });
 test('TEST_ONLY static home uses the existing CSR branch; App/state source is identical apart from the exact approved error route/head fix',()=>{
@@ -33,6 +33,11 @@ test('TEST_ONLY output is only home, fallback and the twelve existing guide alia
  const files=fs.readdirSync('frontend/dist',{recursive:true}).filter(file=>file.endsWith('.html')).sort();assert.equal(files.length,26);
  assert.ok(files.includes('index.html')&&files.includes('spa-fallback.html'));assert.ok(!files.includes('.html'));
  for(const code of ['999999','012345','000000'])assert.ok(!files.some(file=>file.includes(code)));
+ for(const file of files){const html=fs.readFileSync(path.join('frontend/dist',file),'utf8');
+  assert.match(html,/name="robots" content="noindex,follow"/);assert.equal((html.match(/name="robots"/g)||[]).length,1);
+  assert.equal((html.match(/name="google-site-verification"/g)||[]).length,1);
+  assert.ok(html.includes('content="1__oMF1AfA9fD1JOQqhj_DkpHHBxir3E79bzDqeBwRA"'));
+ }
  require('./helpers/public-contact-boundary.cjs')();
  require('./helpers/error-route-seo-boundary.cjs')();
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','frontend/package.json','frontend/package-lock.json','frontend/public','frontend/vite.config.js','frontend/src',':!frontend/src/router.jsx',':!frontend/src/components/PageMeta.jsx',':!frontend/src/seo/publicMetadata.js',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/pages/PublicPages.jsx'],{encoding:'utf8'}),'');
@@ -48,7 +53,7 @@ test('TEST_ONLY preview routing separates home and fallback while leaving GET AP
  }
  const post={url:'/TEST_ONLY_POST',method:'POST'};middleware(post,{},()=>{});assert.equal(post.url,'/TEST_ONLY_POST');
 });
-test('TEST_ONLY actual Vite preview keeps raw home indexable and unknown/invalid stock shells noindex with zero APIs',async()=>{
+test('TEST_ONLY actual Vite preview keeps all raw home and unknown/invalid stock shells noindex with zero APIs',async()=>{
  const {preview}=await import(pathToFileURL(front.resolve('vite')).href),{publicSearchMetadata}=await import(pathToFileURL(path.resolve('frontend/seo-build.js')).href);
  const server=await preview({root:path.resolve('frontend'),configFile:false,envDir:false,plugins:[publicSearchMetadata()],preview:{host:'127.0.0.1',port:0,strictPort:true,proxy:{}}});
  const url='http://127.0.0.1:'+server.httpServer.address().port,api=[];server.httpServer.on('request',req=>{if(req.url.startsWith('/api/'))api.push(req.url);});

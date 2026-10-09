@@ -63,7 +63,7 @@ async function assertGuide(page,url,before,{generated=true,geometry=true}={}){
  const pathname=new URL(url).pathname.replace(/\/+$/,'');
  if(generated){assert.equal(state.root,pathname);assert.ok(state.retained,'hydration retains SSR DOM');}
  assert.equal(state.canonical,'https://k-stock-ai-1.onrender.com'+pathname);
- assert.equal(state.robots,pathname.startsWith('/stocks/')?'noindex,follow':'index,follow');
+ assert.equal(state.robots,'noindex,follow');
  assert.ok(state.title.length>10&&state.description.length>30);assert.deepEqual(state.metadata,[1,1,1,1]);
  if(geometry)assert.equal(state.overflow,false,'no horizontal overflow');
  return state;
@@ -119,7 +119,7 @@ async function loadRepeatedly(page,symbol){
    const state=await page.evaluate(()=>({canonical:document.querySelector('link[rel="canonical"]')?.href,robots:document.querySelector('meta[name="robots"]')?.content,
     retained:window.__testInitialRoot===document.querySelector('#root').firstElementChild,staticHome:document.querySelector('#root').dataset.staticHome,
     overflow:document.documentElement.scrollWidth>innerWidth,metadata:['title','meta[name="description"]','meta[name="robots"]','link[rel="canonical"]'].map(x=>document.querySelectorAll(x).length)}));
-   assert.equal(state.canonical,'https://k-stock-ai-1.onrender.com/');assert.equal(state.robots,'index,follow');assert.deepEqual(state.metadata,[1,1,1,1]);
+   assert.equal(state.canonical,'https://k-stock-ai-1.onrender.com/');assert.equal(state.robots,'noindex,follow');assert.deepEqual(state.metadata,[1,1,1,1]);
    assert.equal(state.retained,false,'home deliberately preserves existing createRoot CSR initialization');assert.equal(state.staticHome,'true');assert.equal(state.overflow,false);
    assert.deepEqual(api.slice(before).map(x=>x.path).sort(),['/api/runtime-config','/api/runtime-config','/api/stock/recommendation-history','/api/stock/recommendation-mode'].sort());
    await page.screenshot({path:path.join(output,'home-client-'+width+'.png'),fullPage:true});
@@ -168,11 +168,11 @@ async function loadRepeatedly(page,symbol){
   for(const route of paths){const before=api.length;await staticPage.goto(origin+route,{waitUntil:'networkidle'});
    assert.ok(await staticPage.locator('.public-page h1').isVisible());assert.equal(api.length,before);}
   await staticPage.goto(origin+'/',{waitUntil:'networkidle'});assert.ok(await staticPage.locator('.public-page h1').isVisible());
-  assert.equal(await staticPage.locator('meta[name="robots"]').getAttribute('content'),'index,follow');
+  assert.equal(await staticPage.locator('meta[name="robots"]').getAttribute('content'),'noindex,follow');
   assert.equal(await staticPage.locator('link[rel="canonical"]').getAttribute('href'),'https://k-stock-ai-1.onrender.com/');
   assert.ok((await staticPage.locator('main').innerText()).includes('원금 손실 위험'));
   await staticPage.screenshot({path:path.join(output,'home-static-390.png'),fullPage:true});
-  cases.push({case:'raw home body/risks/index/canonical with JavaScript disabled',result:'PASS',initialApiCalls:0});
+  cases.push({case:'raw home body/risks/noindex/canonical with JavaScript disabled',result:'PASS',initialApiCalls:0});
   for(const route of ['/stocks/999999','/stocks/abc','/stocks/abc.js']){
    const before=api.length;await staticPage.goto(origin+route,{waitUntil:'networkidle'});
    assert.equal(await staticPage.locator('meta[name="robots"]').getAttribute('content'),'noindex,follow');
