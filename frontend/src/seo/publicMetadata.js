@@ -10,8 +10,15 @@ export const PUBLIC_PAGE_METADATA=Object.freeze({
 });
 export function getPageMeta(path='/',stockName=null){
   const clean=typeof path==='string'?path.split(/[?#]/)[0].replace(/\/+$/,'')||'/':'/';
-  const stock=/^\/stocks\/[^/]+$/.test(clean);
-  const canonicalPath=stock||Object.hasOwn(PUBLIC_PAGE_METADATA,clean)?clean:'/';
+  const stock=/^\/stocks\/\d{6}$/.test(clean);
+  // Invalid symbols and unknown URLs are error screens, never home aliases.
+  // A syntactically valid six-digit symbol retains its unresolved-stock policy.
+  if(!stock&&!Object.hasOwn(PUBLIC_PAGE_METADATA,clean))return {
+    title:clean.startsWith('/stocks/')?'종목코드를 확인해주세요 | K-Stock AI':'페이지를 찾을 수 없습니다 | K-Stock AI',
+    description:'요청하신 페이지 주소를 확인해주세요. 메인 화면에서 공개 분석 안내와 종목 검색을 이용할 수 있습니다.',
+    canonical:null,robots:'noindex,follow'
+  };
+  const canonicalPath=clean;
   const content=stock?{
     title:stockName?stockName+' 주식 분석 | K-Stock AI':'종목 상세 분석 | K-Stock AI',
     description:'선택한 국내주식의 시장 데이터와 분석 기준을 확인하는 상세 공유 화면입니다. 분석 정보는 투자 참고용입니다.'

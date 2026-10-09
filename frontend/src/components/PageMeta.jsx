@@ -12,14 +12,16 @@ export function applyPageMeta(doc,meta){
   };
   set('meta[name="description"]','meta',{name:'description',content:meta.description});
   set('meta[name="robots"]','meta',{name:'robots',content:meta.robots});
-  set('link[rel="canonical"]','link',{rel:'canonical',href:meta.canonical});
+  if(meta.canonical)set('link[rel="canonical"]','link',{rel:'canonical',href:meta.canonical});
+  else for(const node of doc.head.querySelectorAll('link[rel="canonical"]'))node.remove();
 }
 
 // Head-only component: no visible markup, network, storage or analysis work.
 export default function PageMeta({path='/',stockName=null}){
   useEffect(()=>{
     applyPageMeta(document,getPageMeta(path,stockName));
-    return()=>applyPageMeta(document,getPageMeta('/'));
+    // Each route owns its head. Cleanup must not briefly turn an error page
+    // into the indexable home during route changes or StrictMode replay.
   },[path,stockName]);
   return null;
 }

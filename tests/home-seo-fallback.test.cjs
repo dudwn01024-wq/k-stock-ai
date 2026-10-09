@@ -15,10 +15,10 @@ test('TEST_ONLY raw home contains real static description, existing risk notice 
  assert.match(html,/name="robots" content="index,follow"/);assert.ok(html.includes('rel="canonical" href="'+origin+'/"'));
  for(const pattern of [/<title>/g,/name="description"/g,/name="robots"/g,/rel="canonical"/g])assert.equal((html.match(pattern)||[]).length,1);
 });
-test('TEST_ONLY static home uses the existing CSR branch; all App/state/router/metadata source is identical',()=>{
+test('TEST_ONLY static home uses the existing CSR branch; App/state source is identical apart from the exact approved error route/head fix',()=>{
  assert.match(home(),/data-static-home="true"/);assert.doesNotMatch(home(),/data-prerendered/);
  for(const file of ['App.jsx','main.jsx','router.jsx','StockAppRoute.jsx','seo/publicMetadata.js'])
-  assert.equal(fs.readFileSync('frontend/src/'+file,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',base+':frontend/src/'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'));
+  assert.equal(require('./helpers/error-route-seo-boundary.cjs').restoreSource('frontend/src/'+file,fs.readFileSync('frontend/src/'+file,'utf8')),execFileSync('git',['show',base+':frontend/src/'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  const guide=fs.readFileSync('frontend/src/HomeLandingGuide.jsx','utf8');assert.doesNotMatch(guide,/fetch\s*\(|useEffect|localStorage|sessionStorage|App\.jsx|api\/|Date\(|order/);
 });
 test('TEST_ONLY generic fallback is noindex from raw HTML and cannot inherit home body/canonical/hydration marker',()=>{
@@ -31,7 +31,8 @@ test('TEST_ONLY output is only home, fallback and the twelve existing guide alia
  assert.ok(files.includes('index.html')&&files.includes('spa-fallback.html'));assert.ok(!files.includes('.html'));
  for(const code of ['999999','012345','000000'])assert.ok(!files.some(file=>file.includes(code)));
  require('./helpers/public-contact-boundary.cjs')();
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','frontend/package.json','frontend/package-lock.json','frontend/public','frontend/vite.config.js','frontend/src',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/pages/PublicPages.jsx'],{encoding:'utf8'}),'');
+ require('./helpers/error-route-seo-boundary.cjs')();
+ assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','frontend/package.json','frontend/package-lock.json','frontend/public','frontend/vite.config.js','frontend/src',':!frontend/src/router.jsx',':!frontend/src/components/PageMeta.jsx',':!frontend/src/seo/publicMetadata.js',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/pages/PublicPages.jsx'],{encoding:'utf8'}),'');
 });
 test('TEST_ONLY preview routing separates home and fallback while leaving GET APIs/assets and all POSTs untouched',()=>{
  const plugin=load(require.resolve('../frontend/seo-build.js')).publicSearchMetadata();let middleware;

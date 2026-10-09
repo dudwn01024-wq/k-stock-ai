@@ -34,7 +34,7 @@ test('TEST_ONLY /about -> /analysis-method replaces all head values and removes 
 });
 test('TEST_ONLY canonical strips query/hash/trailing slash without temporary or private data',()=>{
  for(const [input,route] of [['/about?TEST_ONLY=1#section','/about'],['/analysis-method/','/analysis-method'],['/?TEST_ONLY=1','/'],['/stocks/005930?TEST_ONLY=1#section','/stocks/005930']])assert.equal(meta.getPageMeta(input).canonical,meta.PUBLIC_SITE_URL+route);
- assert.equal(meta.getPageMeta('/random-path').canonical,meta.PUBLIC_SITE_URL+'/');
+ assert.equal(meta.getPageMeta('/random-path').canonical,null);assert.equal(meta.getPageMeta('/random-path').robots,'noindex,follow');
 });
 test('TEST_ONLY stock metadata retains successful stock name and is noindex,follow without affecting sharing',()=>{
  const doc=testDocument();applyPageMeta(doc,meta.getPageMeta('/stocks/005930','삼성전자'));
@@ -44,13 +44,14 @@ test('TEST_ONLY stock metadata retains successful stock name and is noindex,foll
  applyPageMeta(doc,meta.getPageMeta('/privacy'));assert.equal(doc.title,expected[5][1]);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'index,follow');
 });
 test('TEST_ONLY unresolved/invalid stock metadata contains no alternate or invented stock name',()=>{
- for(const route of ['/stocks/999999','/stocks/abc']){const value=meta.getPageMeta(route);assert.equal(value.title,'종목 상세 분석 | K-Stock AI');assert.equal(value.robots,'noindex,follow');assert.equal(value.canonical,meta.PUBLIC_SITE_URL+route);}
+ for(const route of ['/stocks/999999','/stocks/012345']){const value=meta.getPageMeta(route);assert.equal(value.title,'종목 상세 분석 | K-Stock AI');assert.equal(value.robots,'noindex,follow');assert.equal(value.canonical,meta.PUBLIC_SITE_URL+route);}
+ for(const route of ['/stocks/123','/stocks/abc']){const value=meta.getPageMeta(route);assert.equal(value.robots,'noindex,follow');assert.equal(value.canonical,null);}
 });
-test('TEST_ONLY actual PageMeta effect handles StrictMode setup/cleanup/setup and restores default on exit',()=>{
+test('TEST_ONLY actual PageMeta effect handles StrictMode setup/cleanup/setup and never injects home metadata during cleanup',()=>{
  const document=testDocument(),effects=[],mock={useEffect:fn=>effects.push(fn)};
  const {default:PageMeta}=load(componentFile,{document,react:mock});
  assert.equal(PageMeta({path:'/about'}),null);const cleanup=effects.at(-1)();assert.equal(document.title,expected[1][1]);
- cleanup();assert.equal(document.title,expected[0][1]);effects.at(-1)();assert.equal(document.title,expected[1][1]);
+ assert.equal(cleanup,undefined);effects.at(-1)();assert.equal(document.title,expected[1][1]);
  PageMeta({path:'/analysis-method'});effects.at(-1)();assert.equal(document.title,expected[2][1]);
  one(document,'link[rel="canonical"]');one(document,'meta[name="description"]');one(document,'meta[name="robots"]');
 });
@@ -89,4 +90,16 @@ test('TEST_ONLY App body, API/detail transactions, security, calculations, CSS a
  assert.equal(require('./helpers/without-public-seo.cjs')(app),execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  require('./helpers/public-contact-boundary.cjs')();
  assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/pages',':!frontend/src/pages/PublicPages.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+});
+
+for(const route of ['/unknown-path','/stocks/123','/stocks/abc','/stocks/005930/extra'])test('TEST_ONLY normal -> error -> normal removes canonical and restores valid metadata: '+route,()=>{
+ const doc=testDocument();applyPageMeta(doc,meta.getPageMeta('/about'));
+ const extra=doc.createElement('link');extra.setAttribute('rel','canonical');extra.setAttribute('href','https://test-only.invalid/stale');doc.head.appendChild(extra);
+ applyPageMeta(doc,meta.getPageMeta(route));assert.equal(doc.head.querySelectorAll('link[rel="canonical"]').length,0);
+ assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),'noindex,follow');
+ for(const normal of ['/','/about','/stocks/005930','/stocks/012345']){applyPageMeta(doc,meta.getPageMeta(normal));assert.equal(one(doc,'link[rel="canonical"]').getAttribute('href'),meta.PUBLIC_SITE_URL+normal);assert.equal(one(doc,'meta[name="robots"]').getAttribute('content'),normal.startsWith('/stocks/')?'noindex,follow':'index,follow');}
+});
+test('TEST_ONLY error StrictMode setup/replay remains noindex without any canonical or home cleanup',()=>{
+ const document=testDocument(),effects=[];const {default:PageMeta}=load(componentFile,{document,react:{useEffect:fn=>effects.push(fn)}});
+ PageMeta({path:'/stocks/123'});for(let i=0;i<2;i++){assert.equal(effects[0](),undefined);assert.equal(document.head.querySelectorAll('link[rel="canonical"]').length,0);assert.equal(one(document,'meta[name="robots"]').getAttribute('content'),'noindex,follow');}
 });

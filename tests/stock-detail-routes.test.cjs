@@ -121,11 +121,11 @@ test('TEST_ONLY back/forward selects URL symbols without crashes or query secret
   assert.deepEqual(seen,[],'back/forward renders guides, never hidden App');
  }finally{router.dispose();}
 });
-test('TEST_ONLY title uses successful quote stockName and returns to service title on home/exit',async()=>{
+test('TEST_ONLY title uses successful quote stockName and the next home route restores its own metadata',async()=>{
  const h=await makeReady('005930');const tree=h.render(),meta=visit(tree,n=>n.type?.name==='PageMeta');
  meta.type(meta.props);const clear=h.effects.at(-1)();
- assert.equal(h.document.title,'TEST_ONLY 005930 주식 분석 | K-Stock AI');clear();
- assert.equal(h.document.title,'K-Stock AI | 국내주식 데이터 분석');h.navigate(null);
+ assert.equal(h.document.title,'TEST_ONLY 005930 주식 분석 | K-Stock AI');assert.equal(clear,undefined);
+ h.navigate(null);const home=visit(h.render(),n=>n.type?.name==='PageMeta');home.type(home.props);h.effects.at(-1)();
  assert.equal(h.document.title,'K-Stock AI | 국내주식 데이터 분석');
 });
 test('TEST_ONLY route addition preserves backend, analysis/math/auth/data, CSS, manual AI function and payload mapping exactly',()=>{

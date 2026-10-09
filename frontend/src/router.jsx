@@ -1,7 +1,8 @@
 import React from 'react';
-import { createBrowserRouter, replace } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router-dom';
 import StockAppRoute from './StockAppRoute.jsx';
 import PageMeta from './components/PageMeta.jsx';
+import PublicPageLayout from './components/PublicPageLayout.jsx';
 import {AboutPage,AnalysisMethodPage,DataSourcesPage,InvestmentNoticePage,PrivacyPage} from './pages/PublicPages.jsx';
 
 // Static guides do not mount analysis. Stock detail loads only after an explicit click.
@@ -14,7 +15,10 @@ export const publicRoutes = [
   { path: '/data-sources', element: staticPage('/data-sources', <DataSourcesPage />) },
   { path: '/investment-notice', element: staticPage('/investment-notice', <InvestmentNoticePage />) },
   { path: '/privacy', element: staticPage('/privacy', <PrivacyPage />) },
-  { path: '*', loader: () => replace('/') },
+  { path: '*', element: staticPage('*', <PublicPageLayout title="페이지를 찾을 수 없습니다">
+    <p role="alert">요청하신 페이지 주소를 확인해주세요.</p>
+    <a href="/" className="public-page-home">메인으로 돌아가기</a>
+  </PublicPageLayout>) },
 ];
 
 export function createPublicRouter() {
