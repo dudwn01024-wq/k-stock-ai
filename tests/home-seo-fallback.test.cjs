@@ -11,7 +11,10 @@ test('TEST_ONLY raw home contains real static description, existing risk notice 
  const html=home();assert.match(html,/<main[\s\S]*<article/);assert.equal((html.match(/<h1>/g)||[]).length,1);
  for(const text of ['K-Stock AI · 국내주식 데이터 분석','국내주식의 가격, 거래량, 수급','원금 손실 위험','AI 해설은 제공된 자료를 설명하는 참고 문구입니다.'])assert.ok(html.includes(text));
  for(const code of ['005930','000660','373220','035420','005380','035720','068270'])assert.ok(html.includes('href="/stocks/'+code+'"'));
- assert.doesNotMatch(html,/\d[\d,]*원|최근 업데이트:|현재 시각:|예상 수익률|google-site-verification|adsbygoogle/);
+ assert.doesNotMatch(html,/\d[\d,]*원|최근 업데이트:|현재 시각:|예상 수익률|adsbygoogle/);
+ const head=html.match(/<head>([\s\S]*?)<\/head>/)[1];
+ assert.equal((html.match(/name="google-site-verification"/g)||[]).length,1);
+ assert.match(head,/<meta name="google-site-verification" content="1__oMF1AfA9fD1JOQqhj_DkpHHBxir3E79bzDqeBwRA"\s*\/?>/);
  assert.match(html,/name="robots" content="index,follow"/);assert.ok(html.includes('rel="canonical" href="'+origin+'/"'));
  for(const pattern of [/<title>/g,/name="description"/g,/name="robots"/g,/rel="canonical"/g])assert.equal((html.match(pattern)||[]).length,1);
 });

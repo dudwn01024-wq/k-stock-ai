@@ -21,7 +21,7 @@ export function publicSearchMetadata(){
     },
     transformIndexHtml(html){
       if(!html.includes('<!-- PUBLIC_PAGE_META -->'))throw Error('PUBLIC_PAGE_META_MARKER_MISSING');
-      return html.replace('<!-- PUBLIC_PAGE_META -->',renderDefaultHead());
+      return html.replace('<!-- PUBLIC_PAGE_META -->',renderDefaultHead()+'\n    <meta name="google-site-verification" content="1__oMF1AfA9fD1JOQqhj_DkpHHBxir3E79bzDqeBwRA" />');
     },
     async writeBundle(options,bundle){
       const {writePublicGuides}=await import('./prerender-build.js');
