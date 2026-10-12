@@ -89,7 +89,7 @@ test('TEST_ONLY App body, API/detail transactions, security, calculations, CSS a
  const base='76f910fa9c00c9a9c74665619db5a4793ca63853',app=fs.readFileSync('frontend/src/App.jsx','utf8');
  assert.equal(require('./helpers/without-public-seo.cjs')(app),execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  require('./helpers/public-contact-boundary.cjs')();
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/pages',':!frontend/src/pages/PublicPages.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['server.js','services','scripts','frontend/src/utils','frontend/src/HoldingGuidance.jsx','frontend/src/ExpandedRecommendation.jsx','frontend/src/ExpandedCandidateCard.jsx','frontend/src/PublicInformation.jsx','frontend/src/pages',':!frontend/src/pages/PublicPages.jsx','frontend/src/light-theme.css','frontend/package.json','frontend/package-lock.json','render.yaml'] ),'');
 });
 
 for(const route of ['/unknown-path','/stocks/123','/stocks/abc','/stocks/005930/extra'])test('TEST_ONLY normal -> error -> normal removes canonical and restores valid metadata: '+route,()=>{

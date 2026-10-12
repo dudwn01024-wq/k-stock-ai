@@ -94,8 +94,8 @@ test('TEST_ONLY explanations stay display-only while all existing server calcula
   assert.equal((appSource.match(/strategyExplanation\(strategyData/g)||[]).length,7);
   const before=execFileSync('git',['show','5e2dc4469b9c1c66beeebc95f00a2512772d0216:server.js'],{encoding:'utf8'});
   assert.equal(require('./helpers/without-private-holding.cjs')(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8'))),before.replaceAll('\r\n','\n'));
-  assert.equal(execFileSync('git',['diff','5e2dc4469b9c1c66beeebc95f00a2512772d0216','--','services/tradingStrategy.js',
+  assert.equal(require('./helpers/universe-duplicate-boundary.cjs')('5e2dc4469b9c1c66beeebc95f00a2512772d0216',['services/tradingStrategy.js',
     'services/chartAnalysis.js','services/recommendationUniverse.js','services/recommendationFastScreen.js',
     'services/recommendationVolumePolicy.js','services/expandedRecommendationRuns.js','services/recommendationHistory.js',
-    'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js'],{encoding:'utf8'}),'');
+    'services/recommendationOutcomeBaseline.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js'] ),'');
 });

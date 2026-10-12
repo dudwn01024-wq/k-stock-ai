@@ -1,4 +1,5 @@
 'use strict';
+const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 // Exact allowlist: public page bounds/counts only, never raw rows or exceptions.
 const positive=value=>Number.isSafeInteger(value)&&value>0;
 function safeUniverseCoverage(value){
@@ -17,4 +18,20 @@ function safeUniverseCoverage(value){
   }
   return result;
 }
-module.exports={safeUniverseCoverage};
+// A repeated public identifier and its two positions distinguish row duplication
+// from page overlap. Positions alone do not establish why provider ranks changed.
+function safeUniverseDuplicate(value){
+  if(!isNaverKrStockItemCode(value?.symbol))return null;
+  const position=entry=>entry&&['KOSPI','KOSDAQ'].includes(entry.market)&&
+    Number.isInteger(entry.page)&&entry.page>=1&&entry.page<=10&&
+    Number.isInteger(entry.row)&&entry.row>=1&&entry.row<=100
+      ?{market:entry.market,page:entry.page,row:entry.row}:null;
+  const first=position(value.first),repeated=position(value.repeated);
+  if(!first||!repeated)return null;
+  const sameMarket=first.market===repeated.market;
+  if(sameMarket&&(repeated.page<first.page||
+    (repeated.page===first.page&&repeated.row<=first.row)))return null;
+  const kind=!sameMarket?'CROSS_MARKET':first.page===repeated.page?'WITHIN_PAGE':'CROSS_PAGE';
+  return {kind,symbol:value.symbol,first,repeated};
+}
+module.exports={safeUniverseCoverage,safeUniverseDuplicate};

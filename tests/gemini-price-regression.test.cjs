@@ -86,7 +86,7 @@ test('TEST_ONLY all changed production code stays inside exact transport/display
  for(const file of files)assert.equal(strip(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
  require('./helpers/assert-router-package-boundary.cjs')(base);
  require('./helpers/public-information-boundary.cjs')(base);
- assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services','frontend/src/ExpandedRecommendation.jsx','frontend/src/CurrentAnalysisSummary.jsx','frontend/src/light-theme.css','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js','package.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['services','scripts','frontend/src/services','frontend/src/ExpandedRecommendation.jsx','frontend/src/CurrentAnalysisSummary.jsx','frontend/src/light-theme.css','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js','package.json','render.yaml'] ),'');
 });
 module.exports={uiHarness};
 

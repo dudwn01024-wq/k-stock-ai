@@ -87,8 +87,8 @@ test('TEST_ONLY StrictMode retained and browser router instantiated outside the 
 test('TEST_ONLY home App/theme, API, security, provider policy and stored files stay unchanged',()=>{
  require('./helpers/error-route-seo-boundary.cjs')();
  assert.equal(fs.readFileSync('frontend/src/HomeLandingGuide.jsx','utf8').replaceAll('\r\n','\n'),execFileSync('git',['show','e21a12dec250697aed94013241ca20bc48909599:frontend/src/HomeLandingGuide.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','frontend/src',
-  ':!frontend/src/App.jsx',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/StockAppRoute.jsx',':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/stockCatalog.js',':!frontend/src/stockLandingContent.js',':!frontend/src/stock-landing.css',':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages',':!frontend/src/seo','render.yaml','package.json'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['server.js','services','scripts','frontend/src',
+  ':!frontend/src/App.jsx',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/StockAppRoute.jsx',':!frontend/src/StockLandingPage.jsx',':!frontend/src/StockLandingGuide.jsx',':!frontend/src/stockCatalog.js',':!frontend/src/stockLandingContent.js',':!frontend/src/stock-landing.css',':!frontend/src/main.jsx',':!frontend/src/router.jsx',':!frontend/src/PublicInformation.jsx',':!frontend/src/public-information.css',':!frontend/src/components',':!frontend/src/pages',':!frontend/src/seo','render.yaml','package.json'] ),'');
  assert.equal(require('./helpers/without-stock-routing.cjs')(fs.readFileSync('frontend/src/App.jsx','utf8')),execFileSync('git',['show','2e731ee1ca0d80e952a6d8b46a75f60f37f2df7e:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  require('./helpers/assert-router-package-boundary.cjs')(base);
  const lock=JSON.parse(fs.readFileSync('frontend/package-lock.json','utf8'));

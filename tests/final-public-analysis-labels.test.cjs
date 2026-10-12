@@ -81,7 +81,7 @@ test('TEST_ONLY all changed production source matches the exact label-only allow
  }
  require('./helpers/assert-router-package-boundary.cjs')(base);
  require('./helpers/public-information-boundary.cjs')(base);
- assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/services',
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['services','scripts','frontend/src/services',
   'frontend/src/recommendationDataDates.js','frontend/src/utils/holdingGuidanceAccess.js',
-  'package.json','render.yaml'],{encoding:'utf8'}),'');
+  'package.json','render.yaml'] ),'');
 });

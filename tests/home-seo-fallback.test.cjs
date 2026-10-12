@@ -40,7 +40,7 @@ test('TEST_ONLY output is only home, fallback and the twelve existing guide alia
  }
  require('./helpers/public-contact-boundary.cjs')();
  require('./helpers/error-route-seo-boundary.cjs')();
- assert.equal(execFileSync('git',['diff',base,'--','server.js','services','scripts','migrations','package.json','frontend/package.json','frontend/package-lock.json','frontend/public','frontend/vite.config.js','frontend/src',':!frontend/src/router.jsx',':!frontend/src/components/PageMeta.jsx',':!frontend/src/seo/publicMetadata.js',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/pages/PublicPages.jsx'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['server.js','services','scripts','migrations','package.json','frontend/package.json','frontend/package-lock.json','frontend/public','frontend/vite.config.js','frontend/src',':!frontend/src/router.jsx',':!frontend/src/components/PageMeta.jsx',':!frontend/src/seo/publicMetadata.js',':!frontend/src/HomeLandingGuide.jsx',':!frontend/src/components/PublicPolicyContent.jsx',':!frontend/src/pages/PublicPages.jsx'] ),'');
 });
 test('TEST_ONLY preview routing separates home and fallback while leaving GET APIs/assets and all POSTs untouched',()=>{
  const plugin=load(require.resolve('../frontend/seo-build.js')).publicSearchMetadata();let middleware;

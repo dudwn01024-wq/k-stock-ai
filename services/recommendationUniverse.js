@@ -1,7 +1,7 @@
 'use strict';
 const {isNaverKrStockItemCode,requiresOfficialStockType}=require('./naverKrStockItemCode');
 const {createKrxStockSecurityTypeClassifier}=require('./krxStockSecurityType');
-const {safeUniverseCoverage}=require('./recommendationUniverseDiagnostics');
+const {safeUniverseCoverage,safeUniverseDuplicate}=require('./recommendationUniverseDiagnostics');
 
 const {createHash}=require('node:crypto');
 
@@ -26,6 +26,10 @@ function failure(code,requestCount=0,diagnostic={}){
   if(code==='UNIVERSE_TOP_500_NOT_PROVEN'){
     const coverage=safeUniverseCoverage(diagnostic?.universeCoverage);
     if(coverage)error.universeCoverage=coverage;
+  }
+  if(code==='UNIVERSE_DUPLICATE_SYMBOL'){
+    const duplicate=safeUniverseDuplicate(diagnostic?.universeDuplicate);
+    if(duplicate)error.universeDuplicate=duplicate;
   }
   return error;
 }
@@ -107,7 +111,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     const excludedSecurities=[];
     const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,
       pageMaxMarketValue:null,pageMinMarketValue:null,rows:[]}]));
-    const seen=new Set();
+    const seen=new Map();
     let requestCount=0,excludedCount=0,globalCutoff=null;
     const covered=market=>state[market].done||(globalCutoff!==null&&state[market].pageMaxMarketValue!==null&&
       state[market].pageMaxMarketValue<globalCutoff);
@@ -131,13 +135,16 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       const fetchedAt=clock().toISOString();
       // Commit only a fully validated page. Bounds include valid excluded securities
       // too, so filtering cannot make an unproven market appear covered.
-      const pageSeen=new Set(),pageRows=[],pageExcluded=[];
+      const pageSeen=new Map(),pageRows=[],pageExcluded=[];
       let pageMaxMarketValue=null,pageMinMarketValue=null,pageExcludedCount=0;
-      for(const raw of result.stocks){
+      for(const [index,raw] of result.stocks.entries()){
         let item;
         try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
-        if(seen.has(item.stock.symbol)||pageSeen.has(item.stock.symbol))throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount);
-        pageSeen.add(item.stock.symbol);
+        const first=pageSeen.get(item.stock.symbol)??seen.get(item.stock.symbol);
+        const position={market,page,row:index+1};
+        if(first)throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{
+          universeDuplicate:{symbol:item.stock.symbol,first,repeated:position}});
+        pageSeen.set(item.stock.symbol,position);
         const value=item.stock.marketValue;
         pageMaxMarketValue=pageMaxMarketValue===null?value:Math.max(pageMaxMarketValue,value);
         pageMinMarketValue=pageMinMarketValue===null?value:Math.min(pageMinMarketValue,value);
@@ -162,7 +169,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
             exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
         }else pageRows.push(item.stock);
       }
-      for(const symbol of pageSeen)seen.add(symbol);
+      for(const [symbol,position] of pageSeen)seen.set(symbol,position);
       entry.rows.push(...pageRows);
       excludedSecurities.push(...pageExcluded);
       excludedCount+=pageExcludedCount;
@@ -204,7 +211,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       throw failure(error?.code,requestCount,{
         officialTypeChecks:typeClassifier.checkCount(),officialTypeRequests:typeClassifier.requestCount(),
         blockedSymbol:error?.blockedSymbol,blockedMarket:error?.blockedMarket,httpStatus:error?.httpStatus,
-        universeCoverage:coverage()});
+        universeCoverage:coverage(),universeDuplicate:error?.universeDuplicate});
     }
   }
   return {load};

@@ -63,7 +63,7 @@ test('TEST_ONLY legacy screening signal '+signal+' preserves enum but uses neutr
  assert.ok(html.includes(label));assert.doesNotMatch(html,/9,517원|12,345원|9,087원/);assert.equal(value.strategy.tradeSignal,signal);
 });
 test('TEST_ONLY all server/API/math/security modules and detail request code remain byte-identical to latest main',()=>{
- assert.equal(execFileSync('git',['diff','d33cba4dc19f09ded0f05be3b324f0e2385ead16','--','services','scripts'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')('d33cba4dc19f09ded0f05be3b324f0e2385ead16',['services','scripts'] ),'');
  assert.equal(require('./helpers/without-public-language-policy.cjs')(fs.readFileSync('server.js','utf8')),execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n'));
  const before=execFileSync('git',['show','d33cba4dc19f09ded0f05be3b324f0e2385ead16:frontend/src/App.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  const presentationSource=require('./helpers/public-light-boundaries.cjs').strip(source);

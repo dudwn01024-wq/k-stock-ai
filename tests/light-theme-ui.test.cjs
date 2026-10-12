@@ -91,8 +91,8 @@ test('TEST_ONLY request/state/calculation source and every handler are unchanged
  require('./helpers/public-light-boundaries.cjs').assertApp(appSource,execFileSync('git',['show',base+':frontend/src/App.jsx'],{encoding:'utf8'}));
  require('./helpers/assert-router-package-boundary.cjs')(base);
  require('./helpers/public-information-boundary.cjs')(base);
- assert.equal(execFileSync('git',['diff',base,'--','services','scripts','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js',
-  'frontend/src/ExpandedRecommendation.jsx','frontend/src/recommendationDataDates.js','frontend/src/utils/candles.js','package.json','render.yaml'],{encoding:'utf8'}),'');
+ assert.equal(require('./helpers/universe-duplicate-boundary.cjs')(base,['services','scripts','frontend/src/utils/holdingGuidanceAccess.js','frontend/src/utils/candles.js',
+  'frontend/src/ExpandedRecommendation.jsx','frontend/src/recommendationDataDates.js','frontend/src/utils/candles.js','package.json','render.yaml'] ),'');
 });
 test('TEST_ONLY candlestick change consists exclusively of SVG colors, retaining geometry, domain and tooltip',()=>{
  let before=execFileSync('git',['show','68879573e7f41c95094aa3ec42ed04d2eb4b2a73:frontend/src/CandlestickChart.jsx'],{encoding:'utf8'});
