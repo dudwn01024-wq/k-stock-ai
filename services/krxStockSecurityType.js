@@ -4,6 +4,7 @@ const {isNaverKrStockItemCode,requiresOfficialStockType}=require('./naverKrStock
 // Reviewed exact-code evidence, never a rule inferred from a name or letter.
 // Share type always comes from KIND. Issuer IR may prove only the code binding.
 const HANWHA_CODE_SOURCE_URL='https://www.hanwhacorp.co.kr/upload/hanwha/IRData/pr/20210422/efcf59f8-a459-4004-8f73-60037990cea1.pdf';
+const SAMSUNG_CT_CODE_SOURCE_URL='https://www.samsungcnt.com/ir/stock-info/listinginfo.do';
 const REVIEWED_OFFICIAL_RECORDS=Object.freeze([
   Object.freeze({
     symbol:'00680K',krxCode:'A00680K',market:'KOSPI',securityType:'NON_COMMON',
@@ -28,6 +29,16 @@ const REVIEWED_OFFICIAL_RECORDS=Object.freeze([
     codeSourceUrl:'https://kind.krx.co.kr/external/2026/02/10/000456/20260210001312/61500.htm',
     typeSourceUrl:'https://kind.krx.co.kr/external/2026/02/10/000456/20260210001312/61500.htm',
     basis:'EXPLICIT_OFFICIAL_CODE_AND_SHARE_TYPE',testOnly:false
+  }),
+  Object.freeze({
+    symbol:'02826K',krxCode:'A02826K',market:'KOSPI',securityType:'NON_COMMON',
+    provider:'KRX_KIND',checkedOn:'2026-10-12',
+    codeSourceProvider:'ISSUER_OFFICIAL',typeSourceProvider:'KRX_KIND',
+    // Issuer IR, as of 2026-06-30, binds this exact code to its preferred class.
+    // KIND identifies its only non-common class as preferred shares.
+    codeSourceUrl:SAMSUNG_CT_CODE_SOURCE_URL,
+    typeSourceUrl:'https://kind.krx.co.kr/external/2026/04/29/001087/20260429002762/11309.htm',
+    basis:'EXPLICIT_OFFICIAL_CODE_AND_SHARE_TYPE',testOnly:false
   })
 ]);
 const problem=code=>Object.assign(new Error(code),{code});
@@ -44,8 +55,9 @@ function officialCodeEvidence(record){
   if(record?.codeSourceProvider===undefined||record.codeSourceProvider==='KRX_KIND')
     return officialKindUrl(record?.codeSourceUrl);
   // Exact reviewed HTTPS document, exact symbol and market. No domain wildcard.
-  return record.codeSourceProvider==='ISSUER_OFFICIAL'&&record.symbol==='00088K'&&
-    record.market==='KOSPI'&&record.codeSourceUrl===HANWHA_CODE_SOURCE_URL;
+  return record.codeSourceProvider==='ISSUER_OFFICIAL'&&record.market==='KOSPI'&&
+    ((record.symbol==='00088K'&&record.codeSourceUrl===HANWHA_CODE_SOURCE_URL)||
+      (record.symbol==='02826K'&&record.codeSourceUrl===SAMSUNG_CT_CODE_SOURCE_URL));
 }
 function normalizeOfficialStockTypeEvidence(record,{symbol,market,testOnly=false}={}){
   if(!record||!isNaverKrStockItemCode(symbol)||!['KOSPI','KOSDAQ'].includes(market)||
