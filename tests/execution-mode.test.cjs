@@ -5,7 +5,7 @@ const fs=require('node:fs'),vm=require('node:vm'),http=require('node:http');
 const express=require('express');
 const serverFile=require.resolve('../server.js');
 const localRequire=require('node:module').createRequire(serverFile);
-const source=fs.readFileSync(serverFile,'utf8');
+const source=require('./helpers/without-private-site.cjs')(fs.readFileSync(serverFile,'utf8'));
 
 // Execute the real server route registration. Only providers/env/startup are replaced.
 async function server(t,mode,nodeEnv){

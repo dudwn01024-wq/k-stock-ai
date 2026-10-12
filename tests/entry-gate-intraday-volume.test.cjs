@@ -97,10 +97,10 @@ test('TEST_ONLY recommendation, finalized outcome V3, news, holder and chart cal
     'services/recommendationOutcomeCollector.js','scripts/collectRecommendationOutcomes.js','services/chartAnalysis.js',
     'services/stockDetailNews.js','services/naverMarketData.js']){
     const before=execFileSync('git',['show',prior+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
-    assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),before,file);
+    assert.equal(require('./helpers/without-private-site.cjs')(fs.readFileSync(file,'utf8'),file),before,file);
   }
   const before=execFileSync('git',['show',prior+':server.js'],{encoding:'utf8'}).replaceAll('\r\n','\n');
-  const after=fs.readFileSync('server.js','utf8').replaceAll('\r\n','\n');
+  const after=require('./helpers/without-private-site.cjs')(fs.readFileSync('server.js','utf8'));
   for(const [a,b] of [['const calculateStrategy =','// RISK / REWARD CALCULATION'],['const buildRecommendationResult =','const rankRecommendationResults =']]){
     const segment=s=>s.slice(s.indexOf(a),s.indexOf(b,s.indexOf(a)));assert.equal(segment(after),segment(before));
   }

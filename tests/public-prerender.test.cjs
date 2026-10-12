@@ -50,7 +50,7 @@ test('TEST_ONLY extraction preserves exact guide HTML including unknown stock, n
 });
 
 test('TEST_ONLY initialization hydrates only matching generated routes, preserving one router and StrictMode',()=>{
- const main=fs.readFileSync('frontend/src/main.jsx','utf8').replaceAll('\r\n','\n');
+ const main=require('./helpers/without-private-site.cjs')(fs.readFileSync('frontend/src/main.jsx','utf8'),'frontend/src/main.jsx');
  const previous=execFileSync('git',['show',base+':frontend/src/main.jsx'],{encoding:'utf8'}).replaceAll('\r\n','\n');
  const original=main.slice(0,main.indexOf("const root=document.getElementById('root');")).replace('const tree=(',"ReactDOM.createRoot(document.getElementById('root')).render(");
  assert.equal(original,previous);

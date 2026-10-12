@@ -21,7 +21,9 @@ function protectedDiff(base,paths){
   assert.equal(execFileSync('git',['diff',baseline,base,'--',...Object.keys(approved)],{encoding:'utf8'}),'',
     'historical base has the same universe implementation as the approved starting main');
   for(const file of Object.keys(approved))assertApprovedSource(file,fs.readFileSync(file,'utf8'));
-  return execFileSync('git',['diff',base,'--',...paths,...Object.keys(approved).map(file=>':!'+file)],{encoding:'utf8'});
+  const privateFiles=require('./private-site-boundary-hashes.cjs');
+  for(const [file,digest]of Object.entries(privateFiles))assert.equal(createHash('sha256').update(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n')).digest('hex'),digest,'exact private access boundary: '+file);
+  return execFileSync('git',['diff',base,'--',...paths,...[...Object.keys(approved),...Object.keys(privateFiles)].map(file=>':!'+file)],{encoding:'utf8'});
 }
 module.exports=protectedDiff;
 module.exports.assertApprovedSource=assertApprovedSource;

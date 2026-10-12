@@ -1,0 +1,1 @@
+.private-site-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;background:#eaf2fa;color:#143557;font-size:14px;flex-wrap:wrap}.private-site-bar button{padding:8px 14px;border:1px solid #b4c5d6;border-radius:8px;background:white;color:#143557;cursor:pointer}.private-site-bar button:disabled{opacity:.6}

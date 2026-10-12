@@ -106,7 +106,7 @@ test('TEST_ONLY unchanged decision logic and stale-result FAILED UI are byte-ide
     'services/stockDetailNews.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js',
     'services/recommendationHistory.js','services/recommendationOutcomes.js','services/recommendationOutcomeCollector.js',
     'server.js','frontend/src/ExpandedRecommendation.jsx'])
-    assert.equal(require('./helpers/without-reviewed-02826k.cjs')(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show',baseline+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
+    assert.equal(require('./helpers/without-reviewed-02826k.cjs')(require('./helpers/without-private-site.cjs')(fs.readFileSync(file,'utf8'),file),file),execFileSync('git',['show',baseline+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'),file);
 });
 
 test('TEST_ONLY historical scope exceptions accept only the exact reviewed diagnostic source',()=>{

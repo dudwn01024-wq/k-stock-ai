@@ -19,6 +19,8 @@ const {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const {installPrivateSite}=require('./services/privateSiteAccess');
+const privateSite=installPrivateSite(app,{env:process.env});
 const recommendationRequestContext=new AsyncLocalStorage();
 const recommendationFetch=async (...args)=>{
   const context=recommendationRequestContext.getStore();
@@ -41,9 +43,9 @@ const executionMode=resolveExecutionMode(process.env.KSTOCK_EXECUTION_MODE,proce
 
 // Register private routes only for the explicitly enabled local server.
 installExecutionMode(app,executionMode);
-const {createHoldingGuidanceAccess,registerHoldingGuidanceRoutes}=require('./services/holdingGuidanceAccess');
-const holdingGuidanceAccess=createHoldingGuidanceAccess();
-registerHoldingGuidanceRoutes(app,holdingGuidanceAccess);
+const {createSiteHoldingGuidance,registerSiteHoldingGuidanceRoutes}=require('./services/siteHoldingGuidance');
+const holdingGuidanceAccess=createSiteHoldingGuidance(privateSite.access);
+registerSiteHoldingGuidanceRoutes(app,holdingGuidanceAccess,privateSite.access);
 app.use(express.json());
 
 const NAVER_HEADERS = {
@@ -5250,30 +5252,7 @@ app.get('/api/stock/detail-analysis',handleStockDetailAnalysis(true));
 // ROOT
 // ========================================
 
-app.get(
-  '/',
-  (req, res) => {
-    res.json({
-      service:
-        'K-Stock AI Backend',
-
-      status:
-        'running',
-
-      endpoints: [
-        '/api/health',
-        '/api/stock/search?query=삼성전자',
-        '/api/stock/quote?symbol=005930',
-        '/api/stock/chart?symbol=005930&timeframe=1M',
-        '/api/stock/news?symbol=005930',
-        '/api/stock/strategy?symbol=005930',
-        '/api/stock/ai-analysis?symbol=005930',
-        '/api/stock/recommendations',
-        '/api/stock/recommendations-ai'
-      ]
-    });
-  }
-);
+app.use(privateSite.serveApp);
 
 // ========================================
 // 404

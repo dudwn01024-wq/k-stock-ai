@@ -5,7 +5,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 const {execFileSync}=require('node:child_process');
 const engine=require('../services/tradingStrategy');
-const source=fs.readFileSync(path.join(__dirname,'../server.js'),'utf8');
+const source=require('./helpers/without-private-site.cjs')(fs.readFileSync(path.join(__dirname,'../server.js'),'utf8'));
 const chart=()=>({ma5:100,ma20:99,ma60:98,rsi14:50,macd:{macd:2,signal:1,histogram:1},
   bollingerBands:{position:50},atr14:10,latestClose:100,
   supportResistance:{nearestSupport:{price:100},nearestResistance:{price:120}}});

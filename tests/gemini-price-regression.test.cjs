@@ -69,7 +69,7 @@ function uiHarness(){
 }
 test('TEST_ONLY actual public detail rounds price lines/support/resistance but preserves RSI MACD percent and ratio',()=>{
  const {renderPage}=uiHarness(),html=renderPage();for(const v of ['1,697,001원','245,584원','245,583원','267,000원','240,001원','47.02','2.75','1.25','1.72 : 1','45.25%','0.20배'])assert.ok(html.includes(v),v);
- assert.doesNotMatch(html,/245,583\.33원|1,697,000\.5원/);assert.ok(html.includes('🔒 보유자 참고 판정'));
+ assert.doesNotMatch(html,/245,583\.33원|1,697,000\.5원/);assert.ok(html.includes('보유자 참고 판정'));
 });
 test('TEST_ONLY candidate, history, outcomes and holder render shared currency without changing source objects or returns',()=>{
  const h=uiHarness(),front=createRequire(require.resolve('../frontend/package.json')),React=front('react'),{renderToStaticMarkup}=front('react-dom/server');

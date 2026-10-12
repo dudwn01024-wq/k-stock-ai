@@ -7,7 +7,7 @@ const base='e21a12dec250697aed94013241ca20bc48909599',hashes={
   "frontend/src/seo/publicMetadata.js": "ea6dda184aaa6df1e11bbf59334b24f872471580b417772fe5bb838d87754a8b"
 };
 function restoreSource(file,source){
- const current=source.replaceAll('\r\n','\n');if(!Object.hasOwn(hashes,file))return current;
+ const current=require('./without-private-site.cjs')(source,file);if(!Object.hasOwn(hashes,file))return current;
  assert.equal(crypto.createHash('sha256').update(current).digest('hex'),hashes[file],file+' matches only the approved SEO error edits');
  return execFileSync('git',['show',base+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n');
 }

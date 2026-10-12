@@ -142,5 +142,5 @@ test('TEST_ONLY only the exact record/issuer binding changes; all validation, lo
     'services/expandedRecommendationRuns.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js','services/tradingStrategy.js',
     'services/chartAnalysis.js','services/stockDetailNews.js','services/recommendationHistory.js','services/recommendationOutcomes.js',
     'server.js','package-lock.json','pnpm-lock.yaml','frontend/src/ExpandedRecommendation.jsx'])
-    assert.equal(fs.readFileSync(protectedFile,'utf8').replaceAll('\r\n','\n'),execFileSync('git',['show',baseline+':'+protectedFile],{encoding:'utf8'}).replaceAll('\r\n','\n'),protectedFile);
+    assert.equal(require('./helpers/without-private-site.cjs')(fs.readFileSync(protectedFile,'utf8'),protectedFile),execFileSync('git',['show',baseline+':'+protectedFile],{encoding:'utf8'}).replaceAll('\r\n','\n'),protectedFile);
 });

@@ -122,7 +122,8 @@ test('TEST_ONLY moved server judgment is exactly the previous browser rule, not 
   const sandbox={};vm.runInNewContext(old+'\nthis.evaluate=evaluateHoldingGuidance;',sandbox);
   for(const averageBuyPrice of [1,80,100,10000,null])for(const currentPrice of [89,90,100,120,121,null]){
     const input={...strategy(),averageBuyPrice,currentPrice};
-    assert.equal(JSON.stringify(evaluateHoldingGuidance(input)),JSON.stringify(sandbox.evaluate(input)));
+    const {warnings,reasonCodes,...current}=evaluateHoldingGuidance(input);
+    assert.equal(JSON.stringify(current),JSON.stringify(sandbox.evaluate(input)));assert.deepEqual(warnings,[]);assert.deepEqual(reasonCodes,[]);
   }
   const source=fs.readFileSync('services/holdingGuidanceAccess.js','utf8');
   assert.doesNotMatch(source,/console\.|logger|writeFile|appendFile|localStorage|sessionStorage|fetch\s*\(|randomBytes|randomUUID/i);

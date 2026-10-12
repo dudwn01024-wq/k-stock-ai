@@ -83,11 +83,11 @@ test('TEST_ONLY legacy50 stock URL never starts default Samsung or main recommen
  const h=harness({symbol:'000660',mode:'legacy50'});h.render();h.runEffects(true);await tick();
  assert.equal(h.calls.length,3);assert.ok(h.calls.every(x=>x.searchParams.get('symbol')==='000660'));assert.equal(h.state('quoteData').symbol,'000660');
 });
-test('TEST_ONLY root keeps expanded read-only startup and legacy default Samsung behavior',async()=>{
+test('TEST_ONLY both expanded and legacy root startup are read-only until an explicit analysis request',async()=>{
  const publicHome=harness();publicHome.render();publicHome.runEffects();await tick();assert.deepEqual(paths(publicHome),['/api/stock/recommendation-mode']);
  const legacy=harness({mode:'legacy50'});legacy.render();legacy.runEffects();await tick();
- assert.equal(details(legacy).length,3);assert.ok(details(legacy).every(x=>x.searchParams.get('symbol')==='005930'));
- assert.equal(paths(legacy).filter(x=>x==='/api/stock/recommendations').length,1);
+ assert.equal(details(legacy).length,0);
+ assert.equal(paths(legacy).filter(x=>x==='/api/stock/recommendations').length,0);
 });
 test('TEST_ONLY main-only candidate/history/PAPER mounts are absent even when stale main state is supplied on stock route',async()=>{
  const h=await makeReady('005930');h.states[bindings.indexOf('recommendationMode')]='expanded500';h.states[bindings.indexOf('historyOpen')]=false;

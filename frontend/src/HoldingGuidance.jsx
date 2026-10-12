@@ -4,7 +4,7 @@ import {parseAverageBuyPrice} from './utils/holdingGuidance.js';
 import './holding-guidance.css';
 const price=value=>typeof value==='number'&&Number.isFinite(value)&&value>0?formatKRW(value):'미확인';
 
-export default function HoldingGuidance({symbol,strategy,service}){
+export default function HoldingGuidance({symbol,strategy,service,siteAuthenticated=false}){
   const snapshotId=strategy?.newsSnapshotId;
   const [password,setPassword]=useState('');
   const [access,setAccess]=useState(null);
@@ -13,7 +13,7 @@ export default function HoldingGuidance({symbol,strategy,service}){
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState(null);
   const generation=useRef(0),pending=useRef(false);
-  const unlocked=Boolean(access&&Date.parse(access.expiresAt)>Date.now());
+  const unlocked=siteAuthenticated===true||Boolean(access&&Date.parse(access.expiresAt)>Date.now());
   const value=input.symbol===symbol&&input.snapshotId===snapshotId?input.value:'';
   const average=parseAverageBuyPrice(value);
   const guidance=unlocked&&result?.symbol===symbol&&result.snapshotId===snapshotId&&result.average===average?result.guidance:null;
@@ -36,7 +36,7 @@ export default function HoldingGuidance({symbol,strategy,service}){
     event.preventDefault();if(!unlocked||average===null||pending.current)return;
     pending.current=true;setBusy(true);setError(null);setResult(null);const attempt=++generation.current;
     try{
-      const guidance=await service.evaluateHoldingGuidance({symbol,snapshotId,averageBuyPrice:average},access.accessToken);
+      const guidance=await service.evaluateHoldingGuidance({symbol,snapshotId,averageBuyPrice:average},siteAuthenticated?undefined:access.accessToken);
       if(attempt===generation.current)setResult({symbol,snapshotId,average,guidance});
     }catch(e){if(attempt===generation.current){if(e.code==='HOLDING_GUIDANCE_UNAUTHORIZED')lock();
       setError(e.code?e.message:'참고 판정을 가져오지 못했습니다.');}}
@@ -58,7 +58,7 @@ export default function HoldingGuidance({symbol,strategy,service}){
           onChange={event=>{generation.current++;setInput({symbol,snapshotId,value:event.target.value});setResult(null);}}
           placeholder="평균매수가 입력" aria-invalid={value!==''&&average===null}/></label>
         <button type="submit" className="home-secondary" disabled={busy||average===null||!snapshotId}>참고 판정 요청</button>
-        <button type="button" className="home-secondary" onClick={lock}>다시 잠금</button>
+        {!siteAuthenticated&&<button type="button" className="home-secondary" onClick={lock}>다시 잠금</button>}
       </form>
       {value!==''&&average===null&&<p role="alert" className="holding-warning">유효한 양수 평균매수가를 입력하세요.</p>}
       {guidance&&<>
@@ -71,7 +71,13 @@ export default function HoldingGuidance({symbol,strategy,service}){
           <div><dt>현재 하단 위험 기준</dt><dd>{price(guidance.stopLossPrice)}</dd></div>
         </dl>
         <div className={'holding-result holding-'+guidance.status} role="status"><strong>보유자 참고 판정 · {guidance.label}</strong>
-          <ul>{guidance.reasons?.map(reason=><li key={reason}>{reason}</li>)}</ul></div>
+          <ul>{guidance.reasons?.map(reason=><li key={reason}>{reason}</li>)}</ul>
+          {Array.isArray(guidance.warnings)&&guidance.warnings.length>0&&<>
+            <p><strong>확인된 주의 사유</strong></p>
+            <ul aria-label="확인된 주의 사유">{guidance.warnings.map((warning,index)=><li key={warning.code+'-'+index}>
+              {warning.message}</li>)}</ul>
+          </>}
+        </div>
       </>}
       <p className="holding-note">시장 데이터 기반 참고 판단이며 실제 매수·매도 지시가 아닙니다.</p>
       <p className="holding-note">입력값은 인증된 요청에서 일시 처리되며 서버·이력에 저장하거나 계좌와 연결하지 않습니다. 손익률은 비용·세금·배당을 반영하지 않은 단순 가격 변화입니다.</p>

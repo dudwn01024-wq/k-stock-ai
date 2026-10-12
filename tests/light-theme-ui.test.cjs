@@ -62,8 +62,8 @@ test('TEST_ONLY summary keeps final server status: '+status,()=>{const strategy=
 test('TEST_ONLY missing summary data never receives an invented favorable score or status',()=>{
  const html=summary(null);assert.equal((html.match(/>미확인</g)||[]).length,4);assert.ok(html.includes('판단 보류'));assert.doesNotMatch(html,/양호|분석 조건 충족/);
 });
-test('TEST_ONLY actual detail order is summary, price, indicators, supply/news, candles, patterns, AI, locked holder',()=>{
- const html=renderPage();const order=['핵심 분석 요약','1. 가격 기준선','3. 기술적 지표','4. 지지선','5. 거래량','실제 주가 차트','패턴 분석 · KIS','AI 종합 분석','🔒 보유자 참고 판정'];
+test('TEST_ONLY authenticated detail order is summary, price, indicators, supply/news, candles, patterns, AI, site-session holder',()=>{
+ const html=renderPage();const order=['핵심 분석 요약','1. 가격 기준선','3. 기술적 지표','4. 지지선','5. 거래량','실제 주가 차트','패턴 분석 · KIS','AI 종합 분석','보유자 참고 판정'];
  let index=-1;for(const label of order){const next=html.indexOf(label,index+1);assert.ok(next>index,label);index=next;}
  for(const value of ['11,012원','9,517원','12,345원','9,087원','1.72 : 1','47.02','2.75','1.25','123원','45.25%','0.20배'])assert.ok(html.includes(value),value);
 });
@@ -81,10 +81,10 @@ test('TEST_ONLY candidates retain evidence and no strategy price trio; saved-onl
 test('TEST_ONLY failed-run diagnostic and prior-results warning remain visible',()=>{
  const html=renderPage({detail:false,failed:true});assert.ok(html.includes('상위 500종목 구성을 확인하지 못했습니다.'));assert.ok(html.includes('아래 목록은 이전에 저장된 분석 결과입니다.'));
 });
-test('TEST_ONLY holder remains locked, confirmed operator/pending contact is shown and no token/password storage is added',()=>{
- const html=renderPage();for(const text of ['비공개 참고 기능입니다.','허용된 사용자만 이용할 수 있습니다.','비밀번호 입력','잠금 해제',
+test('TEST_ONLY site-session holder needs no second password; operator/contact remain visible and no private storage is added',()=>{
+ const html=renderPage();for(const text of ['평균매수가 (원)','참고 판정 요청',
   '투자정보 이용안내','개인정보처리방침','광고 및 쿠키 안내','서비스 운영자 표시명은 ‘K-Stock AI 운영자’입니다. 개인정보 및 서비스 문의:'])assert.ok(html.includes(text),text);
- assert.doesNotMatch(html,/평균매수가 \(원\)|현재 손익률|보유 유지 참고/);
+ assert.doesNotMatch(html,/비밀번호 입력|잠금 해제|현재 손익률|보유 유지 참고/);
 });
 test('TEST_ONLY request/state/calculation source and every handler are unchanged from latest main',()=>{
  const base='68879573e7f41c95094aa3ec42ed04d2eb4b2a73';

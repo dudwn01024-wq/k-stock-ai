@@ -36,8 +36,7 @@ import {
   Bot
 } from 'lucide-react';
 
-const API_BASE_URL = typeof window !== 'undefined' && ['localhost','127.0.0.1','[::1]'].includes(window.location.hostname)
-  ? '/api' : 'https://k-stock-ai.onrender.com/api';
+const API_BASE_URL = '/api';
 
 const TIMEFRAMES = [
   { label: '일봉', code: '1D' },
@@ -625,7 +624,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
     }
   };
 
-  const initialDetailSymbol=routeSymbol || (recommendationMode==='legacy50'?'005930':null);
+  const initialDetailSymbol=routeSymbol || null;
   useEffect(() => {
     if(initialDetailSymbol)loadRealStockData(initialDetailSymbol,isStockRoute?routeSymbol:'삼성전자','1D');
     return()=>{
@@ -641,10 +640,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const recommendationLoader=useMemo(()=>createRecommendationLoader(backendService,
     patch=>setRecommendationRun(previous=>({...previous,...patch}))),[backendService]);
   const loadRecommendations=useCallback(()=>recommendationLoader.load(),[recommendationLoader]);
-  useEffect(()=>{
-    if(!isStockRoute&&recommendationMode==='legacy50')loadRecommendations();
-    return ()=>recommendationLoader.cancel();
-  },[loadRecommendations,recommendationLoader,recommendationMode,isStockRoute]);
+  useEffect(()=>()=>recommendationLoader.cancel(),[recommendationLoader]);
 
   const handleSearch = async (event) => {
     event.preventDefault();
@@ -2298,7 +2294,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
             </section>
 
 
-            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData} service={backendService}/>
+            <HoldingGuidance key={activeSymbol} symbol={activeSymbol} strategy={strategyData} service={backendService} siteAuthenticated/>
           </div>
         )}
 
