@@ -5,6 +5,7 @@ import CandidateOverview from './CandidateOverview.jsx';
 import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
+import IntradaySupplyPanel from './IntradaySupplyPanel.jsx';
 import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
 import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
 import CandlestickChart from './CandlestickChart.jsx';
@@ -852,6 +853,8 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         </PaperAccess>
         <ObservationPanel apiBase={API_BASE_URL} stocks={POPULAR_STOCKS} />
         </>}
+
+        {activeTab==='detail'&&<IntradaySupplyPanel key={activeSymbol} symbol={activeSymbol} name={activeName} apiBase={API_BASE_URL}/>}
 
         {!isStockRoute && !recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
           <details className="home-expanded">

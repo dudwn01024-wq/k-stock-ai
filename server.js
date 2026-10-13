@@ -46,6 +46,9 @@ installExecutionMode(app,executionMode);
 const {createSiteHoldingGuidance,registerSiteHoldingGuidanceRoutes}=require('./services/siteHoldingGuidance');
 const holdingGuidanceAccess=createSiteHoldingGuidance(privateSite.access);
 registerSiteHoldingGuidanceRoutes(app,holdingGuidanceAccess,privateSite.access);
+const {createKisIntradayEstimate}=require('./services/kisIntradayEstimate');
+const {registerIntradaySupplyRoutes}=require('./services/intradaySupplyApi');
+registerIntradaySupplyRoutes(app,createKisIntradayEstimate({env:process.env}),privateSite.access);
 app.use(express.json());
 
 const NAVER_HEADERS = {

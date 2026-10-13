@@ -13,6 +13,7 @@ async function fixture(){
   const access=createPrivateSiteAccess({env:{...testEnv,SITE_PUBLIC_ORIGIN:origin},testOnly:true,now:()=>clock,random:()=>Buffer.alloc(24,++serial)});
   const site=installPrivateSite(app,{access});
   app.get('/api/runtime-config',(req,res)=>res.json({mode:'public',paperEnabled:false}));
+  app.get('/api/stock/intraday-supply/config',(req,res)=>res.json({enabled:false,reason:'DISABLED'}));
   app.get('/api/stock/recommendation-mode',(req,res)=>res.json({universeMode:mode,expandedEnabled:true,settings:{aiEnabled:false}}));
   app.get('/api/stock/recommendation-history',(req,res)=>res.json({status:'NOT_CONFIGURED',items:[],total:0,page:1,heldCount:0}));
   app.all('/api/*',(req,res)=>{dataCalls++;res.status(403).json({error:'TEST_ONLY_DATA_FORBIDDEN'});});app.use(site.serveApp);
