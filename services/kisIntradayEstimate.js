@@ -10,9 +10,13 @@ const validSymbol=value=>typeof value==='string'&&/^\d{6}$/.test(value);
 function quantity(value){
   if(value===undefined||value===null||value==='')return {value:null,state:'MISSING'};
   if(typeof value==='string'){
-    if(!value.trim())return {value:null,state:'MISSING'};
-    if(!/^[+-]?\d{1,16}$/.test(value.trim()))return {value:null,state:'INVALID'};
-    value=Number(value.trim());
+    const text=value.trim();
+    if(!text)return {value:null,state:'MISSING'};
+    if(!/^[+-]?\d+$/.test(text))return {value:null,state:'INVALID'};
+    // Leading zero padding changes representation length, not the integer value.
+    const canonical=text.replace(/^([+-]?)0+(?=\d)/,'$1');
+    if(!/^[+-]?\d{1,16}$/.test(canonical))return {value:null,state:'INVALID'};
+    value=Number(canonical);
   }
   return typeof value==='number'&&Number.isSafeInteger(value)?{value,state:'PRESENT'}:{value:null,state:'INVALID'};
 }
