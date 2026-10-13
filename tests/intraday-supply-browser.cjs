@@ -8,7 +8,7 @@ const {createPrivateSiteAccess,installPrivateSite}=require('../services/privateS
 const {createKisIntradayEstimate}=require('../services/kisIntradayEstimate');
 const {createKisEstimateTokenCache}=require('../services/kisEstimateTokenCache');
 const {registerIntradaySupplyRoutes}=require('../services/intradaySupplyApi');
-const out=path.resolve(__dirname,'../../kis-estimate-evidence');
+const out=path.resolve(process.argv[2]||path.resolve(__dirname,'../../kis-estimate-evidence'));fs.mkdirSync(out,{recursive:true});
 const testEnv={SITE_ACCESS_PASSWORD:'TEST_ONLY_KIS_BROWSER_PASSWORD',SITE_SESSION_SECRET:'TEST_ONLY_KIS_BROWSER_SIGNER_'.repeat(3)};
 async function fixture(){
   let clock=Date.now(),serial=0,manual=0,upstream=0,analysis=0,mode='good';
@@ -30,8 +30,11 @@ async function fixture(){
       assert.equal(target.pathname,'/uapi/domestic-stock/v1/quotations/investor-trend-estimate');
       await new Promise(r=>setTimeout(r,250));
       return new Response(JSON.stringify(mode==='fail'?{rt_cd:'1',msg1:'TEST_ONLY_SECRET_NOT_FOR_UI'}:{rt_cd:'0',output2:[
-        {bsop_hour_gb:'1',frgn_fake_ntby_qty:'0',orgn_fake_ntby_qty:'-125',sum_fake_ntby_qty:'-125'},
-        {bsop_hour_gb:'2',frgn_fake_ntby_qty:'42',orgn_fake_ntby_qty:'',sum_fake_ntby_qty:''}]}));}});},
+        {bsop_hour_gb:'5',orgn_fake_ntby_qty:null,sum_fake_ntby_qty:''},
+        {bsop_hour_gb:'4',frgn_fake_ntby_qty:' ',orgn_fake_ntby_qty:false,sum_fake_ntby_qty:'TEST_ONLY_SECRET_RESPONSE_TEXT'},
+        {bsop_hour_gb:'3',frgn_fake_ntby_qty:'0.0000',orgn_fake_ntby_qty:'-125.00',sum_fake_ntby_qty:'42.0'},
+        {bsop_hour_gb:'2',frgn_fake_ntby_qty:'1,000',orgn_fake_ntby_qty:'9007199254740992',sum_fake_ntby_qty:1.5},
+        {bsop_hour_gb:'1',frgn_fake_ntby_qty:'0',orgn_fake_ntby_qty:'-125',sum_fake_ntby_qty:'-125'}]}));}});},
     advance:ms=>clock+=ms,setMode:x=>mode=x,counts:()=>({manual,upstream,analysis}),
     close:()=>new Promise(r=>{server.closeAllConnections();server.close(r);})};
 }
@@ -54,7 +57,10 @@ async function fixture(){
       const manualResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/stock/intraday-supply');
       await button.evaluate(element=>{element.click();element.click();});assert.equal((await manualResponse).status(),200);
       await panel.getByText('0주',{exact:true}).waitFor();assert.equal(f.counts().manual,1);assert.equal(f.counts().upstream,2);
-      assert.equal(await panel.locator('article').count(),2);assert.match(await panel.innerText(),/원천 거래일[\s\S]*미확인/);assert.match(await panel.innerText(),/서버 조회시각 \(KST\)/);
+      assert.equal(await panel.locator('article').count(),5);assert.match(await panel.innerText(),/원천 거래일[\s\S]*미확인/);assert.match(await panel.innerText(),/서버 조회시각 \(KST\)/);
+      const diagnosticText=await panel.innerText();
+      for(const label of ['응답에 수량 필드가 없습니다.','응답 수량이 빈 값입니다.','소수점 문자열을 받아','쉼표가 포함된 문자열을 받아','정수 문자열이 허용 범위를 벗어나','소수 숫자를 받아','지원하지 않는 값 형식입니다.','지원하지 않는 문자열 형식입니다.'])assert.ok(diagnosticText.includes(label),label);
+      assert.equal(await panel.locator('.intraday-supply-diagnosis').count(),12);assert.doesNotMatch(diagnosticText,/TEST_ONLY_SECRET|fake_ntby_qty/);
       await panel.evaluate(element=>{const label=document.createElement('p');label.textContent='MOCK UI 검증 · 실제 수급 데이터가 아닙니다.';label.style.color='#ac2937';element.prepend(label);});
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await panel.screenshot({path:path.join(out,'reference-'+width+'.png')});
       await button.click();await panel.getByRole('alert').waitFor();assert.match(await panel.getByRole('alert').innerText(),/60초/);assert.equal(await panel.locator('article').count(),0);assert.equal(f.counts().upstream,2);
@@ -66,7 +72,7 @@ async function fixture(){
       await page.goto(f.origin+'/about');await page.getByRole('button',{name:'로그아웃',exact:true}).waitFor();
       await page.getByRole('button',{name:'로그아웃',exact:true}).click();await page.getByRole('button',{name:'접속',exact:true}).waitFor();await page.goBack();await page.getByRole('button',{name:'접속',exact:true}).waitFor();
       assert.equal(f.counts().upstream,4);assert.equal(external,0);assert.deepEqual(pageErrors,[]);
-      cases.push({width,offNoRequests:true,loginRefreshBackMock500NoKis:true,doubleClickOneQuery:true,rateLimitNoExtraUpstream:true,failureClearsOldRows:true,zeroAndMissingDistinct:true,unknownSourceDateTime:true,logoutBackProtected:true,syntheticUpstreamRequests:4,actualFinancialProviderRequests:0,externalRequests:external,horizontalOverflow:false});
+      cases.push({width,offNoRequests:true,loginRefreshBackMock500NoKis:true,doubleClickOneQuery:true,rateLimitNoExtraUpstream:true,failureClearsOldRows:true,zeroAndMissingDistinct:true,missingInvalidAndFormatDiagnostics:true,rawValuesAndSecretsHidden:true,unknownSourceDateTime:true,logoutBackProtected:true,syntheticUpstreamRequests:4,actualFinancialProviderRequests:0,externalRequests:external,horizontalOverflow:false});
     }catch(error){await page.screenshot({path:path.join(out,'qa-failure-'+width+'.png'),fullPage:true}).catch(()=>{});console.log(JSON.stringify({width,path:new URL(page.url()).pathname,counts:f.counts(),pageErrors}));throw error;}
     finally{await context.close();await f.close();}
   }}finally{await browser.close();}

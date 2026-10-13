@@ -1,5 +1,18 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('fs'),{pathToFileURL}=require('url'),path=require('path');
+test('TEST_ONLY quantity diagnostics explain missing versus invalid and never echo untrusted format values',async()=>{
+  const {estimateQuantityDiagnosis:diagnose}=await import(pathToFileURL(path.resolve('frontend/src/utils/intradaySupply.js')));
+  assert.equal(diagnose('PRESENT','INTEGER_STRING'),null);
+  assert.equal(diagnose('MISSING','FIELD_ABSENT'),'응답에 수량 필드가 없습니다.');
+  for(const kind of ['NULL','UNDEFINED','EMPTY_STRING','WHITESPACE_STRING'])assert.equal(diagnose('MISSING',kind),'응답 수량이 빈 값입니다.');
+  assert.match(diagnose('INVALID','DECIMAL_STRING'),/소수점 문자열/);assert.match(diagnose('INVALID','GROUPED_STRING'),/쉼표/);
+  assert.match(diagnose('INVALID','UNSAFE_NUMBER'),/정수 범위/);assert.match(diagnose('INVALID','INTEGER_STRING'),/허용 범위/);
+  assert.match(diagnose('INVALID','DECIMAL_NUMBER'),/소수 숫자/);assert.match(diagnose('INVALID','OTHER_TYPE'),/값 형식/);
+  for(const kind of ['TEST_ONLY_SECRET_TEXT','__proto__','constructor',null,{}])assert.equal(diagnose('INVALID',kind),'수량이 정수 형식이나 허용 범위를 충족하지 않습니다.');
+  assert.doesNotMatch(diagnose('TEST_ONLY_SECRET_STATE','TEST_ONLY_SECRET_FORMAT'),/TEST_ONLY/);
+  const panel=fs.readFileSync('frontend/src/IntradaySupplyPanel.jsx','utf8');
+  assert.match(panel,/row\[key\]===null\?estimateQuantityDiagnosis/);assert.match(panel,/row\.quantityStates\?\.\[kind\],row\.quantityFormats\?\.\[kind\]/);
+});
 test('TEST_ONLY client explicit GET intent, signed zero/missing, no persistent storage/polling/score hooks',async()=>{
   const {readEstimate,formatEstimateQuantity}=await import(pathToFileURL(path.resolve('frontend/src/utils/intradaySupply.js')));
   assert.equal(formatEstimateQuantity(0),'0주');assert.equal(formatEstimateQuantity(null),'미확인');assert.equal(formatEstimateQuantity(-12),'-12주');assert.equal(formatEstimateQuantity(12),'+12주');

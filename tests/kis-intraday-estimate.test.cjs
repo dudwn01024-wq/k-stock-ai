@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const {createKisIntradayEstimate:makeAdapter,normalizeEstimate,quantity,POLICY,ORIGIN,ENDPOINT,TR_ID}=require('../services/kisIntradayEstimate');
+const {createKisIntradayEstimate:makeAdapter,normalizeEstimate,quantity,quantityFormat,POLICY,ORIGIN,ENDPOINT,TR_ID}=require('../services/kisIntradayEstimate');
 const {createKisEstimateTokenCache}=require('../services/kisEstimateTokenCache');
 const createKisIntradayEstimate=options=>makeAdapter({...options,tokenCache:createKisEstimateTokenCache()});
 const env=()=>({KIS_INTRADAY_ESTIMATE_ENABLED:'true',KIS_INTRADAY_ESTIMATE_ENVIRONMENT:'live',
@@ -37,6 +37,23 @@ test('TEST_ONLY mapping keeps every provider row, no sum calculation, raw input 
   assert.equal(result.observedAt,'2026-10-12T01:10:00.000Z');assert.equal(result.unit,'shares');
   assert.equal(normalizeEstimate({rt_cd:'0',output2:[]},{symbol:'005930',observedAt:'TEST_ONLY'}).status,'EMPTY');
   for(const body of [{rt_cd:'1',output2:[]},{rt_cd:'0',output2:{}},{rt_cd:'0',output2:[null]},{rt_cd:'0',output2:Array(21).fill({})}])assert.throws(()=>normalizeEstimate(body,{}));
+});
+test('TEST_ONLY diagnostic formats separate absence, blanks and numeric shapes without accepting new quantities',()=>{
+  assert.equal(quantityFormat({},'qty'),'FIELD_ABSENT');
+  const cases=[[null,'NULL'],[undefined,'UNDEFINED'],['','EMPTY_STRING'],['  ','WHITESPACE_STRING'],
+    [0,'INTEGER_NUMBER'],[-42,'INTEGER_NUMBER'],[1.5,'DECIMAL_NUMBER'],[Infinity,'NON_FINITE_NUMBER'],[NaN,'NON_FINITE_NUMBER'],
+    [Number.MAX_SAFE_INTEGER+1,'UNSAFE_NUMBER'],['0','INTEGER_STRING'],[' -42 ','INTEGER_STRING'],['9007199254740992','INTEGER_STRING'],
+    ['0.0000','DECIMAL_STRING'],['-42.00','DECIMAL_STRING'],['.5','DECIMAL_STRING'],['1.','DECIMAL_STRING'],
+    ['-1,234','GROUPED_STRING'],['1,234.00','GROUPED_STRING'],['1,00','OTHER_STRING'],['1e3','OTHER_STRING'],
+    ['TEST_ONLY_SECRET_RESPONSE_TEXT','OTHER_STRING'],[false,'OTHER_TYPE'],[{},'OTHER_TYPE'],[[],'OTHER_TYPE']];
+  for(const [value,format]of cases)assert.equal(quantityFormat({qty:value},'qty'),format);
+  for(const value of ['0.0000','1,234','1.5',1.5,'9007199254740992'])assert.deepEqual(quantity(value),{value:null,state:'INVALID'});
+  const result=normalizeEstimate({rt_cd:'0',output2:[{bsop_hour_gb:'5',orgn_fake_ntby_qty:null,sum_fake_ntby_qty:'TEST_ONLY_SECRET_RESPONSE_TEXT',
+    appkey:'TEST_ONLY_BODY_KEY',access_token:'TEST_ONLY_BODY_TOKEN',unknown:'TEST_ONLY_UNREVIEWED_FIELD'}]},{});
+  assert.deepEqual(result.rows[0].quantityFormats,{foreign:'FIELD_ABSENT',institution:'NULL',sum:'OTHER_STRING'});
+  assert.deepEqual(result.rows[0].quantityStates,{foreign:'MISSING',institution:'MISSING',sum:'INVALID'});
+  assert.doesNotMatch(JSON.stringify(result),/TEST_ONLY|fake_ntby|appkey|access_token|unknown/);
+  assert.equal(result.rows[0].sumNetQuantity,null);assert.equal(result.eligibleForSupplyScore,false);
 });
 test('TEST_ONLY exact live GET/TR/query and isolated OAuth; at most two calls first query, token is never in result',async()=>{
   let clock=100000;const calls=[],service=createKisIntradayEstimate({env:env(),now:()=>clock,fetchImpl:async(url,options)=>{calls.push({url,options});return calls.length===1?auth():response(fixture());}});

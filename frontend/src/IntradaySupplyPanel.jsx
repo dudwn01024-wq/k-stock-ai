@@ -1,5 +1,5 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {formatEstimateQuantity,readEstimate} from './utils/intradaySupply.js';
+import {estimateQuantityDiagnosis,formatEstimateQuantity,readEstimate} from './utils/intradaySupply.js';
 import './intraday-supply.css';
 const setupLabels={DISABLED:'기능이 꺼져 있습니다.',
   LIVE_ENVIRONMENT_REQUIRED:'실전 조회 환경 지정이 필요합니다.',CREDENTIALS_REQUIRED:'조회 자격증명 준비가 필요합니다.'};
@@ -48,10 +48,11 @@ export default function IntradaySupplyPanel({symbol,name,apiBase='/api'}){
       {result.rows.length===0?<p role="status">가집계 응답에 행이 없습니다. 0으로 해석하지 않습니다.</p>:<div className="intraday-supply-rows">
         {result.rows.map((row,index)=><article className="intraday-supply-row" key={index}>
           <h4>입력구분 {row.inputCode??'미확인'} <small>· 시간 매핑 미확인</small></h4>
-          <dl><div><dt>외국인 수량(가집계)</dt><dd>{formatEstimateQuantity(row.foreignNetQuantity)}</dd></div>
-            <div><dt>기관 수량(가집계)</dt><dd>{formatEstimateQuantity(row.institutionNetQuantity)}</dd></div>
-            <div><dt>합산 수량(가집계)</dt><dd>{formatEstimateQuantity(row.sumNetQuantity)}</dd></div></dl>
-          {Object.values(row.quantityStates??{}).some(x=>x!=='PRESENT')&&<p>일부 수량이 누락되거나 형식이 확인되지 않았습니다.</p>}
+          <dl>{[['foreign','foreignNetQuantity','외국인'],['institution','institutionNetQuantity','기관'],['sum','sumNetQuantity','합산']].map(([kind,key,label])=>{
+            const diagnosis=row[key]===null?estimateQuantityDiagnosis(row.quantityStates?.[kind],row.quantityFormats?.[kind]):null;
+            return <div key={kind}><dt>{label} 수량(가집계)</dt><dd>{formatEstimateQuantity(row[key])}
+              {diagnosis&&<small className="intraday-supply-diagnosis">{diagnosis}</small>}</dd></div>;
+          })}</dl>
         </article>)}
       </div>}
       <p className="intraday-supply-note">행 순서는 응답 그대로입니다. 마지막 행을 최신값으로 선택하거나 행들을 더하지 않습니다.</p>

@@ -16,6 +16,23 @@ function quantity(value){
   }
   return typeof value==='number'&&Number.isSafeInteger(value)?{value,state:'PRESENT'}:{value:null,state:'INVALID'};
 }
+// Enumerated shape only. Never return or log raw values, unknown keys or response bodies.
+function quantityFormat(item,key){
+  if(!Object.prototype.hasOwnProperty.call(item,key))return 'FIELD_ABSENT';
+  const value=item[key];
+  if(value===null)return 'NULL';
+  if(value===undefined)return 'UNDEFINED';
+  if(typeof value==='number')return !Number.isFinite(value)?'NON_FINITE_NUMBER':
+    !Number.isInteger(value)?'DECIMAL_NUMBER':!Number.isSafeInteger(value)?'UNSAFE_NUMBER':'INTEGER_NUMBER';
+  if(typeof value!=='string')return 'OTHER_TYPE';
+  if(value==='')return 'EMPTY_STRING';
+  const text=value.trim();
+  if(!text)return 'WHITESPACE_STRING';
+  if(/^[+-]?\d+$/.test(text))return 'INTEGER_STRING';
+  if(/^[+-]?(?:\d+\.\d*|\.\d+)$/.test(text))return 'DECIMAL_STRING';
+  if(/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(text))return 'GROUPED_STRING';
+  return 'OTHER_STRING';
+}
 function normalizeEstimate(body,{symbol,observedAt}){
   if(!body||Array.isArray(body)||String(body.rt_cd)!=='0')throw fail('KIS_ESTIMATE_UPSTREAM_REJECTED');
   if(!Array.isArray(body.output2)||body.output2.length>POLICY.maxRows)throw fail('KIS_ESTIMATE_RESPONSE_INVALID');
@@ -26,7 +43,8 @@ function normalizeEstimate(body,{symbol,observedAt}){
     const foreign=quantity(item.frgn_fake_ntby_qty),institution=quantity(item.orgn_fake_ntby_qty),sum=quantity(item.sum_fake_ntby_qty);
     return {row:index+1,inputCode,inputCodeState:inputCode!==null?'PRESENT':raw===undefined||raw===null||raw===''?'MISSING':'INVALID',
       foreignNetQuantity:foreign.value,institutionNetQuantity:institution.value,sumNetQuantity:sum.value,
-      quantityStates:{foreign:foreign.state,institution:institution.state,sum:sum.state}};
+      quantityStates:{foreign:foreign.state,institution:institution.state,sum:sum.state},
+      quantityFormats:{foreign:quantityFormat(item,'frgn_fake_ntby_qty'),institution:quantityFormat(item,'orgn_fake_ntby_qty'),sum:quantityFormat(item,'sum_fake_ntby_qty')}};
   });
   return {symbol,source:'KIS_INTRADAY_ESTIMATE',kind:'PROVISIONAL_EMPLOYEE_INPUT_CUMULATIVE',unit:'shares',
     status:rows.length?'REFERENCE_ONLY':'EMPTY',observedAt,sourceTradeDate:null,sourceUpdatedAt:null,
@@ -106,4 +124,4 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
   }
   return Object.freeze({availability,query});
 }
-module.exports={createKisIntradayEstimate,normalizeEstimate,quantity,validSymbol,POLICY,ORIGIN,ENDPOINT,TR_ID};
+module.exports={createKisIntradayEstimate,normalizeEstimate,quantity,quantityFormat,validSymbol,POLICY,ORIGIN,ENDPOINT,TR_ID};

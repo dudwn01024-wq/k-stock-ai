@@ -26,9 +26,13 @@ test('TEST_ONLY real auth/CSRF protects all new methods; metadata/login/missing 
   adapter=createKisIntradayEstimate({env:{KIS_INTRADAY_ESTIMATE_ENABLED:'true',KIS_INTRADAY_ESTIMATE_ENVIRONMENT:'live',
     KIS_INTRADAY_ESTIMATE_APP_KEY:'TEST_ONLY_API_KEY',KIS_INTRADAY_ESTIMATE_APP_SECRET:'TEST_ONLY_API_SECRET'},fetchImpl:async url=>{
       providerCalls++;return new Response(JSON.stringify(url.includes('tokenP')?{access_token:'TEST_ONLY_API_TOKEN',expires_in:86400}:
-        {rt_cd:'0',output2:[{bsop_hour_gb:'1',frgn_fake_ntby_qty:'0',orgn_fake_ntby_qty:'1',sum_fake_ntby_qty:'1'}]}));}});
+        {rt_cd:'0',output2:[{bsop_hour_gb:'1',frgn_fake_ntby_qty:'0',orgn_fake_ntby_qty:'1',sum_fake_ntby_qty:'1'},
+          {bsop_hour_gb:'5',orgn_fake_ntby_qty:'-1.0000',sum_fake_ntby_qty:'TEST_ONLY_API_SECRET_RESPONSE_TEXT'}]}));}});
   const successful=await request('/api/stock/intraday-supply?symbol=005930',{headers:manual});assert.equal(successful.status,200);
   const data=await successful.json();assert.equal(data.rows[0].foreignNetQuantity,0);assert.equal(data.eligibleForSupplyScore,false);assert.doesNotMatch(JSON.stringify(data),/TEST_ONLY_API_(?:TOKEN|KEY|SECRET)/);
+  assert.deepEqual(data.rows[1].quantityFormats,{foreign:'FIELD_ABSENT',institution:'DECIMAL_STRING',sum:'OTHER_STRING'});
+  assert.deepEqual(data.rows[1].quantityStates,{foreign:'MISSING',institution:'INVALID',sum:'INVALID'});
+  assert.equal(data.rows[1].institutionNetQuantity,null);assert.equal(data.rows[1].sumNetQuantity,null);
   assert.equal(providerCalls,2);
   const limited=await request('/api/stock/intraday-supply?symbol=005930',{headers:manual});assert.equal(limited.status,429);assert.equal(limited.headers.get('retry-after'),'60');assert.equal(providerCalls,2);
 });
