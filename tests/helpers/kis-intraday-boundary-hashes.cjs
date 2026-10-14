@@ -1,8 +1,8 @@
 'use strict';
-// Exact reviewed manual/scheduled/autonomous/dated-after-close sources only.
+// Exact reviewed manual/scheduled/autonomous/dated-after-close/detail-display sources only.
 module.exports={
   "server.js": "55d2dfd7531bd55fa5794e159a6de7008e110adfca95b95417b97e2dfe580239",
-  "frontend/src/App.jsx": "f1b324085bd00ec319298cca2a1f4faae29d34b65ddcb2ec8a184eb876c759b3",
+  "frontend/src/App.jsx": "01854300aa321c97eb0db205f4021d4df19d8dec55d24a685aaf0478a66fa2ad",
   "services/kisIntradayEstimate.js": "c31231e4da1e3c39bb7b6feb276cf408e809879312c8dfafdd3fb47b713aa13b",
   "services/kisEstimateTokenCache.js": "42f74758bfbf3cc0ccb53cbba8343f25738aa73d065c09947a70e255325cfddd",
   "services/intradaySupplyApi.js": "1c51afd19d40e0097883c3953bd97d9847b20072e28adfd0b3cb608da842d51d",
@@ -25,7 +25,9 @@ module.exports={
   "services/naverMarketData.js": "4b3f5e08e40c7eabdf22e098aa9e5f8de2d28ced05a2be745e039ffe676055da",
   "services/kisAutonomousRecommendations.js": "898757222ab67e9473cf6d08897f9157e55d827ec313198700dad5a7c58c49b9",
   "services/kisRecommendationStore.js": "eb3d254c6d75c396d1acc759cbc9af787d3a7f15b6947e89e5c961eefc766ce4",
-  "frontend/src/AutonomousSupplyPanel.jsx": "d50841cf32979b6e4fa76f8cf539303de804c2280a20385dd68259893e8328ee",
+  "frontend/src/AutonomousSupplyPanel.jsx": "0d192a1f2cbc7f6ff47a58b9d3b5f29caf0ecd3b9a881ed14e18a694d1ed9bea",
   "services/kisDailyInvestor.js": "db6c4a016943a0c5afaede25fe9aeec00458c4999dadf64b369b3c68eb9d37a4",
-  "services/kisAfterCloseOnce.js": "d2835921ad72a1e017a23584caf237a9b8d5f77f4fcb0f1767625d1da10e8a0c"
+  "services/kisAfterCloseOnce.js": "d2835921ad72a1e017a23584caf237a9b8d5f77f4fcb0f1767625d1da10e8a0c",
+  "frontend/src/CurrentAnalysisSummary.jsx": "abb0315793a4fb9e3b16b4f041602617d6a82961df9d487087fde3358c72b6d1",
+  "frontend/src/utils/detailSupply.js": "131ffaefc2534c8f1f22f5eb3ad1649b3b5a050ad59c441f13d4c2c39f012ff7"
 };

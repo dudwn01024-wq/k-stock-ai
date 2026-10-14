@@ -1,5 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {readEstimate} from './utils/intradaySupply.js';
+import {detailSupplyPresentation} from './utils/detailSupply.js';
 import './intraday-supply.css';
 export default function AutonomousSupplyPanel({symbol,source,apiBase='/api',onSnapshot}){
   const [view,setView]=useState(null),[error,setError]=useState(null);
@@ -7,14 +8,16 @@ export default function AutonomousSupplyPanel({symbol,source,apiBase='/api',onSn
   useEffect(()=>{let alive=true,timer;const controller=new AbortController();
     async function read(){try{const value=await readEstimate(apiBase+'/stock/recommendations/latest-kis?symbol='+encodeURIComponent(symbol),{signal:controller.signal});
       if(alive){setView(value);setError(null);callback.current?.(value);}}
-      catch{if(alive){setError('저장된 KIS 추천을 확인하지 못했습니다. 현재 수급 판정을 보류합니다.');callback.current?.({cacheUnavailable:true});}}
+      catch{if(alive){setError('저장된 KIS 추천을 확인하지 못했습니다. 현재 수급 판정을 보류합니다.');callback.current?.({symbol,cacheUnavailable:true});}}
       if(alive)timer=setTimeout(read,60000);
     }
     read();return()=>{alive=false;clearTimeout(timer);controller.abort();};
   },[symbol,source?.id,apiBase]);
   const schedule=view?.scheduling,storage=view?.storage;
+  const selected=detailSupplyPresentation(view,symbol);
   return <section className="intraday-supply-schedule" aria-label="서버 자동 KIS 수급 추천">
     <h3>추천에 반영되는 KIS 수급</h3>
+    {selected&&<p role="status">{selected.label} · 원천 거래일 {selected.sourceTradeDate??'미확인'} · 실제 조회(KST) {selected.receivedKst} · 원천 갱신시각 {selected.sourceUpdatedAt??'미확인'}</p>}
     {view?.afterClose&&<p role="status">장후 일별 수급 보완 · 목표 거래일 {view.afterClose.targetDate} · {view.afterClose.status==='RUNNING'?'수집 중':view.afterClose.status==='COMPLETED'?'수집 완료':view.afterClose.success===0?'당일 유효자료 미확인':'일부 자료 미확인'} · 거래일 확인 {view.afterClose.success??view.afterClose.results?.filter(x=>x.status==='READY').length??0} / {view.afterClose.targetCount} · 최종 확정 여부 미확인</p>}
     <p>서버가 입력 회차에 맞춰 수급을 갱신하고 추천 목록·순위를 저장합니다. 화면을 열어두거나 후보를 등록할 필요가 없습니다.</p>
     <p>심층 후보 {schedule?.candidatePoolCount??0}개 · 선택종목 포함 최대 61개 · 수급 외 자료는 원래 분석 기준을 유지합니다.</p>

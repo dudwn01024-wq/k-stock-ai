@@ -13,10 +13,11 @@ export default function CurrentAnalysisSummary({strategy}){
     <div className="analysis-summary-heading"><h3>핵심 분석 요약</h3><span>서버 분석 결과 · 투자 참고용</span></div>
     <dl className="analysis-summary-grid">{conditions.map(([name,condition])=><div key={name}><dt>{name}</dt>
       <dd className={'analysis-badge tone-'+(tones[condition?.status]||'neutral')}>
-        {name==='뉴스'&&condition?.status==='FAVORABLE'?'긍정':labels[condition?.status]||'미확인'}</dd></div>)}
+        {name==='수급'&&strategy?.supplyPresentation?strategy.supplyPresentation.label+(!strategy.supplyPresentation.historical&&['FAVORABLE','NEUTRAL','CAUTION'].includes(condition?.status)?' · '+labels[condition.status]:''):name==='뉴스'&&condition?.status==='FAVORABLE'?'긍정':labels[condition?.status]||'미확인'}</dd></div>)}
       <div className="analysis-summary-final"><dt>최종 상태</dt><dd className={'analysis-badge tone-'+(tones[final?.status]||'neutral')}>
         {finalLabels[final?.status]||'판단 보류'}</dd></div>
     </dl>
+    {strategy?.supplyPresentation&&<p className="analysis-summary-reason">수급 원천 거래일 {strategy.supplyPresentation.sourceTradeDate??'미확인'} · 실제 조회(KST) {strategy.supplyPresentation.receivedKst} · 원천 갱신시각 {strategy.supplyPresentation.sourceUpdatedAt??'미확인'}</p>}
     {final?.reason&&<p className="analysis-summary-reason">{strategyExplanation(final.reason)}</p>}
   </section>;
 }

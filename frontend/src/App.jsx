@@ -8,6 +8,7 @@ import HoldingGuidance from './HoldingGuidance.jsx';
 import IntradaySupplyPanel from './IntradaySupplyPanel.jsx';
 import AutonomousSupplyPanel from './AutonomousSupplyPanel.jsx';
 import {projectRecommendationData} from './utils/scheduledSupply.js';
+import {reconcileDetailSupply} from './utils/detailSupply.js';
 import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
 import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
 import CandlestickChart from './CandlestickChart.jsx';
@@ -225,6 +226,7 @@ class RealStockBackendService {
     newsReceivedAt:payload?.newsReceivedAt ?? null,
     newsStatus:payload?.newsStatus ?? null,
     decisionRole: strategy?.decisionRole ?? null,
+    supplyAssessment: market?.supplyAssessment ?? null,
     dataMetadata: payload?.dataMetadata ?? null,
     // 기존 App.jsx와 호환
     symbol,
@@ -546,33 +548,12 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   }, [showDetail, loading, activeTab]);
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
-  const applyScheduledSupply=useCallback(view=>{
-    setSupplyView(view);
-    const base=scheduledBaseRef.current;if(!base||base.symbol!==activeSymbol)return;
-    if(view?.cacheUnavailable||(!view?.projection&&view?.assessment&&view?.scheduling?.scoreEnabled)){
-      const pending=view?.assessment?.status==='PENDING';
-      const conditions={...base.strategy?.marketAssessment?.conditions,supply:{status:pending?'PENDING':'UNAVAILABLE',label:'수급',reason:'현재 예약 수급 확인 필요'}};
-      const entries=Object.entries(conditions),all=entries.map(([,value])=>value),foreign=pending?view?.assessment?.foreignerNet??null:null;
-      const metadata={source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:null,freshnessStatus:'UNCONFIRMED'};
-      setQuoteData({...base.quote,foreignerNet:foreign,institutionNet:null,supplyDate:null,supplyAssessment:view?.assessment,
-        naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
-        dataMetadata:{...base.quote.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'}});
-      setStrategyData({...base.strategy,available:false,foreignerNet:foreign,institutionNet:null,netSupplyTotal:null,supplyPassed:null,signal:'WAIT',tradeSignal:'WAIT',
-        entryPrice:null,takeProfitPrice:null,stopLossPrice:null,riskRewardRatio:null,riskRewardAssessment:{available:false,status:'UNAVAILABLE'},executionAssessment:{status:'UNAVAILABLE'},
-        marketAssessment:{...base.strategy.marketAssessment,available:all.every(x=>x.status!=='UNAVAILABLE'),conditions,
-          availableCount:all.filter(x=>x.status!=='UNAVAILABLE').length,favorableCount:all.filter(x=>x.status==='FAVORABLE').length,cautionCount:all.filter(x=>x.status==='CAUTION').length,
-          pendingCount:all.filter(x=>x.status==='PENDING').length,missingRequired:entries.filter(([,x])=>x.status==='UNAVAILABLE').map(([key])=>key),pendingRequired:entries.filter(([,x])=>x.status==='PENDING').map(([key])=>key)},
-        dataMetadata:{...base.strategy.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'},finalAssessment:{status:'WAIT',label:'수급 확인 필요',reason:'이전 수급을 현재 값으로 사용하지 않습니다.'}});return;
-    }
-    const projected=view?.projection;if(!projected||projected.symbol!==activeSymbol){setQuoteData(base.quote);setStrategyData(base.strategy);return;}
-    const mapped=backendService.mapStockStrategy(activeSymbol,projected),context=projected.marketContext;
-    setQuoteData({...base.quote,foreignerNet:context.foreignerNet,institutionNet:context.institutionNet,supplyDate:null,
-      naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
-      supplyAssessment:view.assessment,dataMetadata:{...base.quote.dataMetadata,supply:projected.supplyMetadata,dateConsistency:'UNKNOWN'}});
-    setStrategyData({...base.strategy,...mapped,dataPoints:base.strategy.dataPoints,newsSnapshotId:base.strategy.newsSnapshotId,
-      newsReceivedAt:base.strategy.newsReceivedAt,newsStatus:base.strategy.newsStatus,supplyAssessment:view.assessment,
-      dataMetadata:{...base.strategy.dataMetadata,supply:projected.supplyMetadata,dateConsistency:'UNKNOWN'}});
-  },[activeSymbol,backendService]);
+  const applyScheduledSupply=useCallback(view=>setSupplyView(view),[]);
+  useEffect(()=>{
+    const base=scheduledBaseRef.current;if(loading||isRefreshing||base?.symbol!==activeSymbol)return;
+    const updated=reconcileDetailSupply(base,supplyView,(symbol,payload)=>backendService.mapStockStrategy(symbol,payload));
+    if(updated){setQuoteData(updated.quote);setStrategyData(updated.strategy);}
+  },[loading,isRefreshing,activeSymbol,supplyView,backendService]);
   useEffect(()=>{
     if(isStockRoute)return;
     let active=true;
@@ -895,9 +876,9 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
         {activeTab==='detail'&&<IntradaySupplyPanel key={activeSymbol} symbol={activeSymbol} name={activeName} apiBase={API_BASE_URL}/>}
         {quoteData?.naverDailySupply&&<aside className="intraday-supply-schedule" aria-label="NAVER 일별 수급 참고">
-          <h3>NAVER 일별 수급 참고 · 현재 추정 수급 판정과 분리</h3>
+          <h3>NAVER 일별 수급 참고 · KIS 수급 판정과 분리</h3>
           <p>기준일 {quoteData.naverDailySupply.supplyDate??'미확인'} · 외국인 {formatNumberWithUnit(quoteData.naverDailySupply.foreignerNet,'주')} · 기관 {formatNumberWithUnit(quoteData.naverDailySupply.institutionNet,'주')}</p>
-          <p>KIS 표시값은 관측 회차의 누적 추정치입니다. 원천 거래일·실제 갱신시각은 제공되지 않았으며 NAVER 일별 값으로 빈 회차를 채우지 않습니다.</p>
+          <p>{quoteData.supplyPresentation?.label??'KIS 수급 확인 대기'} · {quoteData.supplyPresentation?.note??'저장된 KIS 수급을 확인합니다.'} NAVER 일별 값으로 빈 수급을 채우지 않습니다.</p>
         </aside>}
 
         {!isStockRoute && !recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
@@ -1351,7 +1332,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
               <details className="detail-source-info"><summary>데이터 제공처 · 기준일 확인</summary><div className="text-xs text-slate-400 space-y-1">
                 <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
                 <p>거래량 — {describeDataMetadata(quoteData?.dataMetadata?.volume)}</p>
-                <p>수급 — {describeDataMetadata(quoteData?.dataMetadata?.supply)}</p>
+                <p>수급 — {quoteData.supplyPresentation?.historical?'이전 거래일 저장 자료 · ':''}{describeDataMetadata(quoteData.supplyPresentation?.historical?quoteData.supplyPresentation.assessment.metadata:quoteData?.dataMetadata?.supply)}</p>
                 <p>상세 일봉 — {describeDataMetadata(strategyData?.dataMetadata?.daily)}</p>
 
               </div></details>
@@ -1849,11 +1830,11 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
         <div className="space-y-1">
           <p className={`text-xs font-mono ${getFlowColorClass(strategyData?.foreignerNet)}`}>
-            외국인 {formatNumberWithUnit(strategyData?.foreignerNet, '주')}
+            외국인 {formatNumberWithUnit(strategyData?.supplyPresentation?.historical?strategyData.supplyPresentation.foreignerNet:strategyData?.foreignerNet, '주')}
           </p>
 
           <p className={`text-xs font-mono ${getFlowColorClass(strategyData?.institutionNet)}`}>
-            기관 {formatNumberWithUnit(strategyData?.institutionNet, '주')}
+            기관 {formatNumberWithUnit(strategyData?.supplyPresentation?.historical?strategyData.supplyPresentation.institutionNet:strategyData?.institutionNet, '주')}
           </p>
         </div>
 
@@ -1866,13 +1847,13 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                 : 'text-slate-400'
           }`}
         >
-          {strategyData?.marketAssessment?.conditions?.supply?.status === 'NEUTRAL'
+          {strategyData?.supplyPresentation?.label??(strategyData?.marketAssessment?.conditions?.supply?.status === 'NEUTRAL'
             ? '중립'
-            : strategyData?.marketAssessment?.conditions?.supply?.label || '상태 없음'}
+            : strategyData?.marketAssessment?.conditions?.supply?.label || '상태 없음')}
         </span>
 
         <p className="text-[11px] text-slate-500 mt-1">
-          {strategyData?.marketAssessment?.conditions?.supply?.detail ||
+          {strategyData?.supplyPresentation?.note||strategyData?.marketAssessment?.conditions?.supply?.detail ||
             '데이터 없음'}
         </p>
       </div>
@@ -1917,10 +1898,10 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                     <TrendingUp className="w-4 h-4 text-emerald-400" />
                     외국인 · 기관 수급
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">백엔드에서 조회된 최근 순매수 수량입니다.</p>
+                  <p className="text-xs text-slate-400 mt-1">{quoteData.supplyPresentation?.label??'저장 수급 확인 대기'}</p>
                 </div>
                 <span className="text-[11px] text-slate-500 font-mono">
-                  기준일 {formatNewsDate(quoteData.supplyDate)}
+                  원천 거래일 {quoteData.supplyPresentation?.sourceTradeDate??quoteData.supplyDate??'미확인'}
                 </span>
               </div>
 
@@ -1928,17 +1909,19 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
                   <span className="text-xs text-slate-400 block mb-1">외국인 순매수</span>
                   <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.foreignerNet)}`}>
-                    {formatNumberWithUnit(quoteData.foreignerNet, '주')}
+                    {formatNumberWithUnit(quoteData.supplyPresentation?.historical?quoteData.supplyPresentation.foreignerNet:quoteData.foreignerNet, '주')}
                   </span>
                 </div>
 
                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
                   <span className="text-xs text-slate-400 block mb-1">기관 순매수</span>
                   <span className={`text-xl font-bold font-mono ${getFlowColorClass(quoteData.institutionNet)}`}>
-                    {formatNumberWithUnit(quoteData.institutionNet, '주')}
+                    {formatNumberWithUnit(quoteData.supplyPresentation?.historical?quoteData.supplyPresentation.institutionNet:quoteData.institutionNet, '주')}
                   </span>
                 </div>
               </div>
+              <p className="text-xs text-slate-400">실제 조회(KST) {quoteData.supplyPresentation?.receivedKst??'미확인'} · 원천 갱신시각 {quoteData.supplyPresentation?.sourceUpdatedAt??'미확인'}</p>
+              <p className="text-xs text-slate-400">{quoteData.supplyPresentation?.note??'저장 수급 확인이 필요합니다.'}</p>
             </section>
 
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
