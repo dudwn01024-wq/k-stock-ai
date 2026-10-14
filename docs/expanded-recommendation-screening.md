@@ -4,6 +4,8 @@
 
 확장 모드는 KOSPI·KOSDAQ 시가총액 목록을 검증해 500개 종목의 universe snapshot을 만든다. 목록은 확인된 Naver 모바일 내부 경로 `/api/stocks/marketValue/{market}?page=N&pageSize=100`에서 최대 10회 읽는다. 이 경로는 공식 공개 API 계약으로 확인되지 않았다. 각 시장에서 아직 읽지 않은 페이지가 전체 500위에 들어올 가능성이 남아 있으면 실행을 중단하며, 목록을 추정해 채우지 않는다. 종류가 명확하지 않은 상장 종목은 `UNKNOWN`으로 보존한다.
 
+페이지 경계 겹침은 이미 확보한 고유 500개의 cutoff보다 새 페이지 **전체 최대값이 엄격히 낮을 때만** 제한적으로 허용한다. 같은 시장의 바로 이전 페이지에서 온 순서가 유지된 선두 겹침이며, 코드·이름·시가총액 원본 값·거래시각·종목 종류 등 universe 입력이 같아야 한다. 겹친 행은 후보·제외 수에 두 번 더하지 않고, 허용 수는 현재 실행의 `universeSnapshot.boundaryOverlapCount`에 기록한다. cutoff 동률/초과, 상충 데이터, 후보 범위 중복, 같은 페이지/다른 시장 중복, 잘못된 식별자, 불완전 페이지는 계속 중단한다. 완전한 경계 페이지와 고유 500개 검증, 최대 10회 요청, `snapshotConsistency=NOT_PROVEN`은 유지하며 추가 재조회·재시도는 없다. 이 규칙은 원자적인 실시간 시장 snapshot을 증명하지 않는다.
+
 1단계는 종목당 기존 Naver 일봉 `price?pageSize=30&page=1`을 최대 1회 읽고 21거래일의 MA5/MA20, 이전 20일 평균 거래량, 고저와 조건 2개를 계산한다. 실패와 부족한 자료는 `LOOKUP_FAILED`, `INSUFFICIENT_DATA`로 구분한다. `preScreenScore`는 0~2의 사전 순서이며 기존 4점 최종 추천 점수가 아니다. 점수, 거래량 비율, universe 시가총액 순서로 정렬해 기본 40개를 고른다. 다른 460개는 `NOT_DEEP_REVIEWED`이며 `EXCLUDED`가 아니다.
 
 2단계는 선정된 종목에만 기존 `buildRecommendationResult`와 기존 최종 정렬을 적용한다. 기존 상세 분석은 통상 basic 1회, price 1회, integration 2회, news 1회 등 종목당 약 5회 요청하며 누락 자료 보완 시 quote 경로에서 최대 2회가 더 일어날 수 있다. 실제 시도 수는 실행별 `requestStats`에 따로 기록한다. 1단계 동시성은 기본 4·최대 6, 2단계는 기본·최대 2다. 2단계 대상 수는 `RECOMMENDATION_DEEP_REVIEW_LIMIT`로 20~60 범위에서 설정하며 기본 40이다.

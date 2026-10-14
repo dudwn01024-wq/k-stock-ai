@@ -132,13 +132,17 @@ test('TEST_ONLY unchanged inputs preserve exact stocks, fingerprints and request
   assert.deepEqual(JSON.parse(JSON.stringify(current)),JSON.parse(JSON.stringify(old)));
 });
 
-test('TEST_ONLY only the exact record/issuer binding changes; all validation, loader and decision code is identical',()=>{
+test('TEST_ONLY exact record/issuer binding and reviewed boundary overlap; all classification and decision code is identical',()=>{
   const file='services/krxStockSecurityType.js',source=fs.readFileSync(file,'utf8');
   assert.equal(withoutReviewed02826K(source),execFileSync('git',['show',baseline+':'+file],{encoding:'utf8'}).replaceAll('\r\n','\n'));
   require('./helpers/universe-duplicate-boundary.cjs').assertApprovedSource(file,source);
   assert.throws(()=>require('./helpers/universe-duplicate-boundary.cjs').assertApprovedSource(file,
     source.replace("record.provider!=='KRX_KIND'","record.provider!=='ANY_PROVIDER'")),/exact universe duplicate diagnostic boundary/);
-  for(const protectedFile of ['services/recommendationUniverse.js','services/recommendationUniverseDiagnostics.js','services/expandedRunFailureDiagnostics.js',
+  // The later boundary-overlap repair is separately locked to its exact source
+  // and exercised with both successful and fail-closed universe fixtures.
+  require('./helpers/universe-duplicate-boundary.cjs').assertApprovedSource('services/recommendationUniverse.js',
+    fs.readFileSync('services/recommendationUniverse.js','utf8'));
+  for(const protectedFile of ['services/recommendationUniverseDiagnostics.js','services/expandedRunFailureDiagnostics.js',
     'services/expandedRecommendationRuns.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js','services/tradingStrategy.js',
     'services/chartAnalysis.js','services/stockDetailNews.js','services/recommendationHistory.js','services/recommendationOutcomes.js',
     'server.js','package-lock.json','pnpm-lock.yaml','frontend/src/ExpandedRecommendation.jsx'])
