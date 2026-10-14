@@ -10,10 +10,10 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
   const knownDates=new Set(settings.marketDates??[]),readCalendar=calendar??(date=>knownDates.has(date)?'STANDARD_OPEN':'UNKNOWN');
   const market=date=>{const value=readCalendar(date),day=new Date(date+'T00:00:00Z').getUTCDay();return value==='UNKNOWN'&&(day===0||day===6)?'CLOSED':value;};
   const enabled=settings.enabled===true,scoreEnabled=settings.scoreEnabled===true,entries=new Map(),attempts=new Map(),counts=new Map();
-  let subscription=null,interval=null,inFlight=false,currentSymbol=null,controller=null,nextAt=0,sessionEvidence=null,pendingDetail=null,currentContext=null;
+  let subscription=null,interval=null,inFlight=false,currentSymbol=null,controller=null,nextAt=0,sessionEvidence=null,pendingDetail=null,currentContext=null,sessionProof=null;
   const probedDates=new Set();
   const sessionAllowed=date=>market(date)==='STANDARD_OPEN'||(market(date)==='UNKNOWN'&&sessionEvidence?.date===date);
-  const freshEntry=symbol=>({symbol,snapshot:null,lastKnown:null,resetObservedDate:null,resetBasis:'OBSERVED_RESET_INFERENCE',failure:null,detailInput:null});
+  const freshEntry=symbol=>({symbol,snapshot:null,lastKnown:null,resetObservedDate:null,resetBasis:'OBSERVED_RESET_INFERENCE',failure:null,detailInput:null,resetProof:null});
   function clear(id){if(id&&subscription?.id!==id)return false;controller?.abort();subscription=null;entries.clear();pendingDetail=null;return true;}
   function active(){if(subscription&&(subscription.expiresAt<=now()||(requireHeartbeat&&subscription.viewerExpiresAt<=now())))clear();return subscription;}
   function derive(input){
@@ -51,6 +51,7 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
     if(isObservedReset(result,entry.symbol,{now:now(),calendarState:market(clock.date)})){
       entry.resetObservedDate=clock.date;entry.resetBasis='OBSERVED_RESET_INFERENCE';
       sessionEvidence={date:clock.date,symbol:entry.symbol,observedAt:result.observedAt,basis:'FIRST_INPUT_OBSERVATION_INFERENCE'};
+      entry.resetProof=structuredClone(result);sessionProof=structuredClone(result);
     }else{
       const received=kst(result.observedAt),expected=latestInput(clock.minute),codes=result.rows.map(row=>row?.inputCode);
       // A new midday candidate may infer a partial current cycle from the observed session.
@@ -59,6 +60,7 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
         codes.includes('1')&&codes.includes(expected.code)&&new Set(codes).size===codes.length&&
         codes.every(code=>INPUTS.some(x=>x.code===code)&&Number(code)<=Number(expected.code))){
         entry.resetObservedDate=clock.date;entry.resetBasis='SESSION_SCOPED_CYCLE_INFERENCE';
+        entry.resetProof=structuredClone(result);
       }
     }
     entry.lastKnown=entry.snapshot??entry.lastKnown;entry.snapshot=result;entry.failure=null;return true;
@@ -150,6 +152,30 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
   }
   function start(){if(!enabled||interval!==null)return false;interval=timers.setInterval(()=>{tick().catch(()=>{});},POLICY.tickMs);interval?.unref?.();return true;}
   function stop(){if(interval!==null)timers.clearInterval(interval);interval=null;clear();}
-  return Object.freeze({status,watch,subscribe,heartbeat,unwatch:clear,observe,resolve,view,rememberDetail,tick,mayQuery,queryContext:symbol=>mayQuery(symbol)?currentContext:null,reuseContext,start,stop});
+  // Durable evidence contains only normalized public observations. Rebuild reset
+  // proof rather than trusting a saved date/status or fetching on restart.
+  function exportState(){return {sessionProof:structuredClone(sessionProof),entries:[...entries.values()].map(x=>({
+    symbol:x.symbol,snapshot:structuredClone(x.snapshot),resetProof:structuredClone(x.resetProof),resetBasis:x.resetBasis,failure:x.failure}))};}
+  function importState(saved){
+    const clock=kst(now());if(!clock||!saved||!Array.isArray(saved.entries)||saved.entries.length>POLICY.maxTargets)return false;
+    const first=saved.sessionProof;
+    if(first&&supported(first.symbol)&&isObservedReset(first,first.symbol,{now:now(),calendarState:market(clock.date)})){
+      sessionProof=structuredClone(first);sessionEvidence={date:clock.date,symbol:first.symbol,observedAt:first.observedAt,basis:'FIRST_INPUT_OBSERVATION_INFERENCE'};
+    }
+    for(const value of saved.entries){const entry=entries.get(value?.symbol);if(!entry)continue;
+      if(value.snapshot&&validSnapshot(value.snapshot,entry.symbol)&&kst(value.snapshot.observedAt)?.time<=clock.time)entry.snapshot=structuredClone(value.snapshot);
+      if(value.failure==='LOOKUP_FAILED')entry.failure=value.failure;
+      const proof=value.resetProof,received=kst(proof?.observedAt),expected=received?latestInput(received.minute):null;
+      const reset=proof&&isObservedReset(proof,entry.symbol,{now:now(),calendarState:market(clock.date)});
+      const codes=proof?.rows?.map(x=>x.inputCode)??[];
+      const partial=value.resetBasis==='SESSION_SCOPED_CYCLE_INFERENCE'&&validSnapshot(proof,entry.symbol)&&
+        received?.date===clock.date&&received.time<=clock.time&&sessionAllowed(clock.date)&&expected&&expected.code!=='5'&&
+        codes.includes('1')&&codes.includes(expected.code)&&new Set(codes).size===codes.length&&
+        codes.every(code=>INPUTS.some(x=>x.code===code)&&Number(code)<=Number(expected.code));
+      if(reset||partial){entry.resetObservedDate=clock.date;entry.resetBasis=reset?'OBSERVED_RESET_INFERENCE':'SESSION_SCOPED_CYCLE_INFERENCE';entry.resetProof=structuredClone(proof);}
+    }
+    return true;
+  }
+  return Object.freeze({status,watch,subscribe,heartbeat,unwatch:clear,observe,resolve,view,rememberDetail,tick,mayQuery,queryContext:symbol=>mayQuery(symbol)?currentContext:null,reuseContext,start,stop,exportState,importState});
 }
 module.exports={createScheduledSupply};

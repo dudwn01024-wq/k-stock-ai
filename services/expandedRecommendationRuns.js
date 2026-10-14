@@ -43,7 +43,7 @@ function createExpandedRecommendationRuns({
   history=null,codeVersion=null,deepLimit=DEFAULT_DEEP_LIMIT,
   fastConcurrency=DEFAULT_FAST_CONCURRENCY,deepConcurrency=DEFAULT_DEEP_CONCURRENCY,
   aiEnabled=false,analyze=null,now=Date.now,makeId=randomUUID,maxEntries=MAX_RUNS_IN_MEMORY,
-  logFailure=line=>console.warn(line),getReuseContext=()=>null
+  logFailure=line=>console.warn(line),getReuseContext=()=>null,onCompleted=()=>{}
 }){
   if(![loadUniverse,fastScreen,deepReview,rank,logFailure].every(x=>typeof x==='function'))throw problem('EXPANDED_RUN_CONFIG_INVALID');
   if(!Number.isInteger(deepLimit)||deepLimit<20||deepLimit>60||
@@ -229,6 +229,12 @@ function createExpandedRecommendationRuns({
         const finalStatus=run.stats.fastFailed||run.stats.fastInsufficient||run.stats.deepFailed?'PARTIAL':'COMPLETED';
         run.status=finalStatus;
         run.scanCompletedAt=timestamp();
+        // Preserve the entire pre-supply deep pool, including currently excluded
+        // results. Never seed an autonomous pool from the final visible subset.
+        try{const latest=await onCompleted({id:runId,mode:'expanded500',scanStartedAt:run.scanStartedAt,
+          scanCompletedAt:run.scanCompletedAt,items:ranked,reviewSymbols:deepTargets.map(x=>x.symbol),stats:run.stats,codeVersion:run.codeVersion});
+          if(latest!==undefined)run.kisLatest=latest;}
+        catch(e){run.kisLatest={ready:false,reason:/^KIS_RECOMMENDATION_/.test(e.code??'')?e.code:'KIS_RECOMMENDATION_WRITE_FAILED'};}
         failureStage='HISTORY_WRITE';
         if(history?.status().status==='CONFIGURED'){
           try{

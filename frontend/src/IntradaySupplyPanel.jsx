@@ -35,7 +35,7 @@ export default function IntradaySupplyPanel({symbol,name,apiBase='/api',onSnapsh
     <div className="intraday-supply-head"><div><h3 id="intraday-supply-title">장중 추정 수급</h3>
       <p>{name||symbol} · {symbol} · KIS 가집계 참고</p></div>
       <button type="button" disabled={!config?.enabled||busy||!valid} onClick={query}>{busy?'조회 중…':'장중 추정 수급 수동 조회'}</button></div>
-    <p className="intraday-supply-note">직원 입력 누계 추정치입니다. 기존 NAVER 수급과 구분하며, 수급 점수·4점 판정·AI·주문에 반영하지 않습니다.</p>
+    <p className="intraday-supply-note">직원 입력 누계 추정치의 수동 참고 조회입니다. 추천은 서버에 저장된 KIS 수급을 사용하며, 이 수동 응답으로 추천 점수·AI·주문을 바꾸지 않습니다.</p>
     {!config&&<p role="status">조회 기능 설정 확인 중</p>}
     {config&&!config.enabled&&<p role="status">{setupLabels[config.reason]||'조회 준비가 필요합니다.'} 운영 활성화 전까지 KIS를 호출하지 않습니다.</p>}
     {!valid&&<p>현재 기능은 숫자 6자리 종목코드만 지원합니다. 영문 혼합 코드는 확인 전 조회하지 않습니다.</p>}

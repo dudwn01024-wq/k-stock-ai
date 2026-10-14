@@ -6,7 +6,7 @@ import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
 import IntradaySupplyPanel from './IntradaySupplyPanel.jsx';
-import ScheduledSupplyPanel from './ScheduledSupplyPanel.jsx';
+import AutonomousSupplyPanel from './AutonomousSupplyPanel.jsx';
 import {projectRecommendationData} from './utils/scheduledSupply.js';
 import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
 import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
@@ -527,7 +527,8 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
   const [supplyView,setSupplyView]=useState(null);
   const [expandedSupplySource,setExpandedSupplySource]=useState(null);
-  const recommendationData=projectRecommendationData(recommendationBase,supplyView,recommendationBase?.scanId);
+  const recommendationData=projectRecommendationData(recommendationBase,
+    supplyView?.analysisMode==='legacy50'||supplyView?.cacheUnavailable?supplyView:null,recommendationBase?.scanId);
   const scheduledSource=recommendationMode==='expanded500'?expandedSupplySource:
     recommendationMode==='legacy50'&&recommendationBase?.scanId?{mode:'legacy50',id:recommendationBase.scanId}:null;
 
@@ -840,13 +841,13 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       </div>
 
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
+        <AutonomousSupplyPanel symbol={activeSymbol} source={isStockRoute?null:scheduledSource} apiBase={API_BASE_URL} onSnapshot={applyScheduledSupply}/>
         {isStockRoute&&<a href="/" className="home-secondary inline-flex items-center">메인으로</a>}
         {!isStockRoute && activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
         {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} supplyView={supplyView} onSupplySource={setExpandedSupplySource} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
           error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {!isStockRoute && activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
-        <ScheduledSupplyPanel symbol={activeSymbol} source={isStockRoute?null:scheduledSource} active={!historyOpen&&activeTab!=='paper'} apiBase={API_BASE_URL} onSnapshot={applyScheduledSupply}/>
         {!historyOpen && <>
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">

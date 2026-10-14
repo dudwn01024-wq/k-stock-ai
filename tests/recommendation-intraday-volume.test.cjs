@@ -4,6 +4,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),os=require('node:os'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
 const policy=require('../services/recommendationVolumePolicy');
+const {assessIntradaySupply,supplyMetadata}=require('../services/kisIntradaySupplyPolicy');
 const {assessRecommendationVolume:assess,DAILY_VOLUME_COMPLETE_KST_MINUTE}=policy;
 const {calculateFastScreen,rankFastScreenResults}=require('../services/recommendationFastScreen');
 const {createExpandedRecommendationRuns}=require('../services/expandedRecommendationRuns');
@@ -41,7 +42,10 @@ for(const [label,patch] of [['null',{currentVolume:null}],['NaN',{currentVolume:
 function backend(time=at('09:30'),volume=200000,{missingSupply=false,emptyNews=false}={}){
   let calls=0;const clock=Date.parse(time);
   class FixedDate extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
-  const context=vm.createContext({scheduledSupply:{resolve:()=>null},...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
+  const kis=assessIntradaySupply({symbol:'000001',now:clock,calendarState:'STANDARD_OPEN',scoreEnabled:true,resetObservedDate:'2026-10-07',
+    failure:missingSupply?'LOOKUP_FAILED':null,snapshot:{symbol:'000001',source:'KIS_INTRADAY_ESTIMATE',observedAt:time,
+      rows:['1','2'].map(inputCode=>({inputCode,foreignNetQuantity:1,institutionNetQuantity:inputCode==='1'?0:1,sumNetQuantity:inputCode==='1'?1:2})).filter(x=>clock>=Date.parse(at('10:00'))||x.inputCode==='1')}});
+  const context=vm.createContext({scheduledSupply:{resolve:()=>({...kis,metadata:supplyMetadata(kis)})},...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
     recommendationFetch:async url=>{calls++;return {ok:true,json:async()=>url.includes('/price?')?daily(volume):
       {dealTrendInfos:[{bizdate:'20261007',foreignerPureBuyQuant:1,organPureBuyQuant:missingSupply?null:1}]}};},
     getLatestDealTrend:data=>data.dealTrendInfos[0],average:x=>x.reduce((a,b)=>a+b,0)/x.length,
@@ -60,10 +64,10 @@ test('TEST_ONLY actual fast and deep share pending policy, preserve raw ratios a
   assert.equal(fast.volumeRatio,0.2);assert.equal(fast.volumeAssessment.status,'INTRADAY_PENDING');
   const f=backend(),deep=await f.api.buildRecommendationResult({symbol:'000001'},{intradayVolume:true});
   assert.equal(deep.strategy.volumePassed,null);assert.equal(deep.strategy.volumeAssessment.status,fast.volumeAssessment.status);
-  assert.equal(deep.score,3);assert.equal(deep.grade,'WATCH_CANDIDATE');assert.equal(deep.requiredDataStatus,'VALID');
-  assert.deepEqual(Array.from(deep.pendingConditions),['거래량']);assert.equal(deep.failedConditions.includes('거래량'),false);
-  assert.equal(deep.unknownConditions.includes('거래량'),false);assert.equal(deep.strategy.signal,'WAIT');
-  assert.equal(deep.strategy.tradeSignal,'WAIT');assert.equal(f.calls(),2);
+  assert.equal(deep.score,2);assert.equal(deep.strategy.supplyPassed,null);assert.equal(deep.grade,'WATCH_CANDIDATE');assert.equal(deep.requiredDataStatus,'VALID');
+  assert.deepEqual(Array.from(deep.pendingConditions),['거래량','수급']);assert.equal(deep.failedConditions.includes('거래량'),false);
+  assert.equal(deep.unknownConditions.includes('거래량'),false);assert.equal(deep.strategy.signal,'WAIT_INTRADAY_CONFIRMATION');
+  assert.equal(deep.strategy.tradeSignal,'WAIT');assert.equal(f.calls(),1);
 });
 for(const missing of ['missingSupply','emptyNews'])test('TEST_ONLY pending does not hide genuinely missing '+missing,async()=>{
   const f=backend(at('09:30'),200000,{[missing]:true});
@@ -86,7 +90,7 @@ for(const [time,volume,passed,status] of [[at('10:30'),1200000,true,'INTRADAY_CO
   });
 test('TEST_ONLY legacy screening and chart calculation policy are unchanged',async()=>{
   const f=backend(),r=await f.api.buildRecommendationResult({symbol:'000001'});
-  assert.equal(r.strategy.volumePassed,false);assert.equal(r.pendingConditions,undefined);assert.equal(r.strategy.volumeAssessment,undefined);
+  assert.equal(r.strategy.volumePassed,false);assert.deepEqual(Array.from(r.pendingConditions),['수급']);assert.equal(r.strategy.volumeAssessment,undefined);
   for(const file of ['services/chartAnalysis.js']){
     const original=execFileSync('git',['show','12dbb24d7b9cb8f5ced10ca2f41a3fb538764ced:'+file],{encoding:'utf8'});
     assert.equal(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n'),original.replaceAll('\r\n','\n'),file);
@@ -124,7 +128,7 @@ test('TEST_ONLY 500 pending rows still select 40, persist pending metadata, and 
   assert.deepEqual([fastCalls,deepCalls,aiCalls],[500,40,0]);assert.equal(run.fastResults.filter(x=>x.status==='NOT_DEEP_REVIEWED').length,460);
   assert.deepEqual(run.recommendations.map(x=>x.symbol),stocks.slice(0,40).map(x=>x.symbol));
   assert.equal(run.history.status,'STORED');assert.equal(run.policyVersion,'PUBLIC_SCREENING_EXPANDED_2_STAGE_V3');
-  const saved=history.detail(run.runId);assert.deepEqual(saved.all[0].pendingConditions,['거래량']);
+  const saved=history.detail(run.runId);assert.deepEqual(saved.all[0].pendingConditions,['거래량','수급']);
   assert.equal(saved.all[0].strategy.volumeAssessment.status,'INTRADAY_PENDING');assert.equal(saved.fastResults[0].volumeAssessment.status,'INTRADAY_PENDING');
   const before=fs.readdirSync(root).map(n=>[n,fs.readFileSync(path.join(root,n),'utf8')]);
   createRecommendationHistory({root,testOnly:true}).detail(run.runId);store.get(run.runId);

@@ -30,7 +30,8 @@ export function recommendationDataDates(item={}){
   const time=value=>day(value.date)+' '+value.time;
   const row=(key,label,metadata,date,suffix='기준')=>{
     const received=date?null:lookupTime(metadata?.receivedAt);
-    return {key,label,value:date?day(date)+' '+suffix:'기준일 미확인',source:source(metadata),
+    const observed=key==='supply'&&metadata?.source==='KIS_INTRADAY_ESTIMATE'?validDay(metadata.observedBusinessDate):null;
+    return {key,label,value:date?day(date)+' '+suffix:observed?'원천 기준일 미확인 · 관측일 '+day(observed)+' (추론)':'기준일 미확인',source:source(metadata),
       lookup:received?'조회 '+time(received):null};
   };
   const assessmentMatches=!assessment?.sourceBusinessDate||validDay(assessment.sourceBusinessDate)===volumeDate;

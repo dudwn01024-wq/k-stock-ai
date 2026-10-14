@@ -5,7 +5,10 @@ const {createScheduledSupply}=require('./kisScheduledSupply');
 const {isIntradayVolumePending}=require('./recommendationVolumePolicy');
 function projectScreeningRecommendations(items,resolve,{score,grade,reason,risk,rank}){
   return rank(items.map(base=>{
-    const a=resolve(base.symbol);if(!a||!base.strategy||base.grade==='FAILED')return structuredClone(base);
+    const a=resolve(base.symbol)??{source:'KIS_INTRADAY_ESTIMATE',provisional:true,status:'PENDING',reason:'CURRENT_OBSERVATION_REQUIRED',sourceTradeDate:null,sourceUpdatedAt:null,
+      foreignerNet:null,institutionNet:null,netSupplyTotal:null,screeningPassed:null,eligibleForSupplyScore:false,
+      observedAt:null,observedDate:null,metadata:{source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:null,provisional:true,status:'PENDING'}};
+    if(!base.strategy||base.grade==='FAILED')return {...structuredClone(base),supplyAssessment:a,requiredDataStatus:'INSUFFICIENT_DATA'};
     const strategy={...structuredClone(base.strategy),foreignerNet:a.foreignerNet,institutionNet:a.institutionNet,
       netSupplyTotal:a.netSupplyTotal,supplyPassed:a.screeningPassed,supplyAssessment:a};
     // Preserve the calculator's early insufficient-price-data exit before any supply score.
@@ -25,10 +28,9 @@ function projectScreeningRecommendations(items,resolve,{score,grade,reason,risk,
     if(a.status==='PENDING'){labels.pendingConditions=[...(labels.pendingConditions??[]).filter(x=>x!=='수급'),'수급'];labels.unknownConditions=labels.unknownConditions.filter(x=>x!=='수급');}
     const rr=risk(strategy);
     if(labels.unknownConditions.length)strategy.signal='INSUFFICIENT_DATA';
-    return {...structuredClone(base),strategy,score:points,grade:grade(points,strategy,rr,base.newsAssessment),riskReward:rr,...labels,
+    const original=structuredClone(base);delete original.naverDailySupply;
+    return {...original,strategy,score:points,grade:grade(points,strategy,rr,base.newsAssessment),riskReward:rr,...labels,
       requiredDataStatus:labels.unknownConditions.length?'INSUFFICIENT_DATA':'VALID',dataMetadata:{...base.dataMetadata,supply:a.metadata,dateConsistency:'UNKNOWN'},
-      naverDailySupply:base.naverDailySupply??{foreignerNet:base.strategy.foreignerNet,institutionNet:base.strategy.institutionNet,
-        supplyDate:base.strategy.dataMetadata?.supply?.sourceBusinessDate??null},
       supplyAssessment:a,projectionRole:'SUPPLY_ONLY_REASSESSMENT',otherInputsRefreshed:false,orderAuthorized:false};
   }));
 }

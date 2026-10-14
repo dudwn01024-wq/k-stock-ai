@@ -51,20 +51,18 @@ const {createRenderScheduledQuota}=require('./services/kisScheduledQuota');
 const scheduledQuota=createRenderScheduledQuota({render:process.env.RENDER,serviceId:process.env.RENDER_SERVICE_ID,instanceId:process.env.RENDER_INSTANCE_ID});
 scheduledQuota.initialize({allowCreate:process.env.KIS_SCHEDULED_SUPPLY_ENABLED!=='true'});
 const {registerIntradaySupplyRoutes}=require('./services/intradaySupplyApi');
-const kisSupplyRuntime=createKisSupplyRuntime({env:process.env,quota:scheduledQuota,audit:event=>console.log('[K-Stock AI] Scheduled supply event '+JSON.stringify(event)),calculateDetail:calculateTradingStrategy,
-  resolveSources:refs=>{
-    const read=id=>{if(!id)return null;return refs.mode==='expanded500'?expandedRuns.get(id):recommendationScans.get(id);};
-    const visible=read(refs.visibleId),review=read(refs.reviewId??refs.visibleId);
-    const visibleItems=(visible?.recommendations??visible?.all??[]).filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
-    const items=review?.all??review?.recommendations??[];
-    const selected=refs.mode==='expanded500'?(review?.fastResults??[]).filter(x=>x.deepReviewSelected===true).map(x=>x.symbol):
-      [...items.map(x=>x.symbol),...(review?.failures??[]).map(x=>x.symbol)];
-    return {visible:visibleItems.map(x=>x.symbol),review:selected,items,visibleItems};
-  },projectRecommendations:(items,resolve)=>projectScreeningRecommendations(items,resolve,{score:getRecommendationScore,grade:getFinalRecommendationGrade,
+const {createRenderKisRecommendationStore}=require('./services/kisRecommendationStore');
+const {createAutonomousKisRecommendations,registerLatestKisRecommendations}=require('./services/kisAutonomousRecommendations');
+const kisRecommendationStore=createRenderKisRecommendationStore({quota:scheduledQuota});
+kisRecommendationStore.initialize({allowCreate:process.env.KIS_AUTONOMOUS_RECOMMENDATIONS_ENABLED!=='true'});
+const autonomousKis=createAutonomousKisRecommendations({env:process.env,store:kisRecommendationStore,quota:scheduledQuota,
+  audit:event=>console.log('[K-Stock AI] Autonomous KIS event '+JSON.stringify(event)),calculateDetail:calculateTradingStrategy,
+  projectRecommendations:(items,resolve)=>projectScreeningRecommendations(items,resolve,{score:getRecommendationScore,grade:getFinalRecommendationGrade,
     reason:buildRecommendationReason,risk:calculateRiskReward,rank:rankRecommendationResults})});
+const kisSupplyRuntime=autonomousKis.runtime;
 const scheduledSupply=kisSupplyRuntime.scheduled;
 registerIntradaySupplyRoutes(app,kisSupplyRuntime.adapter,privateSite.access,scheduledSupply);
-scheduledSupply.start(); // Default OFF and no confirmed trading calendar: no timer or provider call.
+// Autonomous worker is started after the recommendation calculators are initialized.
 console.log(`[K-Stock AI] Scheduled supply startup enabled=${scheduledSupply.status().enabled} scoreEnabled=${scheduledSupply.status().scoreEnabled}`);
 console.log('[K-Stock AI] Scheduled supply quota '+JSON.stringify({ready:scheduledQuota.status().ready,reason:scheduledQuota.status().reason,
   queriesReservedToday:scheduledQuota.status().queriesReservedToday,httpReservedToday:scheduledQuota.status().httpReservedToday,httpAttemptsToday:scheduledQuota.status().httpAttemptsToday}));
@@ -637,27 +635,8 @@ const calculateStrategy =
           0
       });
 
-    const [
-      priceResponse,
-      integrationResponse
-    ] =
-      await Promise.all([
-        recommendationFetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,
-          {
-            headers:
-              NAVER_HEADERS
-          }
-        ),
-
-        recommendationFetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/integration`,
-          {
-            headers:
-              NAVER_HEADERS
-          }
-        )
-      ]);
+    const priceResponse=await recommendationFetch(
+      `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,{headers:NAVER_HEADERS});
 
     if (
       !priceResponse.ok
@@ -691,7 +670,7 @@ const calculateStrategy =
     if (latestRequired.some(value => !Number.isFinite(parseNumber(value)))) return emptyResult();
 
     const receivedAt = new Date().toISOString();
-    let supplyMetadata = dataFreshness({ source: 'Naver integration' });
+
     const rows =
       data
         .map(
@@ -841,49 +820,11 @@ const calculateStrategy =
           )
         : null;
 
-    let foreignerNet =
-      null;
-
-    let institutionNet =
-      null;
-
-    if (
-      integrationResponse.ok
-    ) {
-      try {
-        const integrationData =
-          await integrationResponse.json();
-
-        const latestTrend =
-          getLatestDealTrend(
-            integrationData
-          );
-
-        if (
-          latestTrend
-        ) {
-          supplyMetadata = dataFreshness({ source: 'Naver integration', date: latestTrend.localTradedAt ?? latestTrend.tradeDate ?? latestTrend.bizdate ?? latestTrend.date ?? latestTrend.localDate ?? null, timestamp: latestTrend.localTradedAt ?? null, receivedAt: new Date().toISOString() });
-          foreignerNet =
-            parseNumber(
-              latestTrend.foreignerPureBuyQuant
-            );
-
-          institutionNet =
-            parseNumber(
-              latestTrend.organPureBuyQuant
-            );
-        }
-      } catch (error) {
-        console.warn(
-          `[K-Stock AI] Strategy supply parse failed for ${symbol}:`,
-          error.message
-        );
-      }
-    }
-
+    // Recommendation supply is KIS-only; a missing cache remains pending.
     const intradaySupplyAssessment=scheduledSupply.resolve(symbol);
-    const naverDailySupply=intradaySupplyAssessment?{foreignerNet,institutionNet,supplyDate:supplyMetadata.sourceBusinessDate}:null;
-    if(intradaySupplyAssessment){foreignerNet=intradaySupplyAssessment.foreignerNet;institutionNet=intradaySupplyAssessment.institutionNet;supplyMetadata=intradaySupplyAssessment.metadata;}
+    const foreignerNet=intradaySupplyAssessment.foreignerNet;
+    const institutionNet=intradaySupplyAssessment.institutionNet;
+    const supplyMetadata=intradaySupplyAssessment.metadata;
     const dailyMetadata = dataFreshness({ source: 'Naver daily price', date: rows[0]?.date ?? null, receivedAt });
     const dataMetadata = { price: dailyMetadata, volume: dailyMetadata, supply: supplyMetadata,
       dateConsistency: dateConsistency([dailyMetadata, supplyMetadata]) };
@@ -1009,12 +950,7 @@ const calculateStrategy =
     const pendingConditions = intradayVolume && isIntradayVolumePending({volumePassed,volumeAssessment}) ? ['거래량'] : [];
 
     if(intradaySupplyAssessment?.status==='PENDING')pendingConditions.push('수급');
-    const supplyPassed = intradaySupplyAssessment ? intradaySupplyAssessment.screeningPassed :
-      Number.isFinite(
-        netSupplyTotal
-      )
-        ? netSupplyTotal > 0
-        : null;
+    const supplyPassed = intradaySupplyAssessment.screeningPassed;
 
     const allConditionsPassed =
       trendPassed === true &&
@@ -1132,7 +1068,7 @@ if (
 
 return {
   decisionRole: 'SCREENING',
-  ...(intradaySupplyAssessment?{supplyAssessment:intradaySupplyAssessment,naverDailySupply}: {}),
+  supplyAssessment:intradaySupplyAssessment,
   dataMetadata,
   symbol,
   currentPrice,
@@ -1680,7 +1616,7 @@ const buildRecommendationResult =
     ] =
       await Promise.all([
         fetchStockQuoteData(
-          stock.symbol
+          stock.symbol, {includeSupply:false}
         ),
 
         calculateStrategy(
@@ -1745,7 +1681,7 @@ const buildRecommendationResult =
 
     return {
       decisionRole: 'SCREENING',
-      ...(strategy.supplyAssessment?{supplyAssessment:strategy.supplyAssessment,naverDailySupply:strategy.naverDailySupply}: {}),
+      ...(strategy.supplyAssessment?{supplyAssessment:strategy.supplyAssessment}: {}),
       symbol:
         stock.symbol,
 
@@ -1794,7 +1730,7 @@ const buildRecommendationResult =
           10
         ),
 
-      dataMetadata: quote.dataMetadata ?? null,
+      dataMetadata: {...quote.dataMetadata,supply:strategy.dataMetadata?.supply??scheduledSupply.resolve(stock.symbol).metadata,dateConsistency:'UNKNOWN'},
       strategy: {
         decisionRole: 'SCREENING',
         currentPrice: strategy.currentPrice,
@@ -4531,7 +4467,7 @@ const recommendationOutcomes=outcomesFromEnvironment({history:recommendationHist
 registerOutcomeRoutes(app,recommendationOutcomes);
 const recommendationUniverseMode=process.env.RECOMMENDATION_UNIVERSE_MODE==='expanded500'?'expanded500':'legacy50';
 const recommendationScans=createRecommendationScans({
-  history:recommendationHistory,universe:RECOMMENDATION_WATCHLIST,
+  history:recommendationHistory,universe:RECOMMENDATION_WATCHLIST,onCompleted:input=>autonomousKis.adopt(input),
   codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,calculateRiskReward,assessLatestNews,getRecommendationScore,getFinalRecommendationGrade,rankRecommendationResults,buildRecommendationGeminiPrompt].map(fn=>fn.toString()).join('\n'))),
   scan:scanRecommendationUniverse,analyze:analyzeRecommendationsWithGemini,
   totalCount:RECOMMENDATION_WATCHLIST.length,aiLimit:RECOMMENDATION_AI_LIMIT,
@@ -4542,7 +4478,7 @@ const expandedConfig=expandedSettings(process.env);
 const expandedUniverse=createRecommendationUniverse({headers:NAVER_HEADERS});
 let currentFastScreen=null;
 const expandedRuns=createExpandedRecommendationRuns({
-  getReuseContext:()=>scheduledSupply.reuseContext(),
+  getReuseContext:()=>scheduledSupply.reuseContext(),onCompleted:input=>autonomousKis.adopt(input),
   loadUniverse:async()=>{
     currentFastScreen=createRecommendationFastScreen({headers:NAVER_HEADERS});
     return expandedUniverse.load();
@@ -4557,6 +4493,11 @@ const expandedRuns=createExpandedRecommendationRuns({
   aiEnabled:expandedConfig.aiEnabled
 });
 registerExpandedRecommendationRoutes(app,expandedRuns,{mode:recommendationUniverseMode,history:recommendationHistory});
+registerLatestKisRecommendations(app,autonomousKis);
+autonomousKis.start(); // Explicit new switch defaults OFF; no browser/session/registration dependency.
+const autonomousKisStartup=autonomousKis.status();
+console.log('[K-Stock AI] Autonomous KIS startup '+JSON.stringify({enabled:autonomousKisStartup.enabled,scoreEnabled:autonomousKisStartup.scoreEnabled,
+  candidatePoolCount:autonomousKisStartup.candidatePoolCount,sourceAnalysisId:autonomousKisStartup.sourceAnalysisId,storage:kisRecommendationStore.status()}));
 registerHistoryRoutes(app,recommendationHistory,()=>[
   ...recommendationScans.pendingIds(),...expandedRuns.pendingIds()
 ]);

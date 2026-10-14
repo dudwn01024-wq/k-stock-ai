@@ -100,8 +100,10 @@ test('news path preserves article fields and never treats publication time as a 
   assert.equal(item.dataMetadata.freshnessStatus,'UNKNOWN');
 });
 
-test('actual recommendation daily/supply path preserves metadata without changing observations', async () => {
-  const ctx=vm.createContext({scheduledSupply:{resolve:()=>null},dataFreshness,dateConsistency,sourceDate,NAVER_HEADERS:{},console,
+test('actual recommendation preserves price metadata and KIS lookup without inventing a source business date', async () => {
+  const kis={status:'PENDING',foreignerNet:null,institutionNet:null,screeningPassed:null,
+    metadata:{source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null,receivedAt}};
+  const ctx=vm.createContext({scheduledSupply:{resolve:()=>kis},dataFreshness,dateConsistency,sourceDate,NAVER_HEADERS:{},console,
     getLatestDealTrend:data=>data.dealTrendInfos[0],
     average:values=>values.reduce((a,b)=>a+b,0)/values.length,
     round2:value=>Number(value.toFixed(2)),
@@ -114,8 +116,10 @@ test('actual recommendation daily/supply path preserves metadata without changin
   const result=await ctx.strategy('005930');
   assert.equal(result.currentPrice,70000); assert.equal(result.currentVolume,1000);
   assert.equal(result.dataMetadata.price.sourceBusinessDate,'2026-09-18');
-  assert.equal(result.dataMetadata.supply.sourceBusinessDate,'2026-09-17');
-  assert.equal(result.dataMetadata.dateConsistency,'MISMATCH');
+  assert.equal(result.dataMetadata.supply.sourceBusinessDate,null);
+  assert.equal(result.dataMetadata.supply.source,'KIS_INTRADAY_ESTIMATE');
+  assert.equal(result.dataMetadata.supply.receivedAt,receivedAt);
+  assert.equal(result.dataMetadata.dateConsistency,'UNKNOWN');
 });
 
 for (const [input, expected] of [

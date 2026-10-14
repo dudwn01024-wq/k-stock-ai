@@ -9,7 +9,7 @@ const fail=(code,status,message)=>Object.assign(new Error(message),{code,status}
 const freeze=value=>{if(value&&typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
 
 function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured=()=>true,
-  now=Date.now,makeId=randomUUID,ttlMs=SCAN_TTL_MS,maxEntries=MAX_STORED_SCANS,history=null,universe=[],codeVersion=null}) {
+  now=Date.now,makeId=randomUUID,ttlMs=SCAN_TTL_MS,maxEntries=MAX_STORED_SCANS,history=null,universe=[],codeVersion=null,onCompleted=()=>{}}) {
   const entries=new Map();
   let inFlight=null;
   const prune=()=>{for(const [id,entry] of entries)if(now()>=entry.expiresAt&&entry.aiState!=='PENDING')entries.delete(id);};
@@ -57,7 +57,11 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
         try{saved=history.saveCandidate(payload,{universe,codeVersion,aiSymbols:[...priority,...chase].slice(0,aiLimit).map(x=>x.symbol)});}
         catch(e){saved={status:'FAILED',reason:e.code?.startsWith('HISTORY_')?e.code:'HISTORY_WRITE_FAILED'};}
       }
-      const result=freeze({...payload,history:saved});
+      let kisLatest;
+      try{if(validResults.length)kisLatest=await onCompleted({id:scanId,mode:'legacy50',scanStartedAt,scanCompletedAt,
+        items:all,reviewSymbols:universe.map(x=>x.symbol),stats:{universeCount:totalCount,deepTargetCount:universe.length},codeVersion});}
+      catch(e){kisLatest={ready:false,reason:/^KIS_RECOMMENDATION_/.test(e.code??'')?e.code:'KIS_RECOMMENDATION_WRITE_FAILED'};}
+      const result=freeze({...payload,history:saved,...(kisLatest?{kisLatest}:{})});
       if(validResults.length===0)throw fail('SCAN_NO_DATA',502,'조회된 종목 자료가 없어 후보를 계산하지 못했습니다.');
       entries.set(scanId,{result,expiresAt:completed+ttlMs,
         aiCandidates:freeze([...priority,...chase].slice(0,aiLimit)),aiState:'IDLE',aiPromise:null});

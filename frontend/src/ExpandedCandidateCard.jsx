@@ -20,9 +20,11 @@ export const safeEvidenceUrl=value=>{
 };
 const volumeFields=[['currentVolume','거래량'],['averageVolume20','20일 평균 거래량'],['volumeRatio','거래량 비율'],
   ['foreignerNet','외국인 순수급'],['institutionNet','기관 순수급']];
+const kisTime=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?
+  new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value))+' KST':'미조회';
 
 // Presentation only: no services, hooks, requests, ranking or price calculations.
-export default function ExpandedCandidateCard({item,children,screening=false,onSelect}){
+export default function ExpandedCandidateCard({item,children,screening=false,onSelect,historical=false}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
   const dataDates=recommendationDataDates(item);
@@ -31,7 +33,8 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
     <div className="expanded-card-heading">{screening&&onSelect?<button type="button" className="expanded-stock-name" onClick={()=>onSelect({code:item.symbol,name:item.stockName||item.symbol})}>{item.stockName||item.symbol}</button>:<strong>{item.stockName||item.symbol}</strong>}<small>{item.symbol}</small></div>
-    <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · 분석 조건 점수 {number(item.score)} / 4</p>
+    <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · {historical?'저장 당시 조건 점수':'분석 조건 점수'} {number(item.score)} / 4</p>
+    {historical&&<p className="expanded-card-note">과거 저장값입니다. 아래 수급 조건은 저장 당시 판정이며, 오늘 수급 판정은 확인 대기/장 마감으로 구분합니다.</p>}
     {!screening&&<dl className="expanded-card-prices">
       <div className="expanded-card-quote"><dt>분석 당시 조회가</dt><dd>{price(item.currentPrice)}</dd></div>
       <div><dt>등락률</dt><dd>{percent(item.changeRate)}</dd></div>
@@ -42,11 +45,11 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     </p>}
     <ul className="expanded-card-conditions" aria-label="분석 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
-        <span>{label}</span><strong>{label==='수급'&&item.supplyAssessment?.status==='PENDING'?'집계 대기':label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
+        <span>{label}</span><strong>{historical&&label==='수급'?'저장 당시 '+condition(value):label==='수급'&&item.supplyAssessment?.status==='PENDING'?'집계 대기':label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
       </li>)}
     </ul>
     {volumePending&&<p className="expanded-card-note">당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.</p>}
-    {item.supplyAssessment&&<p className="expanded-card-note">KIS 누적 추정 수급 · 관측일 {item.supplyAssessment.observedDate??'미확인'} · 원천 거래일·실제 갱신시각 미제공 · 예정 회차 {item.supplyAssessment.plannedInputTimeKst??'미확인'} · {item.supplyAssessment.status==='READY'?'당일 회차 관측 추론':'판정 대기/미확인'}</p>}
+    {item.supplyAssessment&&<p className="expanded-card-note">KIS 누적 추정 수급 · 원천 거래일·실제 제공 갱신시각 미제공 · 관측일 {item.supplyAssessment.observedDate??'미확인'} (추론) · 실제 서버 조회 {kisTime(item.supplyAssessment.observedAt)} · 회차 {item.supplyAssessment.expectedInputCode??'미확인'} / 예정 {item.supplyAssessment.plannedInputTimeKst??'미확인'} KST · {item.supplyAssessment.status==='READY'?(historical?'저장 당시 회차 관측 추론':'당일 회차 관측 추론'):item.supplyAssessment.status==='CLOSED'?'휴장/장 마감':'수급 확인 대기/자료 부족'}</p>}
     {item.naverDailySupply&&<p className="expanded-card-note">NAVER 일별 참고(판정 미반영) · 기준일 {item.naverDailySupply.supplyDate??'미확인'} · 외국인 {number(item.naverDailySupply.foreignerNet)} · 기관 {number(item.naverDailySupply.institutionNet)}</p>}
     {screening&&<div className="expanded-selection-reasons">
       <p><strong>분석 근거 · 충족 조건</strong> {words(item.passedConditions)}</p>

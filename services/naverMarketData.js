@@ -281,7 +281,7 @@ const assessLatestNews = (news) => {
 function createNaverMarketData({fetchImpl=(...args)=>globalThis.fetch(...args),failFast=false,allowNewsPageSize20=false}={}) {
 const fetch=fetchImpl;
 const fetchStockQuoteData =
-  async (symbol) => {
+  async (symbol, {includeSupply=true}={}) => {
     const basicResponse =
       await fetch(
         `https://m.stock.naver.com/api/stock/${symbol}/basic`,
@@ -307,7 +307,7 @@ const fetchStockQuoteData =
       date: basicData.localTradedAt ?? basicData.bizdate ?? null,
       timestamp: basicData.localTradedAt ?? null, receivedAt: basicReceivedAt });
     let volumeMetadata = { ...priceMetadata };
-    let supplyMetadata = dataFreshness({ source: 'Naver integration' });
+    let supplyMetadata = dataFreshness({ source: includeSupply?'Naver integration':'NOT_REQUESTED' });
 
     const currentPrice =
       parseNumber(
@@ -497,7 +497,7 @@ const fetchStockQuoteData =
     let supplyDate =
       null;
 
-    try {
+    if(includeSupply||tradingValue===null)try {
       const integrationResponse =
         await fetch(
           `https://m.stock.naver.com/api/stock/${symbol}/integration`,
@@ -526,10 +526,10 @@ const fetchStockQuoteData =
             );
         }
 
-        const latestTrend =
+        const latestTrend = includeSupply?
           getLatestDealTrend(
             integrationData
-          );
+          ):null;
 
         if (
           latestTrend

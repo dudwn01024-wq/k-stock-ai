@@ -30,8 +30,10 @@ export function createScheduledSupplyClient({apiBase='/api',fetchImpl=fetch,onVi
   };
 }
 export function projectRecommendationData(base,view,expectedId){
+  const stored=view?.provider==='KIS_INTRADAY_ESTIMATE'&&view.scheduling?.autonomous===true&&view.status==='STORED';
+  if(!base&&stored){base=view;expectedId=view.sourceAnalysisId;}
   if(base&&view?.cacheUnavailable)return {...base,all:[],priority:[],chase:[],watch:[],recommendations:[],recommendationCount:0,priorityCandidateCount:0,chaseCautionCount:0,watchCandidateCount:0,supplyProjection:true,supplyUnavailable:true};
-  if(!base||!expectedId||view?.scheduling?.scope?.reviewId!==expectedId||!Array.isArray(view?.recommendations))return base;
+  if(!base||!expectedId||(stored?view.sourceAnalysisId!==expectedId:view?.scheduling?.scope?.reviewId!==expectedId)||!Array.isArray(view?.recommendations))return base;
   const all=view.recommendations,priority=all.filter(x=>x.grade==='PRIORITY_CANDIDATE'),chase=all.filter(x=>x.grade==='CHASE_CAUTION'),watch=all.filter(x=>x.grade==='WATCH_CANDIDATE');
   return {...base,all,priority,chase,watch,recommendations:[...priority,...chase,...watch],recommendationCount:priority.length+chase.length+watch.length,priorityCandidateCount:priority.length,chaseCautionCount:chase.length,watchCandidateCount:watch.length,supplyProjection:true};
 }

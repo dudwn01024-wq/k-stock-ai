@@ -20,9 +20,9 @@ const assessment=(f,i)=>({source:'KIS_INTRADAY_ESTIMATE',provisional:true,status
   foreignerNet:f,institutionNet:i,netSupplyTotal:f+i,screeningPassed:f+i>0,entrySupplyStatus:f>0&&i>0?'FAVORABLE':f<0&&i<0?'CAUTION':'NEUTRAL',expectedInputCode:'3',metadata:{source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null}});
 test('TEST_ONLY projected score, grade, price levels and risk equal actual screening calculators across thresholds and missing/failed conditions',async()=>{
   for(const close of [null,80,100,125])for(const volume of [50,200])for(const news of [false,true,null])for(const [f,i]of [[1,2],[1,-1],[-1,-2],[5,-2]]){
-    latestClose=close;latestVolume=volume;foreign=-1;institution=-2;observedSupply=null;const before=plain(await original.calculateStrategy('005930')),newsAssessment={newsPassed:news};
+    latestClose=close;latestVolume=volume;foreign=-1;institution=-2;observedSupply={...assessment(null,null),status:'PENDING',eligibleForSupplyScore:false,screeningPassed:null,netSupplyTotal:null};const before=plain(await original.calculateStrategy('005930')),newsAssessment={newsPassed:news};
     const base={symbol:'005930',currentPrice:999,strategy:before,newsAssessment,news:[{title:'TEST_ONLY_NEWS'}],riskReward:plain(original.risk(before))};
-    foreign=f;institution=i;const expected=plain(await original.calculateStrategy('005930')),expectedRisk=plain(original.risk(expected));
+    foreign=f;institution=i;observedSupply=assessment(f,i);const expected=plain(await original.calculateStrategy('005930')),expectedRisk=plain(original.risk(expected));
     const after=projectScreeningRecommendations([base],()=>assessment(f,i),original)[0];
     if(original.reason(expected,newsAssessment).unknownConditions.length)expected.signal='INSUFFICIENT_DATA';
     assert.equal(after.score,original.score(expected,newsAssessment));assert.equal(after.grade,original.grade(after.score,expected,expectedRisk,newsAssessment));
@@ -40,13 +40,13 @@ test('TEST_ONLY pending/unavailable/closed supply cannot retain prior pass; fail
   for(const status of ['PENDING','UNAVAILABLE','CLOSED']){const base={symbol:'005930',strategy:{currentPrice:100,trendPassed:true,volumePassed:true,supplyPassed:true,nearestSupport:100,ma20:95,recentLow20:90,recentHigh20:120},newsAssessment:{newsPassed:true}};
     const after=projectScreeningRecommendations([base],()=>({...assessment(1,2),status,eligibleForSupplyScore:false,screeningPassed:null,foreignerNet:null,institutionNet:null}),original)[0];
     assert.equal(after.score,3);assert.equal(after.grade,'WATCH_CANDIDATE');assert.equal(after.strategy.entryPrice,null);assert.equal(after.strategy.supplyPassed,null);if(status==='PENDING')assert.ok(after.pendingConditions.includes('수급'));}
-  const failed={symbol:'005930',grade:'FAILED'};assert.deepEqual(plain(projectScreeningRecommendations([failed],()=>assessment(1,2),original)),[failed]);
+  const failed={symbol:'005930',grade:'FAILED'},after=projectScreeningRecommendations([failed],()=>assessment(1,2),original)[0];assert.equal(after.grade,'FAILED');assert.equal(after.requiredDataStatus,'INSUFFICIENT_DATA');
 });
-test('TEST_ONLY direct screening reason labels a missing scheduled row pending and preserves the original NAVER daily reference',async()=>{
+test('TEST_ONLY direct screening reason labels a missing KIS row pending without a NAVER supply fallback/reference',async()=>{
   latestClose=100;latestVolume=200;foreign=-100;institution=-200;
   observedSupply={...assessment(null,null),status:'PENDING',foreignerNet:null,institutionNet:null,netSupplyTotal:null,screeningPassed:null,eligibleForSupplyScore:false};
   const strategy=plain(await original.calculateStrategy('005930')),labels=original.reason(strategy,{newsPassed:true});
   assert.deepEqual(plain(labels.pendingConditions),['수급']);assert.ok(!labels.unknownConditions.includes('수급'));
-  assert.deepEqual(strategy.naverDailySupply,{foreignerNet:-100,institutionNet:-200,supplyDate:'2026-10-14'});assert.equal(strategy.foreignerNet,null);
+  assert.equal(Object.hasOwn(strategy,'naverDailySupply'),false);assert.equal(strategy.foreignerNet,null);assert.equal(strategy.supplyPassed,null);
   observedSupply=null;
 });
