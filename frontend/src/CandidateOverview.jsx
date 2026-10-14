@@ -34,6 +34,7 @@ export default function CandidateOverview({ data, loading, error, aiData, aiLoad
       <div className="history-controls">{!historical&&<button className="home-secondary" onClick={onRefresh} disabled={loading}>후보 새로고침</button>}{onHistory&&<button className="home-secondary" onClick={onHistory}>추천 이력 보기</button>}</div>
     </div>
     <p className="home-notice">{historical?"과거 실행에 저장된 후보와 설명입니다. 현재 시세가 아닙니다.":"추천과 상세의 조회 시점이 다를 수 있습니다. 데이터 기준 시각과 위험을 함께 확인하세요."}</p>
+    {data?.supplyProjection&&<p role={data.supplyUnavailable?'alert':'status'} className="home-warning">{data.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':'수급만 갱신해 재계산·재정렬했습니다. 가격·차트·거래량·뉴스 및 AI 설명은 이전 관측 자료입니다.'}</p>}
     {!historical&&data?.history&&<p className={data.history.status==='STORED'?'home-notice':'home-warning'}>{data.history.status==='STORED'?'후보 이력 저장 완료':data.history.status==='NOT_CONFIGURED'?'이력 저장 미설정 · 현재 후보는 표시하지만 영구 보존되지 않습니다.':'이력 저장 실패 · 현재 후보는 유지됩니다. 자동 재조회하지 않습니다.'}</p>}
     {aiData?.history?.status==='FAILED'&&<p className="home-warning">AI 결과의 이력 저장 실패 · 화면 설명과 저장 이력이 다를 수 있습니다.</p>}
     {loading ? <p role="status" className="home-state">분석 후보를 불러오는 중입니다…</p>

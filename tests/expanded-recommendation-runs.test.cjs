@@ -8,6 +8,13 @@ const {createExpandedRecommendationRuns,registerExpandedRecommendationRoutes,set
 const stocks=Array.from({length:500},(_,i)=>({symbol:String(i+1).padStart(6,'0'),name:'TEST_ONLY_'+(i+1),market:i%2?'KOSDAQ':'KOSPI',marketValue:500-i}));
 const fingerprint=createHash('sha256').update(JSON.stringify(stocks.map(x=>x.symbol))).digest('hex');
 const sleep=()=>new Promise(resolve=>setImmediate(resolve));
+test('TEST_ONLY supply context invalidates reuse only on an explicit start and invalid context fails closed',async()=>{
+  let context='a'.repeat(64);const f=fixture({getReuseContext:()=>context,codeVersion:'TEST_ONLY_VERSION'});
+  const first=await f.store.wait(f.store.start().runId);assert.equal(first.codeVersion,'TEST_ONLY_VERSION:SUPPLY:'+context);
+  assert.equal(f.store.start().runId,first.runId);assert.equal(f.calls.universe,1);context='b'.repeat(64);
+  const second=await f.store.wait(f.store.start().runId);assert.notEqual(second.runId,first.runId);assert.equal(f.calls.universe,2);
+  context='invalid';assert.throws(()=>f.store.start(),e=>e.code==='EXPANDED_REUSE_CONTEXT_INVALID');assert.equal(f.calls.universe,2);
+});
 function fixture(overrides={}){
   const calls={universe:0,fast:0,deep:0,ai:0,maxFast:0,maxDeep:0,activeFast:0,activeDeep:0};
   const store=createExpandedRecommendationRuns({

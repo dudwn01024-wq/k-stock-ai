@@ -685,6 +685,7 @@ const verifiedVolumeAssessment = (assessment, volume, averageVolume20) => {
     ? expected : null;
 };
 
+const {verifiedSupplyAssessment}=require('./kisIntradaySupplyPolicy');
 const evaluateMarketContext = (
   marketContext = {}
 ) => {
@@ -796,8 +797,16 @@ const evaluateMarketContext = (
   // =====================================
 
   let supplyCondition;
+  const hasSupplyAssessment=Object.hasOwn(marketContext??{},'supplyAssessment');
+  const supplyAssessment=hasSupplyAssessment?verifiedSupplyAssessment(marketContext.supplyAssessment,foreignerNet,institutionNet):null;
 
   if (
+    hasSupplyAssessment&&(supplyAssessment?.status==='PENDING')
+  ) {
+    supplyCondition=createCondition('PENDING','수급 집계 대기','현재 입력 회차 또는 기관 첫 집계가 아직 확인되지 않았습니다.');
+  } else if (hasSupplyAssessment&&(!supplyAssessment||supplyAssessment.status!=='READY'||supplyAssessment.eligibleForSupplyScore!==true)) {
+    supplyCondition=createCondition('UNAVAILABLE','수급','추정 수급의 거래일·입력 회차·수량을 확인하지 못했습니다.');
+  } else if (
     !Number.isFinite(
       foreignerNet
     ) ||
@@ -956,6 +965,7 @@ const evaluateMarketContext = (
     institutionNet,
 
     conditions
+    ,...(hasSupplyAssessment?{supplyAssessment}: {})
   };
 };
 
@@ -1346,6 +1356,9 @@ const buildFinalAssessment = ({
   }
 
 
+  // A pending supply input cannot become an entry candidate through other conditions.
+  if (marketAssessment?.conditions?.supply?.status==='PENDING')return {status:'WAIT',label:'수급 집계 확인 중',
+    reason:'현재 입력 회차 또는 기관 첫 집계가 확인되지 않아 진입 판단을 보류합니다.'};
   // Preserve other WAIT reasons; this label applies when volume alone blocks entry.
   if ((marketAssessment?.pendingRequired?.includes('volume') ||
       marketAssessment?.conditions?.volume?.status === 'PENDING') &&

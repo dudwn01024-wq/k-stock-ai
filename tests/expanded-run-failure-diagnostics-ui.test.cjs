@@ -20,6 +20,7 @@ function render(run,saved=null){
     useEffect:()=>{},useRef:()=>({current:0}),useCallback:fn=>fn};
   const component={exports:{}};vm.runInNewContext(code,{module:component,exports:component.exports,Intl,Date,Set,Map,Number,
     require:name=>{if(name==='react')return stub;
+      if(name==='./utils/scheduledSupply.js')return require('./helpers/scheduled-ui-module.cjs');
     if(name==='./PublicInformation.jsx')return {InvestmentNotice:()=>null};if(name.endsWith('.css'))return {};
       if(name==='./ExpandedCandidateCard.jsx')return ({item})=>React.createElement('article',null,item.stockName+' '+item.grade+' '+item.score);
       throw Error('TEST_ONLY_UNEXPECTED_IMPORT');}});

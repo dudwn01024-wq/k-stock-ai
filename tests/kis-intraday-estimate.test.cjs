@@ -33,7 +33,7 @@ test('TEST_ONLY mapping keeps every provider row, no sum calculation, raw input 
   assert.equal(result.rows.length,3);assert.equal(result.rows[0].foreignNetQuantity,0);assert.equal(result.rows[1].institutionNetQuantity,null);
   assert.equal(result.rows[1].sumNetQuantity,null);assert.equal(result.rows[1].quantityStates.sum,'INVALID');
   assert.equal(result.rows[0].inputCode,'1');assert.equal(result.rows[2].inputCode,'1');assert.equal(result.sourceTradeDate,null);assert.equal(result.sourceUpdatedAt,null);
-  assert.equal(result.inputTimeMapping,'UNCONFIRMED');assert.equal(result.freshness,'UNCONFIRMED');assert.equal(result.eligibleForSupplyScore,false);
+  assert.equal(result.inputTimeMapping,'DOCUMENTED_SCHEDULE');assert.equal(result.rows[0].plannedInputTimeKst,'09:30');assert.equal(result.freshness,'UNCONFIRMED');assert.equal(result.eligibleForSupplyScore,false);
   assert.equal(result.observedAt,'2026-10-12T01:10:00.000Z');assert.equal(result.unit,'shares');
   assert.equal(normalizeEstimate({rt_cd:'0',output2:[]},{symbol:'005930',observedAt:'TEST_ONLY'}).status,'EMPTY');
   for(const body of [{rt_cd:'1',output2:[]},{rt_cd:'0',output2:{}},{rt_cd:'0',output2:[null]},{rt_cd:'0',output2:Array(21).fill({})}])assert.throws(()=>normalizeEstimate(body,{}));

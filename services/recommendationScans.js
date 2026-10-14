@@ -104,7 +104,7 @@ function createRecommendationScans({scan,analyze,totalCount,aiLimit,aiConfigured
     })();
     return entry.aiPromise;
   };
-  return {candidates,explain,pendingIds:()=>[...entries].filter(([,e])=>e.aiState==='PENDING').map(([id])=>id)};
+  return {candidates,explain,get:id=>lookup(id).result,pendingIds:()=>[...entries].filter(([,e])=>e.aiState==='PENDING').map(([id])=>id)};
 }
 
 function registerRecommendationRoutes(app,store){

@@ -1,10 +1,12 @@
 'use strict';
 // Isolated read-only feature. Never imports the existing quote/account/order adapters.
 const {sharedKisEstimateTokenCache}=require('./kisEstimateTokenCache');
+const {inputTime}=require('./kisIntradaySupplyPolicy');
 const ORIGIN='https://openapi.koreainvestment.com:9443';
 const ENDPOINT='/uapi/domestic-stock/v1/quotations/investor-trend-estimate';
 const TR_ID='HHPTJ04160200';
 const POLICY=Object.freeze({windowMs:15*60*1000,maxQueries:5,maxUpstreamRequests:10,minIntervalMs:60000,timeoutMs:10000,maxBodyBytes:65536,maxRows:20,retries:0});
+const SCHEDULED_POLICY=Object.freeze({...POLICY,maxQueries:122,maxUpstreamRequests:244,minIntervalMs:2000});
 const fail=(code,status=503,retryAfterSeconds=null)=>Object.assign(Error(code),{code,status,retryAfterSeconds});
 const validSymbol=value=>typeof value==='string'&&/^\d{6}$/.test(value);
 function quantity(value){
@@ -45,17 +47,17 @@ function normalizeEstimate(body,{symbol,observedAt}){
     const raw=item.bsop_hour_gb;
     const inputCode=typeof raw==='string'&&/^[A-Za-z0-9_-]{1,16}$/.test(raw.trim())?raw.trim():null;
     const foreign=quantity(item.frgn_fake_ntby_qty),institution=quantity(item.orgn_fake_ntby_qty),sum=quantity(item.sum_fake_ntby_qty);
-    return {row:index+1,inputCode,inputCodeState:inputCode!==null?'PRESENT':raw===undefined||raw===null||raw===''?'MISSING':'INVALID',
+    return {row:index+1,inputCode,plannedInputTimeKst:inputTime(inputCode),inputCodeState:inputCode!==null?'PRESENT':raw===undefined||raw===null||raw===''?'MISSING':'INVALID',
       foreignNetQuantity:foreign.value,institutionNetQuantity:institution.value,sumNetQuantity:sum.value,
       quantityStates:{foreign:foreign.state,institution:institution.state,sum:sum.state},
       quantityFormats:{foreign:quantityFormat(item,'frgn_fake_ntby_qty'),institution:quantityFormat(item,'orgn_fake_ntby_qty'),sum:quantityFormat(item,'sum_fake_ntby_qty')}};
   });
   return {symbol,source:'KIS_INTRADAY_ESTIMATE',kind:'PROVISIONAL_EMPLOYEE_INPUT_CUMULATIVE',unit:'shares',
     status:rows.length?'REFERENCE_ONLY':'EMPTY',observedAt,sourceTradeDate:null,sourceUpdatedAt:null,
-    freshness:'UNCONFIRMED',inputTimeMapping:'UNCONFIRMED',eligibleForSupplyScore:false,rows};
+    freshness:'UNCONFIRMED',inputTimeMapping:'DOCUMENTED_SCHEDULE',eligibleForSupplyScore:false,rows};
 }
 function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch(...args),now=Date.now,
-  timers={setTimeout,clearTimeout},tokenCache=sharedKisEstimateTokenCache}={}){
+  timers={setTimeout,clearTimeout},tokenCache=sharedKisEstimateTokenCache,authorizeScheduled=()=>false}={}){
   let reason='DISABLED',appKey=null,appSecret=null;
   if(env.KIS_INTRADAY_ESTIMATE_ENABLED==='true'){
     if(env.KIS_INTRADAY_ESTIMATE_ENVIRONMENT!=='live')reason='LIVE_ENVIRONMENT_REQUIRED';
@@ -67,7 +69,8 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
     }
   }
   const authContext=reason===null?{environment:'live',origin:ORIGIN,appKey,appSecret}:null;
-  let active=false,windowStart=null,queries=0,requests=0,nextAt=0;
+  let active=false;
+  const buckets={manual:{windowStart:null,queries:0,requests:0,nextAt:0},scheduled:{windowStart:null,queries:0,requests:0,nextAt:0}};
   const availability=()=>({enabled:reason===null,reason,policy:POLICY,environment:'live-only',eligibleForSupplyScore:false});
   async function readJson(response,signal){
     if(signal.aborted)throw fail('KIS_ESTIMATE_TIMEOUT',504);
@@ -80,17 +83,19 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
       try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{throw fail('KIS_ESTIMATE_RESPONSE_INVALID');}
     }finally{try{await reader.cancel();}catch{}}
   }
-  async function query(symbol,{manual=false,signal:clientSignal}={}){
+  async function query(symbol,{manual=false,scheduledPermit,signal:clientSignal}={}){
     if(reason!==null)throw fail('KIS_ESTIMATE_UNAVAILABLE');
-    if(manual!==true)throw fail('KIS_ESTIMATE_MANUAL_REQUIRED',403);
+    const scheduled=manual!==true&&authorizeScheduled({symbol,permit:scheduledPermit})===true;
+    if(manual!==true&&!scheduled)throw fail('KIS_ESTIMATE_MANUAL_REQUIRED',403);
     if(!validSymbol(symbol))throw fail('KIS_ESTIMATE_SYMBOL_INVALID',400);
     if(clientSignal?.aborted)throw fail('KIS_ESTIMATE_CANCELLED',499);
-    const time=now();if(windowStart===null||time>=windowStart+POLICY.windowMs){windowStart=time;queries=0;requests=0;}
+    const limit=scheduled?SCHEDULED_POLICY:POLICY,bucket=buckets[scheduled?'scheduled':'manual'];
+    const time=now();if(bucket.windowStart===null||time>=bucket.windowStart+limit.windowMs){bucket.windowStart=time;bucket.queries=0;bucket.requests=0;}
     if(active)throw fail('KIS_ESTIMATE_BUSY',409);
-    if(queries>=POLICY.maxQueries||requests+2>POLICY.maxUpstreamRequests)
-      throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.max(1,Math.ceil((windowStart+POLICY.windowMs-time)/1000)));
-    if(time<nextAt)throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.ceil((nextAt-time)/1000));
-    queries++;nextAt=time+POLICY.minIntervalMs;active=true;
+    if(bucket.queries>=limit.maxQueries||bucket.requests+2>limit.maxUpstreamRequests)
+      throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.max(1,Math.ceil((bucket.windowStart+limit.windowMs-time)/1000)));
+    if(time<bucket.nextAt)throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.ceil((bucket.nextAt-time)/1000));
+    bucket.queries++;bucket.nextAt=time+limit.minIntervalMs;active=true;
     const controller=new AbortController(),signal=controller.signal;
     let rejectTimeout;const timeout=new Promise((_,reject)=>{rejectTimeout=reject;});
     const cancel=()=>{controller.abort();rejectTimeout(fail('KIS_ESTIMATE_CANCELLED',499));};
@@ -99,8 +104,8 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
     let usedAccessToken=null;
     const request=async(pathname,options)=>{
       if(signal.aborted)throw fail('KIS_ESTIMATE_TIMEOUT',504);
-      if(requests>=POLICY.maxUpstreamRequests)throw fail('KIS_ESTIMATE_RATE_LIMITED',429);
-      requests++;
+      if(bucket.requests>=limit.maxUpstreamRequests)throw fail('KIS_ESTIMATE_RATE_LIMITED',429);
+      bucket.requests++;
       const response=await fetchImpl(ORIGIN+pathname,{...options,redirect:'error',signal});
       if(signal.aborted)throw fail('KIS_ESTIMATE_TIMEOUT',504);
       if(!response.ok){if(response.status===401)tokenCache.invalidate(authContext,usedAccessToken);throw fail('KIS_ESTIMATE_UPSTREAM_REJECTED');}
@@ -128,4 +133,4 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
   }
   return Object.freeze({availability,query});
 }
-module.exports={createKisIntradayEstimate,normalizeEstimate,quantity,quantityFormat,validSymbol,POLICY,ORIGIN,ENDPOINT,TR_ID};
+module.exports={createKisIntradayEstimate,normalizeEstimate,quantity,quantityFormat,validSymbol,POLICY,SCHEDULED_POLICY,ORIGIN,ENDPOINT,TR_ID};

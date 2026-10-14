@@ -23,7 +23,7 @@ async function fixture(t,{fetchNews,now=Date.now,ttlMs,currentVolume=150,average
   const app=express();
   const holdingGuidanceAccess=require('../services/holdingGuidanceAccess').createHoldingGuidanceAccess({
     env:{HOLDING_GUIDANCE_ACCESS_SECRET:'TEST_ONLY_ACCESS',HOLDING_GUIDANCE_TOKEN_SECRET:'TEST_ONLY_'.repeat(4)}});
-  const context={app,holdingGuidanceAccess,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
+  const context={app,scheduledSupply:{resolve:()=>null,rememberDetail:()=>false},holdingGuidanceAccess,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
     fetchStockQuoteData:async symbol=>{calls.quote++;return {symbol,stockName:'TEST_ONLY',currentPrice:100,foreignerNet:1,institutionNet:1};},
     fetchKisDailyOHLCV:async()=>{calls.daily++;return Array.from({length:30},(_,i)=>({testOnly:true,high:120,low:90,close:100,
       date:i===29?sourceBusinessDate:'2026-10-01',volume:i===29?currentVolume:averageVolume20,
@@ -120,7 +120,7 @@ test('TEST_ONLY legacy strategy and explicit individual AI endpoints retain thei
 
 test('TEST_ONLY watchlist and recommendation news reader contract are preserved',()=>{
   const {execFileSync}=require('node:child_process');
-  const before=execFileSync('git',['show','HEAD:server.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
+  const before=execFileSync('git',['show','7b6a94a5e312241b9518e04b8ab45ab76afec93b:server.js'],{encoding:'utf8'}).replace(/\r\n/g,'\n');
   // Volume policy may evolve; the watchlist and the canonical news provider must remain stable.
   for(const [a,b] of [['const RECOMMENDATION_WATCHLIST =','const sleep =']]){
     assert.ok(source.indexOf(a)>=0&&before.indexOf(a)>=0);

@@ -42,10 +42,12 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     </p>}
     <ul className="expanded-card-conditions" aria-label="분석 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
-        <span>{label}</span><strong>{label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
+        <span>{label}</span><strong>{label==='수급'&&item.supplyAssessment?.status==='PENDING'?'집계 대기':label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
       </li>)}
     </ul>
     {volumePending&&<p className="expanded-card-note">당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.</p>}
+    {item.supplyAssessment&&<p className="expanded-card-note">KIS 누적 추정 수급 · 관측일 {item.supplyAssessment.observedDate??'미확인'} · 원천 거래일·실제 갱신시각 미제공 · 예정 회차 {item.supplyAssessment.plannedInputTimeKst??'미확인'} · {item.supplyAssessment.status==='READY'?'당일 회차 관측 추론':'판정 대기/미확인'}</p>}
+    {item.naverDailySupply&&<p className="expanded-card-note">NAVER 일별 참고(판정 미반영) · 기준일 {item.naverDailySupply.supplyDate??'미확인'} · 외국인 {number(item.naverDailySupply.foreignerNet)} · 기관 {number(item.naverDailySupply.institutionNet)}</p>}
     {screening&&<div className="expanded-selection-reasons">
       <p><strong>분석 근거 · 충족 조건</strong> {words(item.passedConditions)}</p>
       <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>

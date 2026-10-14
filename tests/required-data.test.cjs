@@ -15,7 +15,7 @@ const blocked=r=>{assert.equal(r.finalAssessment.status,'DATA_INSUFFICIENT');ass
 
 test('complete data retains baseline candidate and exact price formulas',()=>{
   const old={exports:{}};
-  vm.runInNewContext(execFileSync('git',['show','HEAD:services/tradingStrategy.js'],{encoding:'utf8'}),{module:old,require:name=>{assert.equal(name,'./recommendationVolumePolicy');return require('../services/recommendationVolumePolicy');}});
+  vm.runInNewContext(execFileSync('git',['show','7b6a94a5e312241b9518e04b8ab45ab76afec93b:services/tradingStrategy.js'],{encoding:'utf8'}),{module:old,require:name=>{assert.equal(name,'./recommendationVolumePolicy');return require('../services/recommendationVolumePolicy');}});
   const before=old.exports.calculateTradingStrategy(input()),after=engine.calculateTradingStrategy(input());
   assert.equal(after.finalAssessment.status,'ENTRY_CANDIDATE');
   assert.deepEqual([after.entryPrice,after.takeProfitPrice,after.stopLossPrice,after.riskRewardRatio],[100,120,95,4]);
@@ -306,7 +306,7 @@ test('AI cannot turn insufficient detailed strategy into BUY',async()=>{
   assert.equal(engine.isEntryAllowed(r.strategy),false);
 });
 test('screening calculations and prices match pre-authority version',async()=>{
-  const oldSource=require('./helpers/without-private-site.cjs')(execFileSync('git',['show','HEAD:server.js'],{encoding:'utf8'}));
+  const oldSource=require('./helpers/without-private-site.cjs')(execFileSync('git',['show','7b6a94a5e312241b9518e04b8ab45ab76afec93b:server.js'],{encoding:'utf8'}));
   const before=await server({serverSource:oldSource}).ctx.recommend({symbol:'005930',name:'Fixture'});
   const after=await server().ctx.recommend({symbol:'005930',name:'Fixture'});
   for(const key of ['score','maxScore','grade'])assert.equal(after[key],before[key]);

@@ -43,7 +43,7 @@ function createExpandedRecommendationRuns({
   history=null,codeVersion=null,deepLimit=DEFAULT_DEEP_LIMIT,
   fastConcurrency=DEFAULT_FAST_CONCURRENCY,deepConcurrency=DEFAULT_DEEP_CONCURRENCY,
   aiEnabled=false,analyze=null,now=Date.now,makeId=randomUUID,maxEntries=MAX_RUNS_IN_MEMORY,
-  logFailure=line=>console.warn(line)
+  logFailure=line=>console.warn(line),getReuseContext=()=>null
 }){
   if(![loadUniverse,fastScreen,deepReview,rank,logFailure].every(x=>typeof x==='function'))throw problem('EXPANDED_RUN_CONFIG_INVALID');
   if(!Number.isInteger(deepLimit)||deepLimit<20||deepLimit>60||
@@ -51,8 +51,11 @@ function createExpandedRecommendationRuns({
     !Number.isInteger(deepConcurrency)||deepConcurrency<1||deepConcurrency>MAX_DEEP_CONCURRENCY||
     !Number.isInteger(maxEntries)||maxEntries<1)throw problem('EXPANDED_RUN_CONFIG_INVALID');
   const runConfig=Object.freeze({deepLimit,aiEnabled});
-  const compatibility={schemaVersion:EXPANDED_HISTORY_VERSION,policyVersion:EXPANDED_POLICY_VERSION,codeVersion,runConfig};
-  const reuseKey=reuseKeyFor(compatibility);
+  const currentCompatibility=()=>{
+    const context=getReuseContext();if(context!==null&&(typeof context!=='string'||!/^[a-f0-9]{64}$/.test(context)))throw problem('EXPANDED_REUSE_CONTEXT_INVALID',503);
+    return {schemaVersion:EXPANDED_HISTORY_VERSION,policyVersion:EXPANDED_POLICY_VERSION,
+      codeVersion:context===null?codeVersion:String(codeVersion??'UNVERSIONED')+':SUPPLY:'+context,runConfig};
+  };
   const runs=new Map();
   let activeId=null;
   const timestamp=()=>new Date(now()).toISOString();
@@ -82,11 +85,12 @@ function createExpandedRecommendationRuns({
       fastResults:saved.fastResults,universeSnapshot:saved.universeSnapshot,aiStatus:saved.aiStatus,ai:saved.ai};
   }
   function reusable(run){
+    const compatibility=currentCompatibility(),reuseKey=reuseKeyFor(compatibility);
     const completed=Date.parse(run.scanCompletedAt),age=now()-completed;
     return ['COMPLETED','PARTIAL'].includes(run.status)&&Number.isFinite(completed)&&age>=0&&age<EXPANDED_REUSE_TTL_MS&&
       run.stats?.universeCount===500&&run.fastResults?.length===500&&run.universeSnapshot?.stocks?.length===500&&
       run.schemaVersion===compatibility.schemaVersion&&run.policyVersion===compatibility.policyVersion&&
-      run.codeVersion===codeVersion&&run.reuseKey===reuseKey&&
+      run.codeVersion===compatibility.codeVersion&&run.reuseKey===reuseKey&&
       run.runConfig?.deepLimit===deepLimit&&run.runConfig?.aiEnabled===aiEnabled&&
       !['PENDING','IN_PROGRESS','INTERRUPTED_UNKNOWN'].includes(run.aiStatus)&&
       (!aiEnabled||run.aiStatus!=='NOT_REQUESTED')&&run.history?.status!=='INCOMPLETE';
@@ -128,6 +132,7 @@ function createExpandedRecommendationRuns({
     if(runs.size>=maxEntries)throw problem('EXPANDED_RUN_CAPACITY',503);
     const runId=makeId();
     if(!validId(runId)||runs.has(runId))throw problem('EXPANDED_RUN_ID_INVALID');
+    const compatibility=currentCompatibility(),reuseKey=reuseKeyFor(compatibility);
     const run={...compatibility,reuseKey,runId,scanId:runId,protocolVersion:RUN_PROTOCOL,status:'QUEUED',
       reused:false,reuseTtlMs:EXPANDED_REUSE_TTL_MS,
       failureStage:null,failureReason:null,failureDiagnostic:null,
@@ -231,7 +236,7 @@ function createExpandedRecommendationRuns({
               scanCompletedAt:run.scanCompletedAt,scanStatus:run.status,
               universeSnapshot:snapshot,fastResults:run.fastResults,
               deepResults:ranked,deepFailures:run.deepFailures,
-              stats:run.stats,requestStats:run.requestStats,codeVersion,aiEnabled,runConfig,reuseKey});
+              stats:run.stats,requestStats:run.requestStats,codeVersion:run.codeVersion,aiEnabled,runConfig,reuseKey:run.reuseKey});
           }catch(error){run.history={status:'FAILED',reason:error.code?.startsWith('HISTORY_')?error.code:'HISTORY_WRITE_FAILED'};}
         }
         if(aiEnabled&&typeof analyze==='function'){

@@ -46,9 +46,23 @@ installExecutionMode(app,executionMode);
 const {createSiteHoldingGuidance,registerSiteHoldingGuidanceRoutes}=require('./services/siteHoldingGuidance');
 const holdingGuidanceAccess=createSiteHoldingGuidance(privateSite.access);
 registerSiteHoldingGuidanceRoutes(app,holdingGuidanceAccess,privateSite.access);
-const {createKisIntradayEstimate}=require('./services/kisIntradayEstimate');
+const {createKisSupplyRuntime,projectScreeningRecommendations}=require('./services/kisSupplyRuntime');
 const {registerIntradaySupplyRoutes}=require('./services/intradaySupplyApi');
-registerIntradaySupplyRoutes(app,createKisIntradayEstimate({env:process.env}),privateSite.access);
+const kisSupplyRuntime=createKisSupplyRuntime({env:process.env,calculateDetail:calculateTradingStrategy,
+  resolveSources:refs=>{
+    const read=id=>{if(!id)return null;return refs.mode==='expanded500'?expandedRuns.get(id):recommendationScans.get(id);};
+    const visible=read(refs.visibleId),review=read(refs.reviewId??refs.visibleId);
+    const visibleItems=(visible?.recommendations??visible?.all??[]).filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
+    const items=review?.all??review?.recommendations??[];
+    const selected=refs.mode==='expanded500'?(review?.fastResults??[]).filter(x=>x.deepReviewSelected===true).map(x=>x.symbol):
+      [...items.map(x=>x.symbol),...(review?.failures??[]).map(x=>x.symbol)];
+    return {visible:visibleItems.map(x=>x.symbol),review:selected,items,visibleItems};
+  },projectRecommendations:(items,resolve)=>projectScreeningRecommendations(items,resolve,{score:getRecommendationScore,grade:getFinalRecommendationGrade,
+    reason:buildRecommendationReason,risk:calculateRiskReward,rank:rankRecommendationResults})});
+const scheduledSupply=kisSupplyRuntime.scheduled;
+registerIntradaySupplyRoutes(app,kisSupplyRuntime.adapter,privateSite.access,scheduledSupply);
+scheduledSupply.start(); // Default OFF and no confirmed trading calendar: no timer or provider call.
+console.log(`[K-Stock AI] Scheduled supply startup enabled=${scheduledSupply.status().enabled} scoreEnabled=${scheduledSupply.status().scoreEnabled}`);
 app.use(express.json());
 
 const NAVER_HEADERS = {
@@ -862,6 +876,9 @@ const calculateStrategy =
       }
     }
 
+    const intradaySupplyAssessment=scheduledSupply.resolve(symbol);
+    const naverDailySupply=intradaySupplyAssessment?{foreignerNet,institutionNet,supplyDate:supplyMetadata.sourceBusinessDate}:null;
+    if(intradaySupplyAssessment){foreignerNet=intradaySupplyAssessment.foreignerNet;institutionNet=intradaySupplyAssessment.institutionNet;supplyMetadata=intradaySupplyAssessment.metadata;}
     const dailyMetadata = dataFreshness({ source: 'Naver daily price', date: rows[0]?.date ?? null, receivedAt });
     const dataMetadata = { price: dailyMetadata, volume: dailyMetadata, supply: supplyMetadata,
       dateConsistency: dateConsistency([dailyMetadata, supplyMetadata]) };
@@ -986,7 +1003,8 @@ const calculateStrategy =
     const volumePassed = intradayVolume ? volumeAssessment.volumePassed : completedVolumePassed;
     const pendingConditions = intradayVolume && isIntradayVolumePending({volumePassed,volumeAssessment}) ? ['거래량'] : [];
 
-    const supplyPassed =
+    if(intradaySupplyAssessment?.status==='PENDING')pendingConditions.push('수급');
+    const supplyPassed = intradaySupplyAssessment ? intradaySupplyAssessment.screeningPassed :
       Number.isFinite(
         netSupplyTotal
       )
@@ -1000,6 +1018,7 @@ const calculateStrategy =
 
     let signal =
       (trendPassed === null || supplyPassed === null || (volumePassed === null && !pendingConditions.length)) ? 'INSUFFICIENT_DATA' : 'WAIT';
+    if(intradaySupplyAssessment?.status==='PENDING'&&trendPassed!==null)signal='WAIT_INTRADAY_CONFIRMATION';
 
     let entryPrice =
       null;
@@ -1108,6 +1127,7 @@ if (
 
 return {
   decisionRole: 'SCREENING',
+  ...(intradaySupplyAssessment?{supplyAssessment:intradaySupplyAssessment,naverDailySupply}: {}),
   dataMetadata,
   symbol,
   currentPrice,
@@ -1126,6 +1146,7 @@ return {
   trendPassed,
   volumePassed,
   ...(intradayVolume?{volumeAssessment,pendingConditions}:{}),
+  ...(intradaySupplyAssessment&&!intradayVolume?{pendingConditions}:{}),
   supplyPassed,
   signal,
   tradeSignal,
@@ -1499,6 +1520,7 @@ const buildRecommendationReason =
     const passed = [];
     const failed = [];
     const pending = isIntradayVolumePending(strategy) ? ['거래량'] : [];
+    if(strategy.supplyAssessment?.status==='PENDING')pending.push('수급');
     const unknown = [['추세', strategy.trendPassed], ['거래량', strategy.volumePassed],
       ['수급', strategy.supplyPassed], ['뉴스', newsAssessment?.newsPassed]]
       .filter(([label, value]) => typeof value !== 'boolean' && !pending.includes(label)).map(([label]) => label);
@@ -1718,6 +1740,7 @@ const buildRecommendationResult =
 
     return {
       decisionRole: 'SCREENING',
+      ...(strategy.supplyAssessment?{supplyAssessment:strategy.supplyAssessment,naverDailySupply:strategy.naverDailySupply}: {}),
       symbol:
         stock.symbol,
 
@@ -1738,7 +1761,7 @@ const buildRecommendationResult =
 
       requiredDataStatus: requiredDataMissing ? 'INSUFFICIENT_DATA' : 'VALID',
       unknownConditions: conditionReason.unknownConditions,
-      ...(intradayVolume?{pendingConditions:conditionReason.pendingConditions??[]}:{}),
+      ...((intradayVolume||strategy.supplyAssessment)?{pendingConditions:conditionReason.pendingConditions??[]}:{}),
       // 기존 3점 → 뉴스 포함 4점
       maxScore:
         4,
@@ -1769,6 +1792,7 @@ const buildRecommendationResult =
       dataMetadata: quote.dataMetadata ?? null,
       strategy: {
         decisionRole: 'SCREENING',
+        currentPrice: strategy.currentPrice,
         dataMetadata: strategy.dataMetadata ?? null,
         ma5:
           strategy.ma5,
@@ -4073,8 +4097,12 @@ app.get(
           symbol
         );
 
+      const currentSupply=scheduledSupply.resolve(symbol);
       return res.json({
         ...quote,
+        ...(currentSupply?{naverDailySupply:{foreignerNet:quote.foreignerNet,institutionNet:quote.institutionNet,supplyDate:quote.supplyDate},
+          foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:null,
+          supplyAssessment:currentSupply,dataMetadata:{...quote.dataMetadata,supply:currentSupply.metadata,dateConsistency:'UNKNOWN'}}: {}),
 
         source:
           'Naver stock data',
@@ -4509,6 +4537,7 @@ const expandedConfig=expandedSettings(process.env);
 const expandedUniverse=createRecommendationUniverse({headers:NAVER_HEADERS});
 let currentFastScreen=null;
 const expandedRuns=createExpandedRecommendationRuns({
+  getReuseContext:()=>scheduledSupply.reuseContext(),
   loadUniverse:async()=>{
     currentFastScreen=createRecommendationFastScreen({headers:NAVER_HEADERS});
     return expandedUniverse.load();
@@ -5117,6 +5146,9 @@ const recentLow20 =
 
       // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
 
+      scheduledSupply.rememberDetail(symbol,{symbol,currentPrice,chartAnalysis,marketContext:rawMarketContext,sourceIntegrity:rows.latestSourceIntegrity});
+      const currentSupply=scheduledSupply.resolve(symbol);
+      if(currentSupply){rawMarketContext.foreignerNet=currentSupply.foreignerNet;rawMarketContext.institutionNet=currentSupply.institutionNet;rawMarketContext.supplyAssessment=currentSupply;}
       const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
@@ -5176,7 +5208,7 @@ recentLow20,
           volumeAssessment,
 
           complete:
-            marketContextComplete,
+            marketContextComplete&&(!currentSupply||currentSupply.eligibleForSupplyScore===true),
 
           volume:
             currentVolume,
@@ -5223,6 +5255,8 @@ recentLow20,
               newsResult?.ok ===
               true
           }
+          ,...(currentSupply?{foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:null,
+            supplyAssessment:currentSupply,naverDailySupply:{foreignerNet,institutionNet,supplyDate:quote?.supplyDate??null}}: {})
         },
 
         chartAnalysis,

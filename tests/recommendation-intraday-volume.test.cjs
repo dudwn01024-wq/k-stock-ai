@@ -41,7 +41,7 @@ for(const [label,patch] of [['null',{currentVolume:null}],['NaN',{currentVolume:
 function backend(time=at('09:30'),volume=200000,{missingSupply=false,emptyNews=false}={}){
   let calls=0;const clock=Date.parse(time);
   class FixedDate extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
-  const context=vm.createContext({...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
+  const context=vm.createContext({scheduledSupply:{resolve:()=>null},...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
     recommendationFetch:async url=>{calls++;return {ok:true,json:async()=>url.includes('/price?')?daily(volume):
       {dealTrendInfos:[{bizdate:'20261007',foreignerPureBuyQuant:1,organPureBuyQuant:missingSupply?null:1}]}};},
     getLatestDealTrend:data=>data.dealTrendInfos[0],average:x=>x.reduce((a,b)=>a+b,0)/x.length,

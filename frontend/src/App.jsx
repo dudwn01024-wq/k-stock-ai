@@ -6,6 +6,8 @@ import RecommendationHistory from './RecommendationHistory.jsx';
 import ExpandedRecommendation from './ExpandedRecommendation.jsx';
 import HoldingGuidance from './HoldingGuidance.jsx';
 import IntradaySupplyPanel from './IntradaySupplyPanel.jsx';
+import ScheduledSupplyPanel from './ScheduledSupplyPanel.jsx';
+import {projectRecommendationData} from './utils/scheduledSupply.js';
 import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
 import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
 import CandlestickChart from './CandlestickChart.jsx';
@@ -512,16 +514,22 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const searchRequestRef=useRef(0);
   const aiRequestRef=useRef(0);
   const detailSnapshotRef=useRef(null);
+  const scheduledBaseRef=useRef(null);
   const aiPendingRef=useRef(false);
 
   const [recommendationRun,setRecommendationRun]=useState({data:null,loading:false,error:null,ai:null,aiLoading:false,aiError:null});
-  const {data:recommendationData,loading:recommendationLoading,error:recommendationError,
+  const {data:recommendationBase,loading:recommendationLoading,error:recommendationError,
     ai:recommendationAIData,aiLoading:recommendationAILoading,aiError:recommendationAIError}=recommendationRun;
   const [historyOpen,setHistoryOpen]=useState(false);
   const [recommendationMode,setRecommendationMode]=useState(null);
   const [expandedAiEnabled,setExpandedAiEnabled]=useState(false);
   const [recommendationModeError,setRecommendationModeError]=useState(null);
   const [recommendationsCollapsed,setRecommendationsCollapsed]=useState(false);
+  const [supplyView,setSupplyView]=useState(null);
+  const [expandedSupplySource,setExpandedSupplySource]=useState(null);
+  const recommendationData=projectRecommendationData(recommendationBase,supplyView,recommendationBase?.scanId);
+  const scheduledSource=recommendationMode==='expanded500'?expandedSupplySource:
+    recommendationMode==='legacy50'&&recommendationBase?.scanId?{mode:'legacy50',id:recommendationBase.scanId}:null;
 
   const [loading, setLoading] = useState(Boolean(routeSymbol));
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -537,6 +545,33 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   }, [showDetail, loading, activeTab]);
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
+  const applyScheduledSupply=useCallback(view=>{
+    setSupplyView(view);
+    const base=scheduledBaseRef.current;if(!base||base.symbol!==activeSymbol)return;
+    if(view?.cacheUnavailable||(!view?.projection&&view?.assessment&&view?.scheduling?.scoreEnabled)){
+      const pending=view?.assessment?.status==='PENDING';
+      const conditions={...base.strategy?.marketAssessment?.conditions,supply:{status:pending?'PENDING':'UNAVAILABLE',label:'수급',reason:'현재 예약 수급 확인 필요'}};
+      const entries=Object.entries(conditions),all=entries.map(([,value])=>value),foreign=pending?view?.assessment?.foreignerNet??null:null;
+      const metadata={source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:null,freshnessStatus:'UNCONFIRMED'};
+      setQuoteData({...base.quote,foreignerNet:foreign,institutionNet:null,supplyDate:null,supplyAssessment:view?.assessment,
+        naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
+        dataMetadata:{...base.quote.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'}});
+      setStrategyData({...base.strategy,available:false,foreignerNet:foreign,institutionNet:null,netSupplyTotal:null,supplyPassed:null,signal:'WAIT',tradeSignal:'WAIT',
+        entryPrice:null,takeProfitPrice:null,stopLossPrice:null,riskRewardRatio:null,riskRewardAssessment:{available:false,status:'UNAVAILABLE'},executionAssessment:{status:'UNAVAILABLE'},
+        marketAssessment:{...base.strategy.marketAssessment,available:all.every(x=>x.status!=='UNAVAILABLE'),conditions,
+          availableCount:all.filter(x=>x.status!=='UNAVAILABLE').length,favorableCount:all.filter(x=>x.status==='FAVORABLE').length,cautionCount:all.filter(x=>x.status==='CAUTION').length,
+          pendingCount:all.filter(x=>x.status==='PENDING').length,missingRequired:entries.filter(([,x])=>x.status==='UNAVAILABLE').map(([key])=>key),pendingRequired:entries.filter(([,x])=>x.status==='PENDING').map(([key])=>key)},
+        dataMetadata:{...base.strategy.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'},finalAssessment:{status:'WAIT',label:'수급 확인 필요',reason:'이전 수급을 현재 값으로 사용하지 않습니다.'}});return;
+    }
+    const projected=view?.projection;if(!projected||projected.symbol!==activeSymbol){setQuoteData(base.quote);setStrategyData(base.strategy);return;}
+    const mapped=backendService.mapStockStrategy(activeSymbol,projected),context=projected.marketContext;
+    setQuoteData({...base.quote,foreignerNet:context.foreignerNet,institutionNet:context.institutionNet,supplyDate:null,
+      naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
+      supplyAssessment:view.assessment,dataMetadata:{...base.quote.dataMetadata,supply:projected.supplyMetadata,dateConsistency:'UNKNOWN'}});
+    setStrategyData({...base.strategy,...mapped,dataPoints:base.strategy.dataPoints,newsSnapshotId:base.strategy.newsSnapshotId,
+      newsReceivedAt:base.strategy.newsReceivedAt,newsStatus:base.strategy.newsStatus,supplyAssessment:view.assessment,
+      dataMetadata:{...base.strategy.dataMetadata,supply:projected.supplyMetadata,dateConsistency:'UNKNOWN'}});
+  },[activeSymbol,backendService]);
   useEffect(()=>{
     if(isStockRoute)return;
     let active=true;
@@ -558,6 +593,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       ++aiRequestRef.current;
       aiPendingRef.current=false;
       detailSnapshotRef.current=null;
+      scheduledBaseRef.current=null;
       setAiLoading(false);
       setAiError(null);
       setAiAnalysis(null);
@@ -587,6 +623,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
         if(request!==detailRequestRef.current)return;
         detailSnapshotRef.current={symbol,id:detail.newsSnapshotId};
+        scheduledBaseRef.current={symbol,quote,strategy:detail.strategy};
         setQuoteData(quote);
         setChartData(chartResult.items);
         setChartSupported(chartResult.supported);
@@ -805,10 +842,11 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       <main className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
         {isStockRoute&&<a href="/" className="home-secondary inline-flex items-center">메인으로</a>}
         {!isStockRoute && activeTab !== 'paper' && historyOpen && <RecommendationHistory service={backendService} onBack={()=>setHistoryOpen(false)}/>}
-        {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
+        {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='expanded500' && <ExpandedRecommendation service={backendService} aiEnabled={expandedAiEnabled} onSelect={handlePopularStock} supplyView={supplyView} onSupplySource={setExpandedSupplySource} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {!isStockRoute && activeTab !== 'paper' && !historyOpen && recommendationMode==='legacy50' && <CandidateOverview data={recommendationData} loading={recommendationLoading}
           error={recommendationError} aiData={recommendationAIData} aiLoading={recommendationAILoading} aiError={recommendationAIError} onSelect={handlePopularStock} onRefresh={loadRecommendations} onHistory={()=>{setActiveTab('home');setHistoryOpen(true);}} />}
         {!isStockRoute && activeTab !== 'paper' && !historyOpen && !recommendationMode && <p role={recommendationModeError?'alert':'status'} className="home-warning">{recommendationModeError||'추천 실행 모드를 확인하는 중입니다…'}</p>}
+        <ScheduledSupplyPanel symbol={activeSymbol} source={isStockRoute?null:scheduledSource} active={!historyOpen&&activeTab!=='paper'} apiBase={API_BASE_URL} onSnapshot={applyScheduledSupply}/>
         {!historyOpen && <>
         {showDetail && loading && (
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-12 text-center space-y-4">
@@ -855,6 +893,11 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         </>}
 
         {activeTab==='detail'&&<IntradaySupplyPanel key={activeSymbol} symbol={activeSymbol} name={activeName} apiBase={API_BASE_URL}/>}
+        {quoteData?.naverDailySupply&&<aside className="intraday-supply-schedule" aria-label="NAVER 일별 수급 참고">
+          <h3>NAVER 일별 수급 참고 · 현재 추정 수급 판정과 분리</h3>
+          <p>기준일 {quoteData.naverDailySupply.supplyDate??'미확인'} · 외국인 {formatNumberWithUnit(quoteData.naverDailySupply.foreignerNet,'주')} · 기관 {formatNumberWithUnit(quoteData.naverDailySupply.institutionNet,'주')}</p>
+          <p>KIS 표시값은 관측 회차의 누적 추정치입니다. 원천 거래일·실제 갱신시각은 제공되지 않았으며 NAVER 일별 값으로 빈 회차를 채우지 않습니다.</p>
+        </aside>}
 
         {!isStockRoute && !recommendationLoading && !recommendationError && Array.isArray(recommendationData?.priority) && activeTab === 'detail' && (
           <details className="home-expanded">

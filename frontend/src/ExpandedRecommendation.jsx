@@ -1,6 +1,7 @@
 import {InvestmentNotice} from './PublicInformation.jsx';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import ExpandedCandidateCard from './ExpandedCandidateCard.jsx';
+import {projectRecommendationData} from './utils/scheduledSupply.js';
 import './expanded-recommendation.css';
 
 const terminal=new Set(['COMPLETED','PARTIAL','FAILED','INTERRUPTED_UNKNOWN']);
@@ -52,7 +53,7 @@ export function expandedRunFailureMessage(run){
   };
 }
 
-export default function ExpandedRecommendation({service,onHistory,onSelect,aiEnabled=false}){
+export default function ExpandedRecommendation({service,onHistory,onSelect,aiEnabled=false,supplyView,onSupplySource}){
   const [run,setRun]=useState(null);
   const [saved,setSaved]=useState(null);
   const [storage,setStorage]=useState(null);
@@ -60,6 +61,8 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
   const [starting,setStarting]=useState(false);
   const generation=useRef(0);
   const runId=run?.runId;
+  useEffect(()=>{onSupplySource?.(runId&&run.status!=='FAILED'&&run.status!=='INTERRUPTED_UNKNOWN'?{mode:'expanded500',id:runId}:null);},[runId,run?.status,onSupplySource]);
+  useEffect(()=>()=>onSupplySource?.(null),[onSupplySource]);
   useEffect(()=>{
     let alive=true;
     service.getHistory({page:1}).then(async list=>{
@@ -108,7 +111,8 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
   const display=run?.status==='COMPLETED'||run?.status==='PARTIAL'?run:saved;
   const failure=run?.status==='FAILED'?expandedRunFailureMessage(run):null;
   const stats=display?.stats;
-  const candidates=display?.recommendations??display?.all??[];
+  const projected=display===run?projectRecommendationData(display,supplyView,runId):display;
+  const candidates=projected?.recommendations??projected?.all??[];
   const actual=candidates.filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
   return <section className="expanded-recommendation" aria-label="추천 후보">
     <div className="expanded-home-toolbar">
@@ -132,11 +136,12 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
       </div></details>
     </div>}
     {display&&<div className="expanded-result">
+      {projected?.supplyProjection&&<p role={projected.supplyUnavailable?'alert':'status'} className="expanded-result-context">{projected.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':'수급만 갱신해 후보를 재계산·재정렬했습니다. 가격·차트·거래량·뉴스와 AI 설명은 이전 관측 자료이며 매수 허가가 아닙니다.'}</p>}
       {run?.status==='FAILED'&&display===saved&&<p className="expanded-result-context">아래 목록은 이전에 저장된 분석 결과입니다.</p>}
       <p className="expanded-result-context">{display.reused?'최근 분석 재사용':display===saved?'저장된 분석 결과':'이번 실행 결과'} · 실시간 시세가 아닙니다.</p>
       <div className="expanded-counts">
         <span>조회 대상 <strong>{number(stats?.universeCount??display.scannedCount)}</strong></span>
-        <span>최종 후보 <strong>{number(stats?.finalCandidateCount??actual.length)}</strong></span>
+        <span>최종 후보 <strong>{number(projected?.supplyProjection?actual.length:stats?.finalCandidateCount??actual.length)}</strong></span>
       </div>
       <p className="expanded-card-note">추천목록은 종목 선정 근거를 보여줍니다. 가격 기준선은 종목을 선택한 뒤 상세 분석에서 확인하세요.</p>
       {actual.length?<ol className="expanded-candidates">{actual.map(item=><li key={item.symbol}>

@@ -3,7 +3,7 @@ import {estimateQuantityDiagnosis,formatEstimateQuantity,readEstimate} from './u
 import './intraday-supply.css';
 const setupLabels={DISABLED:'기능이 꺼져 있습니다.',
   LIVE_ENVIRONMENT_REQUIRED:'실전 조회 환경 지정이 필요합니다.',CREDENTIALS_REQUIRED:'조회 자격증명 준비가 필요합니다.'};
-export default function IntradaySupplyPanel({symbol,name,apiBase='/api'}){
+export default function IntradaySupplyPanel({symbol,name,apiBase='/api',onSnapshot}){
   const [config,setConfig]=useState(null),[result,setResult]=useState(null),[error,setError]=useState(null),[busy,setBusy]=useState(false);
   const pending=useRef(false),generation=useRef(0),controller=useRef(null);
   useEffect(()=>{
@@ -21,7 +21,7 @@ export default function IntradaySupplyPanel({symbol,name,apiBase='/api'}){
     const timer=setTimeout(()=>abort.abort(),12000);
     try{
       const data=await readEstimate(apiBase+'/stock/intraday-supply?symbol='+encodeURIComponent(symbol),{manual:true,signal:abort.signal});
-      if(data.symbol!==symbol||data.source!=='KIS_INTRADAY_ESTIMATE'||data.freshness!=='UNCONFIRMED'||data.eligibleForSupplyScore!==false||
+      if(data.symbol!==symbol||data.source!=='KIS_INTRADAY_ESTIMATE'||data.freshness!=='UNCONFIRMED'||data.inputTimeMapping!=='DOCUMENTED_SCHEDULE'||data.eligibleForSupplyScore!==false||
         !Array.isArray(data.rows)||data.rows.length>20||!Number.isFinite(Date.parse(data.observedAt))||
         data.rows.some(row=>!row||!['foreignNetQuantity','institutionNetQuantity','sumNetQuantity'].every(key=>row[key]===null||Number.isSafeInteger(row[key]))))
         throw Error('조회 결과 형식을 확인하지 못했습니다.');
@@ -43,15 +43,16 @@ export default function IntradaySupplyPanel({symbol,name,apiBase='/api'}){
     {error&&<p className="intraday-supply-error" role="alert">{error}</p>}
     {result&&<>
       <dl className="intraday-supply-meta"><div><dt>원천 거래일</dt><dd>미확인 · 응답 필드 미제공</dd></div>
-        <div><dt>원천 갱신시각</dt><dd>미확인 · 입력구분 시간 매핑 미확인</dd></div>
+        <div><dt>원천 갱신시각</dt><dd>미확인 · 예정 입력 시각과 실제 갱신시각을 구분합니다.</dd></div>
         <div><dt>서버 조회시각 (KST)</dt><dd>{received}</dd></div><div><dt>최신성</dt><dd>확인되지 않음 · 조회시각은 원천 기준일이 아닙니다.</dd></div></dl>
       {result.rows.length===0?<p role="status">가집계 응답에 행이 없습니다. 0으로 해석하지 않습니다.</p>:<div className="intraday-supply-rows">
         {result.rows.map((row,index)=><article className="intraday-supply-row" key={index}>
-          <h4>입력구분 {row.inputCode??'미확인'} <small>· 시간 매핑 미확인</small></h4>
+          <h4>입력구분 {row.inputCode??'미확인'} <small>· 입력 예정 {row.plannedInputTimeKst??'미확인'} KST · 실제 갱신시각 미확인</small></h4>
           <dl>{[['foreign','foreignNetQuantity','외국인'],['institution','institutionNetQuantity','기관'],['sum','sumNetQuantity','합산']].map(([kind,key,label])=>{
             const diagnosis=row[key]===null?estimateQuantityDiagnosis(row.quantityStates?.[kind],row.quantityFormats?.[kind]):null;
             return <div key={kind}><dt>{label} 수량(가집계)</dt><dd>{formatEstimateQuantity(row[key])}
-              {diagnosis&&<small className="intraday-supply-diagnosis">{diagnosis}</small>}</dd></div>;
+              {diagnosis&&<small className="intraday-supply-diagnosis">{diagnosis}</small>}
+              {kind==='institution'&&row.inputCode==='1'&&<small className="intraday-supply-diagnosis">기관 첫 입력 예정은 10:00입니다. 이 회차의 값은 확정 기관 판정에 사용하지 않습니다.</small>}</dd></div>;
           })}</dl>
         </article>)}
       </div>}

@@ -18,4 +18,4 @@ const edits={
     ]
   ]
 };
-module.exports=function(source,file='server.js'){source=source.replaceAll('\r\n','\n');for(const [from,to]of edits[file]??[])if(source.includes(from))source=source.replace(from,to);return source;};
+module.exports=function(source,file='server.js'){source=require('./without-kis-scheduled.cjs')(source,file);source=source.replaceAll('\r\n','\n');for(const [from,to]of edits[file]??[])if(source.includes(from))source=source.replace(from,to);return source;};
