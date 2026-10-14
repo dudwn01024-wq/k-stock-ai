@@ -80,6 +80,7 @@ function supplyMetadata(assessment){return {source:'KIS_INTRADAY_ESTIMATE',sourc
   receivedAt:assessment.observedAt,observedBusinessDate:assessment.observedDate,plannedInputTimeKst:assessment.plannedInputTimeKst,
   freshnessStatus:assessment.dateBasis,provisional:true,status:assessment.status};}
 function verifiedSupplyAssessment(value,foreign,institution){
+  if(value?.source==='KIS_DAILY_INVESTOR')return require('./kisDailyInvestor').verifiedDailyAssessment(value,foreign,institution);
   if(!value||Array.isArray(value)||value.source!=='KIS_INTRADAY_ESTIMATE'||value.provisional!==true||
     value.sourceTradeDate!==null||value.sourceUpdatedAt!==null||!['READY','PENDING','UNAVAILABLE','CLOSED'].includes(value.status))return null;
   if(value.status!=='READY')return value.eligibleForSupplyScore===false?value:null;

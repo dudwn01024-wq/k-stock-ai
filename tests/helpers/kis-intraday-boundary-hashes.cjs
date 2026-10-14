@@ -1,7 +1,7 @@
 'use strict';
-// Exact approved manual, scheduled and autonomous KIS feature sources only.
+// Exact reviewed manual/scheduled/autonomous/dated-after-close sources only.
 module.exports={
-  "server.js": "2a263f748226c8be812744bc644ba9d59a7328f1b8e00eee9912b1871c2c7844",
+  "server.js": "55d2dfd7531bd55fa5794e159a6de7008e110adfca95b95417b97e2dfe580239",
   "frontend/src/App.jsx": "f1b324085bd00ec319298cca2a1f4faae29d34b65ddcb2ec8a184eb876c759b3",
   "services/kisIntradayEstimate.js": "c31231e4da1e3c39bb7b6feb276cf408e809879312c8dfafdd3fb47b713aa13b",
   "services/kisEstimateTokenCache.js": "42f74758bfbf3cc0ccb53cbba8343f25738aa73d065c09947a70e255325cfddd",
@@ -10,20 +10,22 @@ module.exports={
   "frontend/src/intraday-supply.css": "d2e2c62b8b3199a13e1b005c0e2667eaccc21498ef58f3714e2c3576737f7f5d",
   "frontend/src/utils/intradaySupply.js": "0a509ab07d308b32db4d806ae6198fac88795eced0c17172335cf5ba89f02871",
   "services/tradingStrategy.js": "7a24520b7b6a9ff3018e2d7d1e65ea9ce329fbb511aeaa30e6ecf1736d1bae85",
-  "services/kisIntradaySupplyPolicy.js": "58bab49c943479a09f3964fb9d97f0ab55cdff426a50902e69c52b7edf9be468",
+  "services/kisIntradaySupplyPolicy.js": "b7c5208b204e946effd7c6f51fafbb61dcd5c1578203b2690272746e0b8e64e8",
   "services/kisScheduledSupply.js": "a4139594a5b1d4a9c9e24edb4359285be10b57e39993f575beec1e150176cb81",
   "services/kisSupplyRuntime.js": "1a2b191ca0597361707c7ff7a7f2c11f6604a2bdddaaadfc5f95927580e32935",
   "frontend/src/ScheduledSupplyPanel.jsx": "763d7476d3dd72825b38214bdb0a2a93fc54db060be12e94dbf1cf36729d972e",
-  "frontend/src/utils/scheduledSupply.js": "1e3c00401b8cd80c59bd81949c45d5e6fda8fa424613b1ff7d0d1b8a9e91608c",
+  "frontend/src/utils/scheduledSupply.js": "bfb25140885a37b6364f4ffefca21082174e2dd44ea31e4912c76e43a9abd86c",
   "services/expandedRecommendationRuns.js": "52d1d82498882fcfd8f09151473ecee8ec3d1390d0e7375bf65e1a242a9b18c3",
   "services/recommendationScans.js": "689138bf842da8f77ec9a5002f7bdb4b123f60808ef2cf53351c38e968bfca80",
-  "frontend/src/ExpandedRecommendation.jsx": "94071a28a1e4ee469560ba0af3a683418274a5b5142e7e97ec0ecab70b0fa627",
+  "frontend/src/ExpandedRecommendation.jsx": "7690e5f8820fa0596f78976fdba72c71e704f421518acaaf328d06f638ae6e42",
   "frontend/src/CandidateOverview.jsx": "1e422ba2b16cef1b4340a10bcd9621801d291368004c424568d550c03913db2c",
-  "frontend/src/ExpandedCandidateCard.jsx": "f7d0391d7dc54fbbe3912fdf8e774e01abb2d348f0fc290e745cfe0fa09f3fc1",
-  "services/kisScheduledQuota.js": "18393b25b63736f0b3680306ea24c470a47a91b39190dbc8820674ed17ee4792",
-  "frontend/src/recommendationDataDates.js": "9f88db0466d39b623cbbd7de04fc5696277455dde1c77fbf13ee291eb7fc6285",
+  "frontend/src/ExpandedCandidateCard.jsx": "e4ecf3184f9cfab65d33721f7276306c480602aec151137664b6ecfd68483099",
+  "services/kisScheduledQuota.js": "5b158182db49236063964b7066d4365097c481c37e918d7353fe15975ba67299",
+  "frontend/src/recommendationDataDates.js": "20465d6f0b260a28967e0c328d22b6230a5b379cb848a5d328d2ac5a5fd53b8d",
   "services/naverMarketData.js": "4b3f5e08e40c7eabdf22e098aa9e5f8de2d28ced05a2be745e039ffe676055da",
-  "services/kisAutonomousRecommendations.js": "e07df4d282e1278f740e0543893d229dcf331b8a09d73a6144bb44ea08849fb3",
-  "services/kisRecommendationStore.js": "4342cef6b39edf31cb822480f9399829809a1e995af6b50215aa7b5ee0e4b9c1",
-  "frontend/src/AutonomousSupplyPanel.jsx": "5f6f3ab517908183dfa9ac2d982163893eb4d6d26aeb5c005c34802a88389f75"
+  "services/kisAutonomousRecommendations.js": "898757222ab67e9473cf6d08897f9157e55d827ec313198700dad5a7c58c49b9",
+  "services/kisRecommendationStore.js": "eb3d254c6d75c396d1acc759cbc9af787d3a7f15b6947e89e5c961eefc766ce4",
+  "frontend/src/AutonomousSupplyPanel.jsx": "d50841cf32979b6e4fa76f8cf539303de804c2280a20385dd68259893e8328ee",
+  "services/kisDailyInvestor.js": "db6c4a016943a0c5afaede25fe9aeec00458c4999dadf64b369b3c68eb9d37a4",
+  "services/kisAfterCloseOnce.js": "d2835921ad72a1e017a23584caf237a9b8d5f77f4fcb0f1767625d1da10e8a0c"
 };

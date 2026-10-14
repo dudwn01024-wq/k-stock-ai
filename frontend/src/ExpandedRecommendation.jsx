@@ -109,7 +109,7 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
     finally{setStarting(false);}
   },[service,starting,run]);
   const currentRun=run?.status==='COMPLETED'||run?.status==='PARTIAL'?run:null;
-  const latestKis=supplyView?.provider==='KIS_INTRADAY_ESTIMATE'&&supplyView.status==='STORED'?supplyView:null;
+  const latestKis=['KIS_INTRADAY_ESTIMATE','KIS_DAILY_INVESTOR'].includes(supplyView?.provider)&&supplyView.status==='STORED'?supplyView:null;
   const display=latestKis&&(!currentRun||Date.parse(latestKis.scanCompletedAt)>=Date.parse(currentRun.scanCompletedAt))?
     latestKis:currentRun??saved;
   const failure=run?.status==='FAILED'?expandedRunFailureMessage(run):null;
@@ -117,7 +117,10 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
   const projected=display===run?projectRecommendationData(display,supplyView,runId):display;
   const candidates=projected?.recommendations??projected?.all??[];
   const actual=candidates.filter(x=>['PRIORITY_CANDIDATE','CHASE_CAUTION','WATCH_CANDIDATE'].includes(x.grade));
-  const waiting=display?.provider==='KIS_INTRADAY_ESTIMATE'?candidates.filter(x=>!actual.includes(x)&&x.supplyAssessment?.status!=='READY'):[];
+  const waiting=['KIS_INTRADAY_ESTIMATE','KIS_DAILY_INVESTOR'].includes(display?.provider)?candidates.filter(x=>!actual.includes(x)&&x.supplyAssessment?.status!=='READY'):[];
+  const supplyCollectionClosed=supplyView?.currentSupplyState==='CLOSED';
+  const noSupplyCollected=supplyCollectionClosed&&latestKis&&candidates.length>0&&candidates.every(x=>!x.supplyAssessment?.observedAt);
+  const dailyConfirmed=candidates.some(x=>x.supplyAssessment?.source==='KIS_DAILY_INVESTOR'&&x.supplyAssessment.status==='READY'&&x.supplyAssessment.eligibleForSupplyScore===true);
   return <section className="expanded-recommendation" aria-label="추천 후보">
     <div className="expanded-home-toolbar">
       <p className="expanded-risk-note">분석은 참고용이며, 주식 투자는 원금 손실 위험이 있습니다.</p>
@@ -140,22 +143,22 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
       </div></details>
     </div>}
     {display&&<div className="expanded-result">
-      {projected?.supplyProjection&&<p role={projected.supplyUnavailable?'alert':'status'} className="expanded-result-context">{projected.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':'수급만 갱신해 후보를 재계산·재정렬했습니다. 가격·차트·거래량·뉴스와 AI 설명은 이전 관측 자료이며 매수 허가가 아닙니다.'}</p>}
+      {projected?.supplyProjection&&<p role={projected.supplyUnavailable?'alert':'status'} className="expanded-result-context">{projected.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':noSupplyCollected?'오늘 KIS 수급 자료 미수집 · 오늘 수집은 종료됐으며 수급 판정을 보류합니다. 수급 외 자료는 원래 분석 기준입니다.':display?.provider==='KIS_DAILY_INVESTOR'&&!dailyConfirmed?'장후 조회는 종료됐지만 당일 유효자료를 확인하지 못했습니다. 수급 판정을 보류하며 수급 외 자료는 원래 분석 기준입니다.':'수급만 갱신해 후보를 재계산·재정렬했습니다. 가격·차트·거래량·뉴스와 AI 설명은 이전 관측 자료이며 매수 허가가 아닙니다.'}</p>}
       {run?.status==='FAILED'&&display===saved&&<p className="expanded-result-context">아래 목록은 이전에 저장된 분석 결과입니다.</p>}
-      {display===latestKis&&<p className="expanded-result-context">{display.historical?'마지막 KIS 관측 당시 저장 추천 · 현재 수급 확인 대기/장 마감':'서버에 저장된 최신 KIS 수급 재평가'} · 수급 외 자료는 원래 분석 기준입니다. 출처 분석 {display.sourceAnalysisId}</p>}
+      {display===latestKis&&<p className="expanded-result-context">{noSupplyCollected?'서버에 저장된 분석 후보 · 오늘 수급 자료 미수집':display.historical?'마지막 KIS 관측 당시 저장 추천 · 현재 수급 확인 대기/장 마감':display.provider==='KIS_DAILY_INVESTOR'?(dailyConfirmed?'거래일을 확인한 장후 일별 수급 재평가 · 최종 확정 여부 미확인':'장후 일별 수급 조회 결과 · 당일 유효자료 미확인'):'서버에 저장된 최신 KIS 수급 재평가'} · 수급 외 자료는 원래 분석 기준입니다. 출처 분석 {display.sourceAnalysisId}</p>}
       {display===saved&&<p className="expanded-result-context">과거 저장 이력입니다. NAVER 기반 수급·점수를 현재 KIS 판정으로 사용하지 않습니다.</p>}
-      <p className="expanded-result-context">{display===latestKis?(display.historical?'과거 KIS 저장 결과 · 오늘 수급 판정 대기/장 마감':'저장된 KIS 재평가 결과'):display.reused?'최근 분석 재사용':display===saved?'저장된 분석 결과':'이번 실행 결과'} · 실시간 시세가 아닙니다.</p>
+      <p className="expanded-result-context">{display===latestKis?(noSupplyCollected?'저장된 분석 후보 · 오늘 KIS 수급 미수집':display.historical?'과거 KIS 저장 결과 · 오늘 수급 판정 대기/장 마감':'저장된 KIS 재평가 결과'):display.reused?'최근 분석 재사용':display===saved?'저장된 분석 결과':'이번 실행 결과'} · 실시간 시세가 아닙니다.</p>
       <div className="expanded-counts">
         <span>조회 대상 <strong>{number(stats?.universeCount??display.scannedCount)}</strong></span>
         <span>최종 후보 <strong>{number(projected?.supplyProjection?actual.length:stats?.finalCandidateCount??actual.length)}</strong></span>
       </div>
       <p className="expanded-card-note">추천목록은 종목 선정 근거를 보여줍니다. 가격 기준선은 종목을 선택한 뒤 상세 분석에서 확인하세요.</p>
       {actual.length?<ol className="expanded-candidates">{actual.map(item=><li key={item.symbol}>
-        <ExpandedCandidateCard item={item} screening onSelect={onSelect} historical={display===saved||display.historical===true}/>
+        <ExpandedCandidateCard item={item} screening onSelect={onSelect} historical={display===saved||display.historical===true} supplyCollectionClosed={supplyCollectionClosed}/>
       </li>)}</ol>:<p className="home-state">저장된 최종 후보가 없습니다.</p>}
-      {waiting.length>0&&<section aria-label="KIS 수급 확인 대기 후보"><h3>심층 후보 · KIS 수급 확인 대기</h3>
-        <p className="expanded-card-note">수급 탈락 전 후보 풀입니다. 자료가 확인되면 기존 조건으로 재평가하며, 현재 추천이나 매수 허가가 아닙니다.</p>
-        <ol className="expanded-candidates">{waiting.map(item=><li key={item.symbol}><ExpandedCandidateCard item={item} screening onSelect={onSelect} historical={display===saved||display.historical===true}/></li>)}</ol>
+      {waiting.length>0&&<section aria-label={supplyCollectionClosed?'KIS 수급 자료 미확인 후보':'KIS 수급 확인 대기 후보'}><h3>심층 후보 · {supplyCollectionClosed?'KIS 수급 자료 미확인':'KIS 수급 확인 대기'}</h3>
+        <p className="expanded-card-note">{supplyCollectionClosed?'오늘 수급 수집은 종료됐습니다. 저장된 심층 후보이며 수급 판정과 매수 허가는 보류합니다.':'수급 탈락 전 후보 풀입니다. 자료가 확인되면 기존 조건으로 재평가하며, 현재 추천이나 매수 허가가 아닙니다.'}</p>
+        <ol className="expanded-candidates">{waiting.map(item=><li key={item.symbol}><ExpandedCandidateCard item={item} screening onSelect={onSelect} historical={display===saved||display.historical===true} supplyCollectionClosed={supplyCollectionClosed}/></li>)}</ol>
       </section>}
       <details className="expanded-result-notes"><summary>분석 범위 안내</summary>
         <p className="home-warning">1단계에서 정밀분석 대상이 아닌 종목은 정책상 탈락으로 판정하지 않았습니다. 자료 부족·조회 실패와 조건 미충족은 별도 상태입니다.</p>

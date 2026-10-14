@@ -135,7 +135,8 @@ test('TEST_ONLY live and saved cards preserve candidate order, grades and scores
     const component=loader(react)(require.resolve('../frontend/src/ExpandedRecommendation.jsx')).default;
     const html=renderToStaticMarkup(React.createElement(component,{service:noService}));
     assert.ok(html.indexOf('TEST_ONLY_FIRST')<html.indexOf('TEST_ONLY_SECOND'));assert.doesNotMatch(html,/TEST_ONLY_EXCLUDED/);
-    assert.match(html,/관심 후보 · 분석 조건 점수 2 \/ 4/);assert.match(html,/조건 우수 후보 · 분석 조건 점수 4 \/ 4/);
+    const scoreLabel=saved?'저장 당시 조건 점수':'분석 조건 점수';
+    assert.ok(html.includes('관심 후보 · '+scoreLabel+' 2 / 4'));assert.ok(html.includes('조건 우수 후보 · '+scoreLabel+' 4 / 4'));
     assert.match(html,/상세 근거 보기/);assert.match(html,/주식 투자는 원금 손실 위험이 있습니다/);
   }
   assert.equal(JSON.stringify(items),before);

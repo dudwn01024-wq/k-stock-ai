@@ -30,7 +30,7 @@ export function createScheduledSupplyClient({apiBase='/api',fetchImpl=fetch,onVi
   };
 }
 export function projectRecommendationData(base,view,expectedId){
-  const stored=view?.provider==='KIS_INTRADAY_ESTIMATE'&&view.scheduling?.autonomous===true&&view.status==='STORED';
+  const stored=['KIS_INTRADAY_ESTIMATE','KIS_DAILY_INVESTOR'].includes(view?.provider)&&view.scheduling?.autonomous===true&&view.status==='STORED';
   if(!base&&stored){base=view;expectedId=view.sourceAnalysisId;}
   if(base&&view?.cacheUnavailable)return {...base,all:[],priority:[],chase:[],watch:[],recommendations:[],recommendationCount:0,priorityCandidateCount:0,chaseCautionCount:0,watchCandidateCount:0,supplyProjection:true,supplyUnavailable:true};
   if(!base||!expectedId||(stored?view.sourceAnalysisId!==expectedId:view?.scheduling?.scope?.reviewId!==expectedId)||!Array.isArray(view?.recommendations))return base;

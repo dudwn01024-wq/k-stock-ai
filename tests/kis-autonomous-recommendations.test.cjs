@@ -22,7 +22,7 @@ function harness(t,{count=3,standard=false,enabled=true,feed}={}){
   const now=()=>time,base=fs.realpathSync(os.tmpdir()),root=fs.mkdtempSync(path.join(base,'kstock-auto-kis-'));
   if(path.relative(base,root).startsWith('..')||path.isAbsolute(path.relative(base,root)))throw Error('TEST_ONLY_PATH_INVALID');
   t.after(()=>{service?.stop();fs.rmSync(root,{recursive:true,force:true});});
-  const calls=[],intervals=[],audits=[];
+  const calls=[],intervals=[],audits=[];let lastTick=null;
   const env={KIS_AUTONOMOUS_RECOMMENDATIONS_ENABLED:enabled?'true':'false',KIS_SCHEDULED_SUPPLY_ENABLED:'true',KIS_SCHEDULED_SUPPLY_SCORE_ENABLED:'true',
     ...(standard?{KIS_SCHEDULED_SUPPLY_STANDARD_OPEN_DATES:'2026-10-15'}:{})};
   const storageIo={...fs,renameSync:(...args)=>{if(failWrites)throw Error('TEST_ONLY_STORAGE_WRITE_FAILURE');return fs.renameSync(...args);}};
@@ -49,7 +49,8 @@ function harness(t,{count=3,standard=false,enabled=true,feed}={}){
   return {calls,intervals,audits,symbols,adopt,root,now,env,get service(){return service;},get store(){return opened.store;},get quota(){return opened.quota;},
     at:value=>{time=Date.parse(value);},advance:ms=>{time+=ms;},restart:()=>{service.stop();opened=reopen();service.start();return service;},
     failStorage:value=>{failWrites=value;},
-    tick:async()=>{const result=await service.tick();time+=2000;return result;}};
+    tick:async()=>{const result=await service.tick();lastTick=result;time+=2000;return result;},
+    diagnostics:()=>({clock:new Date(time).toISOString(),lastTick,service:service.status(),storage:opened.store.status(),publicationFailures:audits.filter(x=>x.event==='publication_failed')})};
 }
 
 test('TEST_ONLY browserless/loginless server registers the pre-supply pool and saves ranks at each input',async t=>{
@@ -58,7 +59,7 @@ test('TEST_ONLY browserless/loginless server registers the pre-supply pool and s
   await h.tick();assert.equal(h.calls.length,1,'only one bounded unknown-calendar first-input probe');
   await h.tick();await h.tick();assert.equal(h.calls.length,3);
   h.at('2026-10-15T10:01:00+09:00');await h.tick();await h.tick();await h.tick();
-  const latest=h.service.latest();assert.equal(latest.status,'STORED');assert.equal(latest.recommendations.length,3);
+  const latest=h.service.latest();assert.equal(latest.status,'STORED',JSON.stringify(h.diagnostics()));assert.equal(latest.recommendations.length,3);
   assert.ok(latest.recommendations.every(x=>x.strategy.supplyPassed===true&&x.score===4&&x.grade==='PRIORITY_CANDIDATE'));
   assert.ok(latest.recommendations.every(x=>!Object.hasOwn(x,'naverDailySupply')));
   assert.equal(latest.storage.ready,true);assert.equal(latest.sourceInputsUnchanged,true);assert.equal(latest.orderAuthorized,false);

@@ -3,6 +3,7 @@
 const fs=require('node:fs'),path=require('node:path'),{createHash,randomUUID}=require('node:crypto');
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {verifiedSupplyAssessment}=require('./kisIntradaySupplyPolicy');
+const {SOURCE,validDailySnapshot}=require('./kisDailyInvestor');
 const VERSION='KIS_AUTONOMOUS_RECOMMENDATIONS_V1',MAX_BYTES=8*1024*1024;
 const fail=code=>Object.assign(Error(code),{code,status:503});
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -24,12 +25,18 @@ function validate(payload){
     !Array.isArray(payload.supplyState.entries)||payload.supplyState.entries.length>61)
     throw fail('KIS_RECOMMENDATION_STATE_INVALID');
   validateBase(payload.base);
+  if(payload.dailySnapshots!==undefined&&(!Array.isArray(payload.dailySnapshots)||payload.dailySnapshots.length>40||
+    new Set(payload.dailySnapshots.map(x=>x.symbol)).size!==payload.dailySnapshots.length||payload.dailySnapshots.some(x=>
+      !payload.base?.reviewSymbols.includes(x.symbol)||!validDailySnapshot(x))))throw fail('KIS_RECOMMENDATION_STATE_INVALID');
+  if(payload.dailyOperation!==undefined&&payload.dailyOperation!==null&&(!/^[a-f0-9-]{36}$/.test(payload.dailyOperation.operationId??'')||
+    payload.dailyOperation.sourceAnalysisId!==payload.base?.id||payload.dailyOperation.targetCount!==40||!Array.isArray(payload.dailyOperation.results)||payload.dailyOperation.results.length>40||
+    new Set(payload.dailyOperation.results.map(x=>x.symbol)).size!==payload.dailyOperation.results.length||payload.dailyOperation.results.some(x=>!payload.base.reviewSymbols.includes(x.symbol))))throw fail('KIS_RECOMMENDATION_STATE_INVALID');
   for(const snapshot of [payload.latest,payload.lastPublished])if(snapshot!==null){
-    if(!snapshot||snapshot.protocolVersion!==VERSION||snapshot.provider!=='KIS_INTRADAY_ESTIMATE'||
+    if(!snapshot||snapshot.protocolVersion!==VERSION||!['KIS_INTRADAY_ESTIMATE',SOURCE].includes(snapshot.provider)||
       snapshot.sourceAnalysisId!==payload.base?.id||!validTime(snapshot.updatedAt)||
       !Array.isArray(snapshot.all)||snapshot.all.length>60||!Array.isArray(snapshot.recommendations)||snapshot.recommendations.length>60||
       new Set(snapshot.all.map(x=>x.symbol)).size!==snapshot.all.length||snapshot.all.some(x=>
-        !payload.base.reviewSymbols.includes(x.symbol)||x.naverDailySupply||x.strategy?.dataMetadata?.supply?.source!=='KIS_INTRADAY_ESTIMATE'||
+        !payload.base.reviewSymbols.includes(x.symbol)||x.naverDailySupply||!['KIS_INTRADAY_ESTIMATE',SOURCE].includes(x.strategy?.dataMetadata?.supply?.source)||
         !verifiedSupplyAssessment(x.supplyAssessment,x.strategy?.foreignerNet,x.strategy?.institutionNet)||
         (x.supplyAssessment.status!=='READY'&&x.strategy.supplyPassed!==null)))throw fail('KIS_RECOMMENDATION_STATE_INVALID');
   }

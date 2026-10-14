@@ -4498,6 +4498,8 @@ autonomousKis.start(); // Explicit new switch defaults OFF; no browser/session/r
 const autonomousKisStartup=autonomousKis.status();
 console.log('[K-Stock AI] Autonomous KIS startup '+JSON.stringify({enabled:autonomousKisStartup.enabled,scoreEnabled:autonomousKisStartup.scoreEnabled,
   candidatePoolCount:autonomousKisStartup.candidatePoolCount,sourceAnalysisId:autonomousKisStartup.sourceAnalysisId,storage:kisRecommendationStore.status()}));
+console.log('[K-Stock AI] After-close KIS readiness '+JSON.stringify(autonomousKis.afterCloseStatus()));
+autonomousKis.runAfterCloseOnce().catch(()=>console.error('[K-Stock AI] After-close KIS startup failed'));
 registerHistoryRoutes(app,recommendationHistory,()=>[
   ...recommendationScans.pendingIds(),...expandedRuns.pendingIds()
 ]);

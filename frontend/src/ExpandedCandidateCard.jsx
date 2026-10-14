@@ -24,11 +24,16 @@ const kisTime=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))
   new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(value))+' KST':'미조회';
 
 // Presentation only: no services, hooks, requests, ranking or price calculations.
-export default function ExpandedCandidateCard({item,children,screening=false,onSelect,historical=false}){
+export default function ExpandedCandidateCard({item,children,screening=false,onSelect,historical=false,supplyCollectionClosed=false}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
   const dataDates=recommendationDataDates(item);
   const volumePending=strategy.volumePassed===null&&strategy.volumeAssessment?.status==='INTRADAY_PENDING';
+  const supply=item.supplyAssessment,collectionClosed=supplyCollectionClosed||supply?.status==='CLOSED';
+  const closedSupplyLabel=supply?.reason==='NON_TRADING_DAY'?'휴장':supply?.observedAt?'수집 종료 · 자료 미확인':'오늘 자료 미수집';
+  const supplyLabel=collectionClosed?closedSupplyLabel:supply?.status==='PENDING'?'집계 대기':'미확인';
+  const supplyNote=supply?.status==='READY'?(historical||collectionClosed?'저장 당시 회차 관측 추론':'당일 회차 관측 추론'):
+    collectionClosed?closedSupplyLabel+(supply?.observedAt||supply?.reason==='NON_TRADING_DAY'?'':' · 수집 종료'):'수급 확인 대기/자료 부족';
   const news=Array.isArray(item.news)?item.news.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).slice(0,3):null;
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
@@ -45,16 +50,16 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     </p>}
     <ul className="expanded-card-conditions" aria-label="분석 조건">
       {conditions.map(([label,value])=><li key={label} className={value===true?'condition-pass':value===false?'condition-fail':'condition-unknown'}>
-        <span>{label}</span><strong>{historical&&label==='수급'?'저장 당시 '+condition(value):label==='수급'&&item.supplyAssessment?.status==='PENDING'?'집계 대기':label==='거래량'&&volumePending?'장중 확인 중':condition(value)}</strong>
+        <span>{label}</span><strong>{historical&&label==='수급'?'저장 당시 '+condition(value):label==='수급'&&supply&&value!==true&&value!==false?supplyLabel:label==='거래량'&&volumePending?(collectionClosed?'저장된 장중 자료':'장중 확인 중'):condition(value)}</strong>
       </li>)}
     </ul>
-    {volumePending&&<p className="expanded-card-note">당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.</p>}
-    {item.supplyAssessment&&<p className="expanded-card-note">KIS 누적 추정 수급 · 원천 거래일·실제 제공 갱신시각 미제공 · 관측일 {item.supplyAssessment.observedDate??'미확인'} (추론) · 실제 서버 조회 {kisTime(item.supplyAssessment.observedAt)} · 회차 {item.supplyAssessment.expectedInputCode??'미확인'} / 예정 {item.supplyAssessment.plannedInputTimeKst??'미확인'} KST · {item.supplyAssessment.status==='READY'?(historical?'저장 당시 회차 관측 추론':'당일 회차 관측 추론'):item.supplyAssessment.status==='CLOSED'?'휴장/장 마감':'수급 확인 대기/자료 부족'}</p>}
+    {volumePending&&<p className="expanded-card-note">{collectionClosed?'저장된 장중 거래량입니다. 장 마감 자료를 새로 확인하지 않았습니다.':'당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.'}</p>}
+    {item.supplyAssessment&&(supply.source==='KIS_DAILY_INVESTOR'?<p className="expanded-card-note">KIS 장후 일별 수급 · 제공 거래일 {supply.sourceTradeDate??'미확인'} · 실제 서버 조회 {kisTime(supply.observedAt)} · 제공 갱신시각·최종 확정 여부 미확인 · 외국인+기관 합계는 두 순매수 수량의 합 · {historical?'저장 당시 판정':supply.status==='READY'?'거래일 확인 · 추천 반영':'오늘 자료 미확인 · 추천 미반영'}</p>:<p className="expanded-card-note">KIS 누적 추정 수급 · 원천 거래일·실제 제공 갱신시각 미제공 · 관측일 {item.supplyAssessment.observedDate??'미확인'} (추론) · 실제 서버 조회 {kisTime(item.supplyAssessment.observedAt)} · 회차 {item.supplyAssessment.expectedInputCode??'미확인'} / 입력 일정 {item.supplyAssessment.plannedInputTimeKst??'미확인'} KST (다음 조회 시각 아님) · {supplyNote}</p>)}
     {item.naverDailySupply&&<p className="expanded-card-note">NAVER 일별 참고(판정 미반영) · 기준일 {item.naverDailySupply.supplyDate??'미확인'} · 외국인 {number(item.naverDailySupply.foreignerNet)} · 기관 {number(item.naverDailySupply.institutionNet)}</p>}
     {screening&&<div className="expanded-selection-reasons">
       <p><strong>분석 근거 · 충족 조건</strong> {words(item.passedConditions)}</p>
       <p><strong>미충족 조건</strong> {words(item.failedConditions)}</p>
-      {item.pendingConditions?.length>0&&<p><strong>장중 확인 중 조건</strong> {words(item.pendingConditions)}</p>}
+      {item.pendingConditions?.length>0&&<p><strong>{collectionClosed?'확인 필요 조건':'장중 확인 중 조건'}</strong> {words(item.pendingConditions)}</p>}
       <p><strong>미확인 조건</strong> {words(item.unknownConditions)}</p>
     </div>}
     <section className="expanded-data-dates" aria-label="데이터 기준">
@@ -97,7 +102,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       {typeof riskReward?.reason==='string'&&riskReward.reason&&<p className="expanded-card-note">저장된 손익비 근거: {strategyExplanation(riskReward.reason)}</p>}</>}
       <h4>당시 선정 조건</h4>
       <p>통과: {words(item.passedConditions)}</p><p>미충족: {words(item.failedConditions)}</p><p>미확인: {words(item.unknownConditions)}</p>
-      {item.pendingConditions?.length>0&&<p>장중 확인 중: {words(item.pendingConditions)}</p>}
+      {item.pendingConditions?.length>0&&<p>{collectionClosed?'확인 필요':'장중 확인 중'}: {words(item.pendingConditions)}</p>}
       <p className={metadata?.freshnessStatus==='STALE'?'home-warning':'expanded-card-note'}>
         {metadata?.freshnessStatus==='STALE'?'오래된 자료 · 최신성 재확인 필요':'최신성 미확인 · 실시간 시세가 아닙니다.'}
       </p>

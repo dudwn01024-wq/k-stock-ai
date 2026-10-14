@@ -75,7 +75,7 @@ test('TEST_ONLY disclosures default closed but risk, final state, date mismatch 
  assert.ok(html.includes('특정 가격에서의 매수·매도를 지시하거나 수익을 보장하는 값이 아닙니다.'));
 });
 test('TEST_ONLY candidates retain evidence and no strategy price trio; saved-only display performs zero requests',()=>{
- const html=renderPage({detail:false});for(const text of ['조건 우수 후보','분석 조건 점수 4','분석 근거','추세','거래량','수급','뉴스','장중 확인 중','상세 근거 보기'])assert.ok(html.includes(text),text);
+ const html=renderPage({detail:false});for(const text of ['조건 우수 후보','저장 당시 조건 점수 4','분석 근거','추세','거래량','수급','뉴스','장중 확인 중','상세 근거 보기'])assert.ok(html.includes(text),text);
  assert.doesNotMatch(html,/9,517원|12,345원|9,087원|<dt>전략 계산 기준가/);assert.equal((html.match(/TEST_ONLY 저장 뉴스/g)||[]).length,3);
 });
 test('TEST_ONLY failed-run diagnostic and prior-results warning remain visible',()=>{
