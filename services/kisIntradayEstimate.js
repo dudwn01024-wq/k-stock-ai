@@ -57,7 +57,7 @@ function normalizeEstimate(body,{symbol,observedAt}){
     freshness:'UNCONFIRMED',inputTimeMapping:'DOCUMENTED_SCHEDULE',eligibleForSupplyScore:false,rows};
 }
 function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch(...args),now=Date.now,
-  timers={setTimeout,clearTimeout},tokenCache=sharedKisEstimateTokenCache,authorizeScheduled=()=>false}={}){
+  timers={setTimeout,clearTimeout},tokenCache=sharedKisEstimateTokenCache,authorizeScheduled=()=>false,scheduledBudget=null}={}){
   let reason='DISABLED',appKey=null,appSecret=null;
   if(env.KIS_INTRADAY_ESTIMATE_ENABLED==='true'){
     if(env.KIS_INTRADAY_ESTIMATE_ENVIRONMENT!=='live')reason='LIVE_ENVIRONMENT_REQUIRED';
@@ -95,6 +95,8 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
     if(bucket.queries>=limit.maxQueries||bucket.requests+2>limit.maxUpstreamRequests)
       throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.max(1,Math.ceil((bucket.windowStart+limit.windowMs-time)/1000)));
     if(time<bucket.nextAt)throw fail('KIS_ESTIMATE_RATE_LIMITED',429,Math.ceil((bucket.nextAt-time)/1000));
+    const reservation=scheduled?scheduledBudget?.reserve(symbol):null;
+    if(scheduled&&!reservation)throw fail('KIS_SCHEDULE_QUOTA_NOT_READY');
     bucket.queries++;bucket.nextAt=time+limit.minIntervalMs;active=true;
     const controller=new AbortController(),signal=controller.signal;
     let rejectTimeout;const timeout=new Promise((_,reject)=>{rejectTimeout=reject;});
@@ -104,6 +106,7 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
     let usedAccessToken=null;
     const request=async(pathname,options)=>{
       if(signal.aborted)throw fail('KIS_ESTIMATE_TIMEOUT',504);
+      if(reservation){scheduledBudget.beforeHttp(reservation);if(signal.aborted||now()>=reservation.deadlineAt)throw fail('KIS_SCHEDULE_QUOTA_OUTSIDE_SLOT',409);}
       if(bucket.requests>=limit.maxUpstreamRequests)throw fail('KIS_ESTIMATE_RATE_LIMITED',429);
       bucket.requests++;
       const response=await fetchImpl(ORIGIN+pathname,{...options,redirect:'error',signal});
@@ -128,8 +131,8 @@ function createKisIntradayEstimate({env={},fetchImpl=(...args)=>globalThis.fetch
       return normalizeEstimate(body,{symbol,observedAt:new Date(now()).toISOString()});
     };
     try{return await Promise.race([work(),timeout]);}
-    catch(error){if(/^KIS_ESTIMATE_/.test(error?.code??''))throw error;throw fail('KIS_ESTIMATE_UPSTREAM_UNAVAILABLE');}
-    finally{timers.clearTimeout(timer);clientSignal?.removeEventListener('abort',cancel);active=false;}
+    catch(error){const safe=/^KIS_(?:ESTIMATE|SCHEDULE)_/.test(error?.code??'')?error:fail('KIS_ESTIMATE_UPSTREAM_UNAVAILABLE');if(reservation)safe.scheduledBudgetCharged=true;throw safe;}
+    finally{timers.clearTimeout(timer);clientSignal?.removeEventListener('abort',cancel);active=false;if(reservation)scheduledBudget.finish(reservation);}
   }
   return Object.freeze({availability,query});
 }

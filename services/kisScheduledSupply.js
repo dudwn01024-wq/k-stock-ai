@@ -6,11 +6,11 @@ const fail=(code,status=409)=>Object.assign(Error(code),{code,status});
 const supported=symbol=>typeof symbol==='string'&&/^\d{6}$/.test(symbol);
 function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marketDates:[],calendarConfigured:false},readEstimate,permit,
   now=Date.now,timers={setInterval,clearInterval},calendar,calculateDetail,resolveSources=()=>({visible:[],review:[],items:[]}),
-  projectRecommendations,requireHeartbeat=false,makeId=randomUUID}={}){
+  projectRecommendations,requireHeartbeat=false,makeId=randomUUID,quota=null,audit=()=>{}}={}){
   const knownDates=new Set(settings.marketDates??[]),readCalendar=calendar??(date=>knownDates.has(date)?'STANDARD_OPEN':'UNKNOWN');
   const market=date=>{const value=readCalendar(date),day=new Date(date+'T00:00:00Z').getUTCDay();return value==='UNKNOWN'&&(day===0||day===6)?'CLOSED':value;};
   const enabled=settings.enabled===true,scoreEnabled=settings.scoreEnabled===true,entries=new Map(),attempts=new Map(),counts=new Map();
-  let subscription=null,interval=null,inFlight=false,currentSymbol=null,controller=null,nextAt=0,sessionEvidence=null,pendingDetail=null;
+  let subscription=null,interval=null,inFlight=false,currentSymbol=null,controller=null,nextAt=0,sessionEvidence=null,pendingDetail=null,currentContext=null;
   const probedDates=new Set();
   const sessionAllowed=date=>market(date)==='STANDARD_OPEN'||(market(date)==='UNKNOWN'&&sessionEvidence?.date===date);
   const freshEntry=symbol=>({symbol,snapshot:null,lastKnown:null,resetObservedDate:null,resetBasis:'OBSERVED_RESET_INFERENCE',failure:null,detailInput:null});
@@ -33,6 +33,7 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
   }
   function subscribe(input,id,{renewViewer=true}={}){
     if(!enabled)throw fail('KIS_SCHEDULE_DISABLED',503);
+    if(quota&&!quota.status().ready)throw fail('KIS_SCHEDULE_QUOTA_NOT_READY',503);
     if(id&&active()?.id!==id)throw fail('KIS_SCHEDULE_SUBSCRIPTION_EXPIRED',410);
     const scope=derive(input),previous=id?active():null,resourceId=previous?.id??makeId();
     subscription={id:resourceId,...scope,registeredAt:previous?.registeredAt??new Date(now()).toISOString(),
@@ -40,7 +41,7 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
     for(const symbol of entries.keys())if(!scope.targets.has(symbol)){entries.delete(symbol);if(currentSymbol===symbol)controller?.abort();}
     for(const symbol of scope.targets.keys())if(!entries.has(symbol))entries.set(symbol,freshEntry(symbol));
     if(pendingDetail&&entries.has(pendingDetail.symbol)){entries.get(pendingDetail.symbol).detailInput=pendingDetail;pendingDetail=null;}
-    return status();
+    if(renewViewer)audit({event:'subscription',targetCount:scope.targets.size});return status();
   }
   function watch(symbol){if(!supported(symbol))throw fail('KIS_SCHEDULE_SYMBOL_INVALID',400);return subscribe({selectedSymbol:symbol,mode:null});}
   function heartbeat(id){if(!id||active()?.id!==id)return false;subscription.viewerExpiresAt=now()+POLICY.viewerLeaseMs;return true;}
@@ -66,6 +67,8 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
     if(!enabled||!active()?.targets.has(symbol))return null;
     const entry=entries.get(symbol),clock=kst(now()),value=assessIntradaySupply({symbol,snapshot:entry.snapshot,resetObservedDate:entry.resetObservedDate,
       resetBasis:entry.resetBasis,now:now(),calendarState:clock?market(clock.date):'UNKNOWN',scoreEnabled,failure:entry.failure});
+    if(quota&&!quota.status().ready)return {...value,status:'UNAVAILABLE',reason:'SCHEDULED_BUDGET_UNAVAILABLE',foreignerNet:null,institutionNet:null,netSupplyTotal:null,
+      screeningPassed:null,entrySupplyStatus:null,eligibleForSupplyScore:false};
     return supported(symbol)?value:{...value,status:'UNAVAILABLE',reason:'SYMBOL_UNSUPPORTED',eligibleForSupplyScore:false};
   }
   function resolve(symbol){const value=scoreEnabled?assessment(symbol):null;return value?{...value,metadata:supplyMetadata(value)}:null;}
@@ -89,17 +92,18 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
     return {symbol,scheduling:status(),assessment:value,projection,recommendations:projectedItems(),
       lastKnown:entry?.lastKnown?{observedAt:entry.lastKnown.observedAt,observedDate:kst(entry.lastKnown.observedAt)?.date??null,label:'PREVIOUS_OBSERVATION_ONLY'}:null};
   }
-  function status(){const sub=active(),clock=kst(now());return {enabled,scoreEnabled,subscriptionId:sub?.id??null,
+  function status(){const sub=active(),clock=kst(now()),budget=quota?.status();return {enabled:enabled&&(!budget||budget.ready),scoreEnabled:scoreEnabled&&(!budget||budget.ready),budget:budget??null,subscriptionId:sub?.id??null,
     target:sub?{symbol:sub.input.selectedSymbol,registeredAt:sub.registeredAt,expiresAt:new Date(sub.expiresAt).toISOString()}:null,
     targets:sub?[...sub.targets.values()].map(x=>({...x,supported:supported(x.symbol)})):[],scope:sub?.input??null,
     calendarConfigured:settings.calendarConfigured===true||typeof calendar==='function',calendarState:clock?market(clock.date):'UNKNOWN',
     sessionEvidence:sessionEvidence?.date===clock?.date?sessionEvidence:null,
-    scheduledQueriesToday:clock?counts.get(clock.date+':day')??0:0,policy:POLICY,inputs:INPUTS,storage:'SERVER_MEMORY_ONLY'};}
+    scheduledQueriesToday:budget?.ready?budget.queriesReservedToday:clock?counts.get(clock.date+':day')??0:0,policy:POLICY,inputs:INPUTS,storage:quota?'PERSISTENT_BUDGET_AND_MEMORY_SNAPSHOTS':'SERVER_MEMORY_ONLY'};}
   function reuseContext(){if(!enabled||!scoreEnabled)return null;const sub=active();return createHash('sha256').update(JSON.stringify({scope:sub?.input??null,
     assessments:sub?[...sub.targets.keys()].sort().map(assessment):[]})).digest('hex');}
   function mayQuery(symbol){return enabled&&active()?.targets.has(symbol)&&inFlight&&currentSymbol===symbol;}
   async function tick(){
     let sub=active();const clock=kst(now());if(!enabled||inFlight||!sub||!clock||now()<nextAt)return {queried:false,reason:'DISABLED_IDLE_OR_PACED'};
+    const budget=quota?.status();if(budget&&!budget.ready)return {queried:false,reason:budget.reason};if(budget&&now()<budget.nextAt)return {queried:false,reason:'DURABLE_PACED'};
     // Refresh the server-owned candidate set as deep-review selection completes; no scan is started.
     try{subscribe(sub.input,sub.id,{renewViewer:false});sub=active();}catch{clear(sub.id);return {queried:false,reason:'SOURCE_UNAVAILABLE'};}
     const input=latestInput(clock.minute),cal=market(clock.date),delay=input?clock.minute-input.minute:-1;
@@ -107,30 +111,38 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
     const inputStart=Date.parse(clock.date+'T'+input.time+':00+09:00');
     if(now()+POLICY.maxQueryDurationMs>inputStart+POLICY.inputDeadlineMinutes*60000)return {queried:false,reason:'DEADLINE_RESERVE'};
     const evidence=sessionAllowed(clock.date);
-    const probe=!evidence&&cal==='UNKNOWN'&&input.code==='1'&&!probedDates.has(clock.date);
+    const probe=!evidence&&cal==='UNKNOWN'&&input.code==='1'&&!probedDates.has(clock.date)&&!budget?.probeIssued;
     if(!evidence&&!probe)return {queried:false,reason:'SESSION_EVIDENCE_REQUIRED'};
     const pass=delay<7?0:1,slot=clock.date+':'+input.code;
-    if((counts.get(slot)??0)>=POLICY.maxScheduledQueriesPerInput||(counts.get(clock.date+':day')??0)>=POLICY.maxScheduledQueriesPerDay)return {queried:false,reason:'SCHEDULED_QUERY_CAP'};
+    if((budget?.slots?.[input.code]??counts.get(slot)??0)>=POLICY.maxScheduledQueriesPerInput||(budget?.queriesReservedToday??counts.get(clock.date+':day')??0)>=POLICY.maxScheduledQueriesPerDay)return {queried:false,reason:'SCHEDULED_QUERY_CAP'};
     const symbols=[...sub.targets.keys()].filter(supported).sort((a,b)=>(attempts.get(slot+':'+a)?.issued??0)-(attempts.get(slot+':'+b)?.issued??0));
     const symbol=symbols.find(code=>{
       if(probe&&code!==sub.input.selectedSymbol&&supported(sub.input.selectedSymbol))return false;
       const state=attempts.get(slot+':'+code)??{issued:0,passes:[],deferrals:0},a=assessment(code);
-      return state.issued<2&&!state.passes.includes(pass)&&!(a?.status==='READY'||a?.reason==='INSTITUTION_FIRST_INPUT_PENDING');
+      const durablePasses=budget?.attempts?.[input.code+':'+code]??[];
+      return state.issued<2&&!state.passes.includes(pass)&&durablePasses.length<2&&!durablePasses.includes(pass)&&!(a?.status==='READY'||a?.reason==='INSTITUTION_FIRST_INPUT_PENDING');
     });
     if(!symbol)return {queried:false,reason:'INPUT_ALREADY_RECEIVED_OR_ATTEMPTED'};
     const key=slot+':'+symbol,state=attempts.get(key)??{issued:0,passes:[],deferrals:0};
     const id=sub.id;controller=new AbortController();inFlight=true;currentSymbol=symbol;nextAt=now()+POLICY.queryGapMs;
+    currentContext={symbol,date:clock.date,inputCode:input.code,pass,probe};
     try{
       const result=await readEstimate(symbol,{permit,signal:controller.signal});
       state.issued++;state.passes.push(pass);counts.set(slot,(counts.get(slot)??0)+1);counts.set(clock.date+':day',(counts.get(clock.date+':day')??0)+1);
       if(probe)probedDates.add(clock.date);if(active()?.id===id&&entries.has(symbol))observe(result);
+      const a=assessment(symbol),q=quota?.status(),projected=projectedItems(),rank=projected?.findIndex(x=>x.symbol===symbol),candidate=rank>=0?projected[rank]:null;
+      audit({event:'result',symbol,inputCode:input.code,observedAt:result.observedAt,status:a?.status,reason:a?.reason,
+        foreignerNet:a?.foreignerNet,institutionNet:a?.institutionNet,dateBasis:a?.dateBasis,sourceTradeDate:null,sourceUpdatedAt:null,
+        queriesReserved:q?.queriesReservedToday,httpReserved:q?.httpReservedToday,httpAttempts:q?.httpAttemptsToday,
+        recommendation:candidate?{score:candidate.score,grade:candidate.grade,rank:rank+1}:null});
       return {queried:true,symbol,assessment:assessment(symbol)};
     }catch(error){
-      if(['KIS_ESTIMATE_BUSY','KIS_ESTIMATE_RATE_LIMITED'].includes(error?.code)&&state.deferrals<2){state.deferrals++;return {queried:false,reason:'TRANSPORT_DEFERRED'};}
+      if(!error.scheduledBudgetCharged&&['KIS_ESTIMATE_BUSY','KIS_ESTIMATE_RATE_LIMITED','KIS_SCHEDULE_QUOTA_BUSY','KIS_SCHEDULE_QUOTA_PACED'].includes(error?.code)&&state.deferrals<2){state.deferrals++;return {queried:false,reason:'TRANSPORT_DEFERRED'};}
+      if(/^KIS_SCHEDULE_QUOTA_/.test(error?.code??'')){audit({event:'blocked',reason:error.code});return {queried:false,reason:error.code};}
       state.issued++;state.passes.push(pass);counts.set(slot,(counts.get(slot)??0)+1);counts.set(clock.date+':day',(counts.get(clock.date+':day')??0)+1);if(probe)probedDates.add(clock.date);
       if(active()?.id===id&&entries.has(symbol)){const entry=entries.get(symbol);entry.lastKnown=entry.snapshot??entry.lastKnown;entry.snapshot=null;entry.failure='LOOKUP_FAILED';}
       return {queried:true,symbol,error:/^KIS_(?:ESTIMATE|SCHEDULE)_/.test(error?.code??'')?error.code:'KIS_SCHEDULE_QUERY_FAILED'};
-    }finally{attempts.set(key,state);inFlight=false;currentSymbol=null;controller=null;
+    }finally{attempts.set(key,state);inFlight=false;currentSymbol=null;controller=null;currentContext=null;
       for(const old of attempts.keys())if(!old.startsWith(clock.date+':'))attempts.delete(old);
       for(const old of counts.keys())if(!old.startsWith(clock.date+':'))counts.delete(old);
       for(const old of probedDates)if(old!==clock.date)probedDates.delete(old);
@@ -138,6 +150,6 @@ function createScheduledSupply({settings={enabled:false,scoreEnabled:false,marke
   }
   function start(){if(!enabled||interval!==null)return false;interval=timers.setInterval(()=>{tick().catch(()=>{});},POLICY.tickMs);interval?.unref?.();return true;}
   function stop(){if(interval!==null)timers.clearInterval(interval);interval=null;clear();}
-  return Object.freeze({status,watch,subscribe,heartbeat,unwatch:clear,observe,resolve,view,rememberDetail,tick,mayQuery,reuseContext,start,stop});
+  return Object.freeze({status,watch,subscribe,heartbeat,unwatch:clear,observe,resolve,view,rememberDetail,tick,mayQuery,queryContext:symbol=>mayQuery(symbol)?currentContext:null,reuseContext,start,stop});
 }
 module.exports={createScheduledSupply};

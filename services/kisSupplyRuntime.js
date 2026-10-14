@@ -32,12 +32,15 @@ function projectScreeningRecommendations(items,resolve,{score,grade,reason,risk,
       supplyAssessment:a,projectionRole:'SUPPLY_ONLY_REASSESSMENT',otherInputsRefreshed:false,orderAuthorized:false};
   }));
 }
-function createKisSupplyRuntime({env={},now=Date.now,fetchImpl,timers,calendar,calculateDetail,resolveSources,projectRecommendations,requireHeartbeat=true}={}){
+function createKisSupplyRuntime({env={},now=Date.now,fetchImpl,timers,calendar,calculateDetail,resolveSources,projectRecommendations,requireHeartbeat=true,quota=null,audit}={}){
   const settings=loadScheduledSupplySettings(env),permit=Object.freeze({});let scheduled;
+  const quotaStatus=quota?.status()??{ready:false,reason:'KIS_SCHEDULE_QUOTA_NOT_READY'};
+  const effectiveSettings={...settings,enabled:settings.enabled&&quotaStatus.ready,scoreEnabled:settings.scoreEnabled&&quotaStatus.ready};
   const adapter=createKisIntradayEstimate({env,now,...(fetchImpl?{fetchImpl}:{}),
+    scheduledBudget:quota?{reserve:symbol=>quota.reserve(scheduled.queryContext(symbol)),beforeHttp:ticket=>quota.beforeHttp(ticket),finish:ticket=>quota.finish(ticket)}:null,
     authorizeScheduled:({symbol,permit:provided})=>provided===permit&&scheduled?.mayQuery(symbol)===true});
-  scheduled=createScheduledSupply({settings,permit,now,...(timers?{timers}:{}),calendar,calculateDetail,resolveSources,projectRecommendations,requireHeartbeat,
+  scheduled=createScheduledSupply({settings:effectiveSettings,permit,now,...(timers?{timers}:{}),calendar,calculateDetail,resolveSources,projectRecommendations,requireHeartbeat,quota,audit,
     readEstimate:(symbol,{signal})=>adapter.query(symbol,{scheduledPermit:permit,signal})});
-  return {adapter,scheduled};
+  return {adapter,scheduled,quota};
 }
 module.exports={createKisSupplyRuntime,projectScreeningRecommendations};

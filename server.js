@@ -47,8 +47,11 @@ const {createSiteHoldingGuidance,registerSiteHoldingGuidanceRoutes}=require('./s
 const holdingGuidanceAccess=createSiteHoldingGuidance(privateSite.access);
 registerSiteHoldingGuidanceRoutes(app,holdingGuidanceAccess,privateSite.access);
 const {createKisSupplyRuntime,projectScreeningRecommendations}=require('./services/kisSupplyRuntime');
+const {createRenderScheduledQuota}=require('./services/kisScheduledQuota');
+const scheduledQuota=createRenderScheduledQuota({render:process.env.RENDER,serviceId:process.env.RENDER_SERVICE_ID,instanceId:process.env.RENDER_INSTANCE_ID});
+scheduledQuota.initialize({allowCreate:process.env.KIS_SCHEDULED_SUPPLY_ENABLED!=='true'});
 const {registerIntradaySupplyRoutes}=require('./services/intradaySupplyApi');
-const kisSupplyRuntime=createKisSupplyRuntime({env:process.env,calculateDetail:calculateTradingStrategy,
+const kisSupplyRuntime=createKisSupplyRuntime({env:process.env,quota:scheduledQuota,audit:event=>console.log('[K-Stock AI] Scheduled supply event '+JSON.stringify(event)),calculateDetail:calculateTradingStrategy,
   resolveSources:refs=>{
     const read=id=>{if(!id)return null;return refs.mode==='expanded500'?expandedRuns.get(id):recommendationScans.get(id);};
     const visible=read(refs.visibleId),review=read(refs.reviewId??refs.visibleId);
@@ -63,6 +66,8 @@ const scheduledSupply=kisSupplyRuntime.scheduled;
 registerIntradaySupplyRoutes(app,kisSupplyRuntime.adapter,privateSite.access,scheduledSupply);
 scheduledSupply.start(); // Default OFF and no confirmed trading calendar: no timer or provider call.
 console.log(`[K-Stock AI] Scheduled supply startup enabled=${scheduledSupply.status().enabled} scoreEnabled=${scheduledSupply.status().scoreEnabled}`);
+console.log('[K-Stock AI] Scheduled supply quota '+JSON.stringify({ready:scheduledQuota.status().ready,reason:scheduledQuota.status().reason,
+  queriesReservedToday:scheduledQuota.status().queriesReservedToday,httpReservedToday:scheduledQuota.status().httpReservedToday,httpAttemptsToday:scheduledQuota.status().httpAttemptsToday}));
 app.use(express.json());
 
 const NAVER_HEADERS = {

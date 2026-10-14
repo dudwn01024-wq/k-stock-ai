@@ -14,7 +14,7 @@ export default function ScheduledSupplyPanel({symbol,source=null,active=true,api
   // Deferred disposal handles React StrictMode's immediate replay without a leaked subscription.
   useEffect(()=>{const marker={};client.mountMarker=marker;return()=>queueMicrotask(()=>{if(client.mountMarker===marker)client.destroy();});},[client]);
   const change=async remove=>{if(busy)return;setBusy(true);setError(null);try{await(remove?client.stop():client.start());setTracking(client.status().running);}finally{setBusy(false);}};
-  const current=view?.scheduling??config,assessment=view?.assessment,enabled=config?.enabled===true;
+  const current=view?.scheduling??config,assessment=view?.assessment,enabled=current?.enabled===true;
   return <section className="intraday-supply-schedule" aria-label="예약 수급 갱신">
     <h3>입력 시각에 맞춘 예약 수급</h3>
     <p>선택 종목과 현재 실행의 심층 검토 후보에 적용합니다. 확장 후보는 기본 40개, 최대 60개이며 선택 종목 포함 최대 61개입니다. 새 실행은 이전 목록의 구독을 교체합니다.</p>
@@ -28,6 +28,7 @@ export default function ScheduledSupplyPanel({symbol,source=null,active=true,api
       <p>화면 구독 확인 60초 간격 · 화면 종료 후 150초 이내 해제 · 최대 24시간. 가격·차트·거래량·뉴스는 재조회하지 않습니다.</p>
     </>}
     {error&&<p role="alert">{error}</p>}
+    {current?.budget&&!current.budget.ready&&<p role="alert">일일 예산을 확인하지 못해 예약 조회를 막았습니다. 이전 수급으로 판정하지 않습니다.</p>}
     {assessment&&<>
       <p role="status">{assessment.status==='READY'?'현재 예정 회차 관측 · 누적 추정치':reasons[assessment.reason]||'수급 확인 대기'}</p>
       <p>관측일 {assessment.observedDate??'미확인'} · 원천 거래일 미제공 · 실제 갱신시각 미확인 · 예정 입력 {assessment.plannedInputTimeKst??'미정'} KST</p>

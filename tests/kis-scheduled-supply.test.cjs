@@ -69,8 +69,8 @@ test('TEST_ONLY cache-only detail reassessment does not authorize entry or refre
   const view=f.scheduled.view('005930');assert.equal(view.projection.marketContext.volume,200);assert.equal(view.projection.currentPrice,100);
   assert.equal(view.projection.strategy.available,false);assert.equal(view.projection.strategy.finalAssessment.status,'WAIT');assert.equal(engine.isEntryAllowed(view.projection.strategy),false);assert.equal(f.calls(),0);
 });
-test('TEST_ONLY manual budget stays unchanged and separate, shared token/active-request controls and trusted permit remain',async()=>{
-  let clock=Date.parse(stamp('09:31')),calls=0;const runtime=createKisSupplyRuntime({now:()=>clock,env:{KIS_SCHEDULED_SUPPLY_ENABLED:'true',KIS_SCHEDULED_SUPPLY_SCORE_ENABLED:'true',KIS_SCHEDULED_SUPPLY_STANDARD_OPEN_DATES:'2026-10-14',
+test('TEST_ONLY manual budget stays unchanged and separate, shared token/active-request controls and trusted permit remain',async t=>{
+  let clock=Date.parse(stamp('09:31')),calls=0;const quota=require('./helpers/scheduled-quota-fixture.cjs')(t,()=>clock);const runtime=createKisSupplyRuntime({quota,now:()=>clock,env:{KIS_SCHEDULED_SUPPLY_ENABLED:'true',KIS_SCHEDULED_SUPPLY_SCORE_ENABLED:'true',KIS_SCHEDULED_SUPPLY_STANDARD_OPEN_DATES:'2026-10-14',
     KIS_INTRADAY_ESTIMATE_ENABLED:'true',KIS_INTRADAY_ESTIMATE_ENVIRONMENT:'live',KIS_INTRADAY_ESTIMATE_APP_KEY:'TEST_ONLY_SCHEDULE_KEY',KIS_INTRADAY_ESTIMATE_APP_SECRET:'TEST_ONLY_SCHEDULE_SECRET'},
     fetchImpl:async url=>{calls++;return new Response(JSON.stringify(url.includes('tokenP')?{access_token:'TEST_ONLY_SCHEDULE_TOKEN',expires_in:86400}:{rt_cd:'0',output2:[row('1')]}));}});
   runtime.scheduled.watch('005930');runtime.scheduled.status();runtime.scheduled.view('005930');assert.equal(calls,0);
