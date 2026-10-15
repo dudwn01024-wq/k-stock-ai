@@ -29,5 +29,5 @@ module.exports={
   "services/kisDailyInvestor.js": "db6c4a016943a0c5afaede25fe9aeec00458c4999dadf64b369b3c68eb9d37a4",
   "services/kisAfterCloseOnce.js": "d2835921ad72a1e017a23584caf237a9b8d5f77f4fcb0f1767625d1da10e8a0c",
   "frontend/src/CurrentAnalysisSummary.jsx": "abb0315793a4fb9e3b16b4f041602617d6a82961df9d487087fde3358c72b6d1",
-  "frontend/src/utils/detailSupply.js": "131ffaefc2534c8f1f22f5eb3ad1649b3b5a050ad59c441f13d4c2c39f012ff7"
+  "frontend/src/utils/detailSupply.js": "c4b14e18cd244ff5569ad881a10b966a7c39e89b0fe480deb51b2218df04d808"
 };

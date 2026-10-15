@@ -79,18 +79,19 @@ test('TEST_ONLY same-day disabled scoring is stored history, not a falsely label
   assert.match(display.receivedKst,/20:44:05/);assert.match(display.note,/최종 확정 여부.*미확인/);
 });
 for(const [label,a,expected]of[['missing',{...assessment,status:'PENDING',eligibleForSupplyScore:false,foreignerNet:null,institutionNet:null,netSupplyTotal:null,
-  source:'KIS_INTRADAY_ESTIMATE',observedAt:null,sourceTradeDate:null,metadata:undefined},'오늘 자료 미수집'],
+  source:'KIS_INTRADAY_ESTIMATE',observedAt:null,sourceTradeDate:null,metadata:undefined},'저장 수급 없음'],
   ['bad-date',{...assessment,status:'UNAVAILABLE',eligibleForSupplyScore:false,foreignerNet:null,institutionNet:null,netSupplyTotal:null,sourceTradeDate:null,
     metadata:{...assessment.metadata,sourceBusinessDate:null}},'조회 자료 미확인']])test('TEST_ONLY '+label+' is explicit after close without NAVER fallback or an invented date',async()=>{
   const {reconcileDetailSupply}=await helpers,result=reconcileDetailSupply(base(),view(a),()=>assert.fail('TEST_ONLY_NO_CALCULATOR'));
   assert.equal(result.quote.foreignerNet,null);assert.equal(result.quote.institutionNet,null);assert.equal(result.quote.supplyDate,null);
   assert.match(result.quote.supplyPresentation.label,new RegExp(expected));assert.equal(result.quote.supplyPresentation.sourceTradeDate,null);assert.equal(result.strategy.supplyPassed,null);
-  if(label==='bad-date')assert.match(result.quote.supplyPresentation.note,/당일 유효자료를 확인하지 못/);
+  assert.doesNotMatch(result.strategy.finalAssessment.reason,/저장 수급을 표시합니다/);
 });
-test('TEST_ONLY outside the stored40 scope is distinct from a missing target and cannot borrow another symbol',async()=>{
+test('TEST_ONLY missing from recommendations alone leaves collection membership unknown and cannot borrow another symbol',async()=>{
   const {reconcileDetailSupply}=await helpers,a={...assessment,status:'PENDING',eligibleForSupplyScore:false,observedAt:null,sourceTradeDate:null};
   const cached={...view(a),recommendations:[{symbol:'005930',supplyAssessment:{...assessment,symbol:'005930'}}]};
-  const result=reconcileDetailSupply(base(),cached,()=>assert.fail('TEST_ONLY_NO_CALCULATOR'));assert.match(result.quote.supplyPresentation.label,/대상 밖/);
+  const result=reconcileDetailSupply(base(),cached,()=>assert.fail('TEST_ONLY_NO_CALCULATOR'));assert.match(result.quote.supplyPresentation.label,/대상 여부 미확인/);
+  assert.equal(result.quote.supplyPresentation.outside,false);
   assert.equal(result.quote.foreignerNet,null);assert.equal(result.strategy.tradeSignal,'WAIT');
   assert.equal(reconcileDetailSupply(base(),view({...assessment,symbol:'005930'}),()=>{}),null);
   assert.equal(reconcileDetailSupply(base(),{symbol:'005930',cacheUnavailable:true},()=>{}),null);
