@@ -31,6 +31,12 @@ function renderStatus(status,stats){
               {module:helper,exports:helper.exports,Intl,Date});return helper.exports;
           }
           if(name==='./utils/numbers.js')return numbers.exports;
+          if(name==='./utils/detailSupply.js'){
+            const helper={exports:{}},direction={exports:{}};
+            vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/supplyDirection.js'),'utf8'),{format:'cjs'}).code,{module:direction,exports:direction.exports});
+            vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/detailSupply.js'),'utf8'),{format:'cjs'}).code,
+              {module:helper,exports:helper.exports,Intl,Date,require:name=>{assert.equal(name,'./supplyDirection.js');return direction.exports;}});return helper.exports;
+          }
           if(name==='./utils/strategyExplanation.js'){
             const language={exports:{}};
             vm.runInNewContext(transformSync(fs.readFileSync(require.resolve('../frontend/src/utils/strategyExplanation.js'),'utf8'),{format:'cjs'}).code,

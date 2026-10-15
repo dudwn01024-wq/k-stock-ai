@@ -15,10 +15,13 @@ export default function AutonomousSupplyPanel({symbol,source,apiBase='/api',onSn
   },[symbol,source?.id,apiBase]);
   const schedule=view?.scheduling,storage=view?.storage;
   const selected=detailSupplyPresentation(view,symbol);
+  const closeStatus={RUNNING:'수집 중',RECHECKING:'당일 행 재확인 중',WAITING_RECHECK:'17:10 당일 행 재확인 대기',WAITING_BUDGET:'기존 일일 호출 예산 소진 · 보완 보류',COMPLETED:'수집 완료',PARTIAL:view?.afterClose?.success===0?'당일 유효자료 미확인':'일부 자료 미확인'};
   return <section className="intraday-supply-schedule" aria-label="서버 자동 KIS 수급 추천">
     <h3>추천에 반영되는 KIS 수급</h3>
+    <p>{view?.dailySchedule?.enabled?'정기 장후 보완 활성':'정기 장후 보완 운영 대기'} · 16:10 1차 / 당일 행 미도착만 17:10 재확인 · 기존 일일 예산 내 실행</p>
+    {view?.dailySchedule?.unsupportedSymbols?.length>0&&<p>장후 수급 조회 미지원 코드: {view.dailySchedule.unsupportedSymbols.join(' · ')} · 현재 수급 판정에서 제외합니다.</p>}
     {selected&&<p role="status">{selected.label} · 원천 거래일 {selected.sourceTradeDate??'미확인'} · 실제 조회(KST) {selected.receivedKst} · 원천 갱신시각 {selected.sourceUpdatedAt??'미확인'}</p>}
-    {view?.afterClose&&<p role="status">장후 일별 수급 보완 · 목표 거래일 {view.afterClose.targetDate} · {view.afterClose.status==='RUNNING'?'수집 중':view.afterClose.status==='COMPLETED'?'수집 완료':view.afterClose.success===0?'당일 유효자료 미확인':'일부 자료 미확인'} · 거래일 확인 {view.afterClose.success??view.afterClose.results?.filter(x=>x.status==='READY').length??0} / {view.afterClose.targetCount} · 최종 확정 여부 미확인</p>}
+    {view?.afterClose&&<p role="status">장후 일별 수급 보완 · 목표 거래일 {view.afterClose.targetDate} · {closeStatus[view.afterClose.status]??'수집 상태 미확인'} · 거래일 확인 {view.afterClose.success??view.afterClose.results?.filter(x=>x.status==='READY').length??0} / {view.afterClose.targetCount} · 최종 확정 여부 미확인</p>}
     <p>서버가 입력 회차에 맞춰 수급을 갱신하고 추천 목록·순위를 저장합니다. 화면을 열어두거나 후보를 등록할 필요가 없습니다.</p>
     <p>심층 후보 {schedule?.candidatePoolCount??0}개 · 선택종목 포함 최대 61개 · 수급 외 자료는 원래 분석 기준을 유지합니다.</p>
     <p>예정 입력 09:30·10:00·11:20·13:20·14:30 KST · +1분 조회 · 지연 시 +7분 재확인 · +12분 종료</p>

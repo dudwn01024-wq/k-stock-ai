@@ -44,7 +44,7 @@ test('TEST_ONLY READY cache with no projection preserves values, source date and
   assert.equal(result.quote.currentPrice,11750);assert.equal(result.quote.volume,696000);assert.equal(result.strategy.ma20,10000);
   assert.equal(result.strategy.newsSnapshotId,'TEST-ONLY-DETAIL');assert.equal(result.strategy.newsReceivedAt,'2026-10-14T12:32:01Z');
   assert.equal(result.strategy.supplyPassed,null);assert.equal(result.strategy.tradeSignal,'WAIT');assert.equal(result.strategy.entryPrice,null);
-  assert.equal(result.quote.supplyPresentation.label,'장마감 일별 수급');assert.equal(JSON.stringify(input),before);
+  assert.equal(result.quote.supplyPresentation.label,'장마감 일별 수급 · 외국인 순매도 · 기관 순매수');assert.equal(JSON.stringify(input),before);
 });
 test('TEST_ONLY projection can supply the existing server verdict while retaining the original detail news identity',async()=>{
   const {reconcileDetailSupply}=await helpers,input=base(),cached=view();cached.projection={symbol:'003380',marketContext:{supplyAssessment:assessment}};

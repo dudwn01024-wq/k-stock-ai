@@ -5,6 +5,7 @@ const {quantity}=require('./kisIntradayEstimate');
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 const sourceTime=value=>typeof value==='string'&&/(?:Z|[+-]\d{2}:\d{2})$/.test(value)?dataFreshness({timestamp:value}).sourceTimestamp:null;
 const {kst,POLICY}=require('./kisIntradaySupplyPolicy');
+const {POLICY:DAILY_POLICY}=require('./kisAfterClosePolicy');
 const ORIGIN='https://openapi.koreainvestment.com:9443',ENDPOINT='/uapi/domestic-stock/v1/quotations/inquire-investor',TR_ID='FHKST01010900';
 const SOURCE='KIS_DAILY_INVESTOR',KIND='AFTER_CLOSE_DAILY_AGGREGATE';
 const fail=code=>Object.assign(Error(code),{code,status:503});
@@ -68,7 +69,8 @@ function createKisDailyInvestor({env={},quota,authorize=()=>false,fetchImpl=(...
   const availability=()=>({enabled:ready,source:SOURCE,market:'J',reason:ready?null:'EXISTING_LIVE_CONTEXT_REQUIRED',endpoint:ENDPOINT});
   async function query(symbol,input){
     if(!ready||active||!/^\d{6}$/.test(symbol)||!authorize(symbol,input))throw fail('KIS_DAILY_NOT_AUTHORIZED');
-    const ticket=quota.reserveAfterClose({...input,symbol});active=true;const controller=new AbortController(),signal=controller.signal;
+    const ticket=input.protocolVersion===DAILY_POLICY.version?quota.reserveDailyClose({...input,symbol}):quota.reserveAfterClose({...input,symbol});
+    active=true;const controller=new AbortController(),signal=controller.signal;
     let reject;const timeout=new Promise((_,bad)=>{reject=bad;}),timer=timers.setTimeout(()=>{controller.abort();reject(fail('KIS_DAILY_TIMEOUT'));},10000);let usedToken;
     async function request(pathname,options){
       if(signal.aborted)throw fail('KIS_DAILY_TIMEOUT');quota.beforeHttp(ticket,pathname==='/oauth2/tokenP'?'auth':'data');

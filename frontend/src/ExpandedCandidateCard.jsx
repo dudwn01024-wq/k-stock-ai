@@ -3,6 +3,7 @@ import React from 'react';
 import './expanded-recommendation.css';
 import {recommendationDataDates} from './recommendationDataDates.js';
 import {strategyExplanation} from './utils/strategyExplanation.js';
+import {detailSupplyPresentation} from './utils/detailSupply.js';
 
 const gradeLabels={PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보'};
 const numeric=value=>typeof value==='number'&&Number.isFinite(value);
@@ -27,11 +28,14 @@ const kisTime=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))
 export default function ExpandedCandidateCard({item,children,screening=false,onSelect,historical=false,supplyCollectionClosed=false}){
   const strategy=item.strategy??{},assessment=item.newsAssessment??{},metadata=item.dataMetadata?.price;
   const riskReward=item.riskReward;
-  const dataDates=recommendationDataDates(item);
+  const supplyView=detailSupplyPresentation({assessment:item.supplyAssessment,lastKnownAssessment:item.lastKnownSupplyAssessment,historical,
+    currentSupplyState:supplyCollectionClosed?'CLOSED':'CURRENT_SESSION'},item.symbol);
+  const supplyHistory=supplyView?.historical===true;
+  const dataDates=recommendationDataDates(supplyHistory?{...item,strategy:{...strategy,dataMetadata:{...strategy.dataMetadata,supply:supplyView.assessment.metadata}}}:item);
   const volumePending=strategy.volumePassed===null&&strategy.volumeAssessment?.status==='INTRADAY_PENDING';
-  const supply=item.supplyAssessment,collectionClosed=supplyCollectionClosed||supply?.status==='CLOSED';
+  const supply=supplyHistory?supplyView.assessment:item.supplyAssessment,collectionClosed=supplyCollectionClosed||supply?.status==='CLOSED';
   const closedSupplyLabel=supply?.reason==='NON_TRADING_DAY'?'휴장':supply?.observedAt?'수집 종료 · 자료 미확인':'오늘 자료 미수집';
-  const supplyLabel=collectionClosed?closedSupplyLabel:supply?.status==='PENDING'?'집계 대기':'미확인';
+  const supplyLabel=supplyHistory?'이전 관측 참고 · 현재 판정 제외':collectionClosed?closedSupplyLabel:supply?.status==='PENDING'?'집계 대기':'미확인';
   const supplyNote=supply?.status==='READY'?(historical||collectionClosed?'저장 당시 회차 관측 추론':'당일 회차 관측 추론'):
     collectionClosed?closedSupplyLabel+(supply?.observedAt||supply?.reason==='NON_TRADING_DAY'?'':' · 수집 종료'):'수급 확인 대기/자료 부족';
   const news=Array.isArray(item.news)?item.news.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).slice(0,3):null;
@@ -54,7 +58,9 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       </li>)}
     </ul>
     {volumePending&&<p className="expanded-card-note">{collectionClosed?'저장된 장중 거래량입니다. 장 마감 자료를 새로 확인하지 않았습니다.':'당일 누적 거래량은 장 마감 전 최종 판정하지 않습니다.'}</p>}
-    {item.supplyAssessment&&(supply.source==='KIS_DAILY_INVESTOR'?<p className="expanded-card-note">KIS 장후 일별 수급 · 제공 거래일 {supply.sourceTradeDate??'미확인'} · 실제 서버 조회 {kisTime(supply.observedAt)} · 제공 갱신시각·최종 확정 여부 미확인 · 외국인+기관 합계는 두 순매수 수량의 합 · {historical?'저장 당시 판정':supply.status==='READY'?'거래일 확인 · 추천 반영':'오늘 자료 미확인 · 추천 미반영'}</p>:<p className="expanded-card-note">KIS 누적 추정 수급 · 원천 거래일·실제 제공 갱신시각 미제공 · 관측일 {item.supplyAssessment.observedDate??'미확인'} (추론) · 실제 서버 조회 {kisTime(item.supplyAssessment.observedAt)} · 회차 {item.supplyAssessment.expectedInputCode??'미확인'} / 입력 일정 {item.supplyAssessment.plannedInputTimeKst??'미확인'} KST (다음 조회 시각 아님) · {supplyNote}</p>)}
+    {supply&&(supply.source==='KIS_DAILY_INVESTOR'?<p className="expanded-card-note">KIS 장후 일별 수급 · 제공 거래일 {supply.sourceTradeDate??'미확인'} · 실제 서버 조회 {kisTime(supply.observedAt)} · 제공 갱신시각·최종 확정 여부 미확인 · 외국인+기관 합계는 두 순매수 수량의 합 · {historical||supplyHistory?'저장 당시 관측 · 현재 판정 제외':supply.status==='READY'?'거래일 확인 · 추천 반영':'오늘 자료 미확인 · 추천 미반영'}</p>:<p className="expanded-card-note">KIS 누적 추정 수급 · 원천 거래일·실제 제공 갱신시각 미제공 · 관측일 {supply.observedDate??'미확인'} (추론) · 실제 서버 조회 {kisTime(supply.observedAt)} · 회차 {supply.expectedInputCode??'미확인'} / 입력 일정 {supply.plannedInputTimeKst??'미확인'} KST (다음 조회 시각 아님) · {supplyHistory?'이전 관측 참고 · 현재 수급 점수 제외':supplyNote}</p>)}
+    {supplyView?.directionLabel&&<p className="expanded-card-note">{supplyView.directionLabel}</p>}
+    {supply?.reusedForAnalysis&&<p className="expanded-card-note">이전 분석에서 관측한 수급 재사용 · 원래 조회시각 유지</p>}
     {item.naverDailySupply&&<p className="expanded-card-note">NAVER 일별 참고(판정 미반영) · 기준일 {item.naverDailySupply.supplyDate??'미확인'} · 외국인 {number(item.naverDailySupply.foreignerNet)} · 기관 {number(item.naverDailySupply.institutionNet)}</p>}
     {screening&&<div className="expanded-selection-reasons">
       <p><strong>분석 근거 · 충족 조건</strong> {words(item.passedConditions)}</p>
@@ -72,7 +78,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
     <details className="expanded-card-evidence"><summary>상세 근거 보기</summary>
       <p className="expanded-card-note">{screening?'분석 당시 저장된 선정 근거이며, 시세 최신성과 매수 허가를 뜻하지 않습니다.':'분석 당시 자료입니다. 참고 가격은 주문 지시가 아니며, 시세 최신성을 보장하지 않습니다.'}</p>
       <h4>거래량·수급</h4>
-      <dl className="expanded-card-facts">{volumeFields.map(([key,label])=><div key={key}><dt>{label}</dt><dd>{number(strategy[key])}</dd></div>)}</dl>
+      <dl className="expanded-card-facts">{volumeFields.map(([key,label])=><div key={key}><dt>{label}</dt><dd>{number(supplyHistory&&['foreignerNet','institutionNet'].includes(key)?supply[key]:strategy[key])}</dd></div>)}</dl>
       <p className="expanded-card-note">거래량·수급 단위와 확정 여부는 이 화면에서 추가 검증하지 않습니다.</p>
       <h4>뉴스 필터 근거</h4>
       <dl className="expanded-card-facts">

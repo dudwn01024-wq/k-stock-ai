@@ -4,10 +4,21 @@ const fs=require('node:fs'),path=require('node:path'),{createHash,randomUUID}=re
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const {verifiedSupplyAssessment}=require('./kisIntradaySupplyPolicy');
 const {SOURCE,validDailySnapshot}=require('./kisDailyInvestor');
+const {validateFacts}=require('./kisSupplyFacts');
 const VERSION='KIS_AUTONOMOUS_RECOMMENDATIONS_V1',MAX_BYTES=8*1024*1024;
 const fail=code=>Object.assign(Error(code),{code,status:503});
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const validTime=x=>typeof x==='string'&&Number.isFinite(Date.parse(x));
+function validReport(x,recurring=false){return x&&/^[a-f0-9-]{36}$/.test(x.operationId??'')&&/^[A-Za-z0-9-]{1,80}$/.test(x.sourceAnalysisId??'')&&
+  /^\d{4}-\d{2}-\d{2}$/.test(x.targetDate??'')&&Number.isFinite(Date.parse(x.targetDate+'T00:00:00Z'))&&
+  new Date(x.targetDate+'T00:00:00Z').toISOString().slice(0,10)===x.targetDate&&
+  ['RUNNING','RECHECKING','WAITING_RECHECK','WAITING_BUDGET','COMPLETED','PARTIAL'].includes(x.status)&&
+  Number.isSafeInteger(x.targetCount)&&x.targetCount>0&&x.targetCount<=(recurring?61:40)&&
+  Array.isArray(x.results)&&x.results.length<=x.targetCount&&new Set(x.results.map(r=>r?.symbol)).size===x.results.length&&
+  x.results.every(r=>isNaverKrStockItemCode(r?.symbol)&&['READY','DATE_MISMATCH','UNAVAILABLE','LOOKUP_FAILED','UNVERIFIED_AFTER_RESTART','PENDING'].includes(r.status)&&
+    (r.sourceTradeDate==null||r.sourceTradeDate===x.targetDate)&&(r.observedAt==null||validTime(r.observedAt)))&&
+  (!recurring||x.protocolVersion==='KIS_AFTER_CLOSE_DAILY_V1'&&Array.isArray(x.targetSymbols)&&x.targetSymbols.length===x.targetCount&&
+    new Set(x.targetSymbols).size===x.targetCount&&x.targetSymbols.every(isNaverKrStockItemCode)&&x.results.every(r=>x.targetSymbols.includes(r.symbol)));}
 function validateBase(base){
   if(base===null)return;
   if(!base||base.provenance!==VERSION||!['expanded500','legacy50'].includes(base.mode)||
@@ -25,6 +36,8 @@ function validate(payload){
     !Array.isArray(payload.supplyState.entries)||payload.supplyState.entries.length>61)
     throw fail('KIS_RECOMMENDATION_STATE_INVALID');
   validateBase(payload.base);
+  if(!validateFacts(payload.supplyFacts)||payload.collectionHistory!==undefined&&(!Array.isArray(payload.collectionHistory)||payload.collectionHistory.length>7||payload.collectionHistory.some(x=>!validReport(x)))||
+    payload.dailyScheduleReport!==undefined&&payload.dailyScheduleReport!==null&&!validReport(payload.dailyScheduleReport,true))throw fail('KIS_RECOMMENDATION_STATE_INVALID');
   if(payload.dailySnapshots!==undefined&&(!Array.isArray(payload.dailySnapshots)||payload.dailySnapshots.length>40||
     new Set(payload.dailySnapshots.map(x=>x.symbol)).size!==payload.dailySnapshots.length||payload.dailySnapshots.some(x=>
       !payload.base?.reviewSymbols.includes(x.symbol)||!validDailySnapshot(x))))throw fail('KIS_RECOMMENDATION_STATE_INVALID');

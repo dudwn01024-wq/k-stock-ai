@@ -65,6 +65,7 @@ registerIntradaySupplyRoutes(app,kisSupplyRuntime.adapter,privateSite.access,sch
 // Autonomous worker is started after the recommendation calculators are initialized.
 console.log(`[K-Stock AI] Scheduled supply startup enabled=${scheduledSupply.status().enabled} scoreEnabled=${scheduledSupply.status().scoreEnabled}`);
 console.log('[K-Stock AI] Scheduled supply quota '+JSON.stringify({ready:scheduledQuota.status().ready,reason:scheduledQuota.status().reason,
+  version:scheduledQuota.status().version,rollbackProtection:scheduledQuota.status().rollbackProtection,
   queriesReservedToday:scheduledQuota.status().queriesReservedToday,httpReservedToday:scheduledQuota.status().httpReservedToday,httpAttemptsToday:scheduledQuota.status().httpAttemptsToday}));
 app.use(express.json());
 
@@ -4499,6 +4500,8 @@ const autonomousKisStartup=autonomousKis.status();
 console.log('[K-Stock AI] Autonomous KIS startup '+JSON.stringify({enabled:autonomousKisStartup.enabled,scoreEnabled:autonomousKisStartup.scoreEnabled,
   candidatePoolCount:autonomousKisStartup.candidatePoolCount,sourceAnalysisId:autonomousKisStartup.sourceAnalysisId,storage:kisRecommendationStore.status()}));
 console.log('[K-Stock AI] After-close KIS readiness '+JSON.stringify(autonomousKis.afterCloseStatus()));
+console.log('[K-Stock AI] Daily after-close KIS schedule '+JSON.stringify(autonomousKis.dailyScheduleStatus()));
+console.log('[K-Stock AI] Restored KIS observations '+JSON.stringify(autonomousKis.restorationEvidence()));
 autonomousKis.runAfterCloseOnce().catch(()=>console.error('[K-Stock AI] After-close KIS startup failed'));
 registerHistoryRoutes(app,recommendationHistory,()=>[
   ...recommendationScans.pendingIds(),...expandedRuns.pendingIds()
