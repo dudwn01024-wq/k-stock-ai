@@ -2,6 +2,8 @@
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 // Exact allowlist: public page bounds/counts only, never raw rows or exceptions.
 const positive=value=>Number.isSafeInteger(value)&&value>0;
+const duplicateReasons=new Set(['WITHIN_PAGE','CROSS_MARKET','NON_ADJACENT_PAGE','CUTOFF_NOT_ESTABLISHED',
+  'OVERLAP_REACHES_CUTOFF','ROW_FACTS_CONFLICT','PAGE_REACHES_CUTOFF','NO_NEW_SYMBOLS']);
 function safeUniverseCoverage(value){
   if(!value||(value.globalCutoff!==null&&!positive(value.globalCutoff)))return null;
   const result={globalCutoff:value.globalCutoff};
@@ -32,6 +34,6 @@ function safeUniverseDuplicate(value){
   if(sameMarket&&(repeated.page<first.page||
     (repeated.page===first.page&&repeated.row<=first.row)))return null;
   const kind=!sameMarket?'CROSS_MARKET':first.page===repeated.page?'WITHIN_PAGE':'CROSS_PAGE';
-  return {kind,symbol:value.symbol,first,repeated};
+  return {kind,symbol:value.symbol,first,repeated,...(duplicateReasons.has(value.reason)?{reason:value.reason}:{})};
 }
 module.exports={safeUniverseCoverage,safeUniverseDuplicate};

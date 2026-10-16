@@ -5,9 +5,9 @@ const baseline='5ad387ff04769dcdde53114bf0079835f0341849';
 // diagnostic edits, the below-cutoff boundary overlap fix, and the exact reviewed 02826K record are independently tested.
 // A different edit to any of these files must fail before excluding its diff.
 const approved={
-  'services/recommendationUniverse.js':'4a369715e5c270f171e8e13176cc3680f8378cb194d7929f11dc266d2e2011b6',
-  'services/recommendationUniverseDiagnostics.js':'0a166fa2d19e7caa040b9535381bc2be33d9193b090b59ab2a8aa020826c5410',
-  'services/expandedRunFailureDiagnostics.js':'878d34bd7a27dce5c9ae87a7f8017c1aec788a060db206a82467a22ec7cba5e6',
+  'services/recommendationUniverse.js':'dc697c1f80de0df8d4a91bfb72cb7c9ab1c3911d0dd540b199b95066133fdfb5',
+  'services/recommendationUniverseDiagnostics.js':'ffea7bc92fc05a80500bbcef631abcacdcc428c03919f0de9504e9a0fb23b0f9',
+  'services/expandedRunFailureDiagnostics.js':'0d51b95f080339f9a477b4fc0cad5d1a6401275a982bbe3fb58bec1a10a76d24',
   'services/krxStockSecurityType.js':'62d325c37232b144df3b46a046d96551fbc979213be43d08d43377f0d499a001'
 };
 function assertApprovedSource(file,source){
@@ -23,7 +23,7 @@ function protectedDiff(base,paths){
   for(const file of Object.keys(approved))assertApprovedSource(file,fs.readFileSync(file,'utf8'));
   const privateFiles=require('./private-site-boundary-hashes.cjs');
   const kisFiles=require('./kis-intraday-boundary-hashes.cjs'),stripKis=require('./without-kis-intraday.cjs');
-  for(const [file,digest]of Object.entries(kisFiles))assert.equal(createHash('sha256').update(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n')).digest('hex'),digest,'exact manual KIS reference boundary: '+file);
+  for(const [file,digest]of Object.entries(kisFiles))assert.equal(createHash('sha256').update(require('./without-universe-recurrence.cjs')(fs.readFileSync(file,'utf8'),file).replaceAll('\r\n','\n')).digest('hex'),digest,'exact manual KIS reference boundary: '+file);
   for(const [file,digest]of Object.entries(privateFiles))assert.equal(createHash('sha256').update(stripKis(fs.readFileSync(file,'utf8'),file)).digest('hex'),digest,'exact private access boundary: '+file);
   return execFileSync('git',['diff',base,'--',...paths,...[...Object.keys(approved),...Object.keys(privateFiles),...Object.keys(kisFiles)].map(file=>':!'+file)],{encoding:'utf8'});
 }

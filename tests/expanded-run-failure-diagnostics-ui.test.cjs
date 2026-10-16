@@ -15,7 +15,7 @@ const expected={UNIVERSE_PROVIDER_REQUEST_FAILED:'종목 목록 제공처 연결
   UNIVERSE_TOP_500_NOT_PROVEN:'상위 500종목 구성을 확인하지 못했습니다.',
   TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE:'일부 종목의 공식 종목 유형을 확인하지 못해 분석을 중단했습니다.'};
 const privateText='TEST_ONLY_PRIVATE_MUST_NOT_LEAK';
-function render(run,saved=null){
+function render(run,saved=null,supplyView=null){
   let index=0,calls=0;const stub={...React,useState:()=>[index++===0?run:index===2?saved:null,()=>{}],
     useEffect:()=>{},useRef:()=>({current:0}),useCallback:fn=>fn};
   const component={exports:{}};vm.runInNewContext(code,{module:component,exports:component.exports,Intl,Date,Set,Map,Number,
@@ -25,7 +25,7 @@ function render(run,saved=null){
       if(name==='./ExpandedCandidateCard.jsx')return ({item})=>React.createElement('article',null,item.stockName+' '+item.grade+' '+item.score);
       throw Error('TEST_ONLY_UNEXPECTED_IMPORT');}});
   const service=new Proxy({},{get:()=>()=>{calls++;assert.fail('TEST_ONLY_SERVICE_CALL_FORBIDDEN');}});
-  const html=renderToStaticMarkup(React.createElement(component.exports.default,{service}));assert.equal(calls,0);
+  const html=renderToStaticMarkup(React.createElement(component.exports.default,{service,supplyView}));assert.equal(calls,0);
   return {html,message:component.exports.expandedRunFailureMessage(run)};
 }
 const failed=code=>({testOnly:true,status:'FAILED',failureReason:code,failureStage:'UNIVERSE_LOAD',
@@ -67,4 +67,25 @@ test('TEST_ONLY exhausted order retry has a clear message without exposing marke
   const {html}=render(r);assert.match(html,/시가총액 순서를 재확인했지만 일관된 목록을 확인하지 못했습니다/);
   assert.doesNotMatch(html,/123456789|987654321|TEST_ONLY_PRIVATE|rawResponse/);
   r.failureDiagnostic.orderRetryCount=0;assert.match(render(r).html,/종목 목록의 시가총액 순서를 확인하지 못했습니다/);
+});
+test('TEST_ONLY failed new scan leaves39 prior KIS candidates intact and explicitly excludes them from this failed run',()=>{
+  const kis={status:'STORED',provider:'KIS_INTRADAY_ESTIMATE',sourceAnalysisId:'TEST-ONLY-PREVIOUS-KIS',supplyProjection:true,
+    stats:{universeCount:500},scanCompletedAt:'2026-10-16T04:00:00Z',recommendations:Array.from({length:39},(_,i)=>({
+      symbol:String(i+1).padStart(6,'0'),stockName:'TEST_ONLY_STORED_'+i,grade:'WATCH_CANDIDATE',score:3}))};
+  const before=JSON.stringify(kis),r=failed('UNIVERSE_DUPLICATE_SYMBOL'),{html}=render(r,null,kis);
+  assert.match(html,/아래 목록은 이전에 저장된 분석 결과입니다\. 이번 실행 결과가 아닙니다/);
+  assert.match(html,/출처 분석 TEST-ONLY-PREVIOUS-KIS/);assert.match(html,/최종 후보 <strong>39/);assert.match(html,/1단계 처리 0 \/ 0/);
+  assert.equal((html.match(/TEST_ONLY_STORED_/g)||[]).length,39);assert.equal(JSON.stringify(kis),before);
+  assert.doesNotMatch(html,/이번 실행 결과 · 실시간/);
+});
+for(const [reason,message]of [['WITHIN_PAGE','같은 페이지 안에서'],['CROSS_MARKET','서로 다른 시장'],['NON_ADJACENT_PAGE','떨어진 페이지'],
+  ['CUTOFF_NOT_ESTABLISHED','상위 500종목 기준'],['OVERLAP_REACHES_CUTOFF','순위 경계'],['ROW_FACTS_CONFLICT','이름·시장·유형·거래일'],
+  ['PAGE_REACHES_CUTOFF','겹친 페이지의 순위 범위'],['NO_NEW_SYMBOLS','이미 조회한 종목 목록만']])test('TEST_ONLY duplicate diagnostic '+reason+' has a bounded accurate message',()=>{
+  const r=failed('UNIVERSE_DUPLICATE_SYMBOL');r.failureDiagnostic.universeDuplicate={reason,rawResponse:privateText};const {html}=render(r);
+  assert.match(html,new RegExp(message));assert.doesNotMatch(html,/TEST_ONLY_PRIVATE|rawResponse/);
+});
+test('TEST_ONLY unknown or unrelated duplicate reason cannot be rendered as a verified cause',()=>{
+  const r=failed('UNIVERSE_DUPLICATE_SYMBOL');r.failureDiagnostic.universeDuplicate={reason:privateText};assert.match(render(r).html,/종목 목록에 중복 코드가 있어/);
+  assert.doesNotMatch(render(r).html,/TEST_ONLY_PRIVATE/);r.failureReason='UNIVERSE_ROW_INVALID';r.failureDiagnostic.universeDuplicate.reason='WITHIN_PAGE';
+  assert.match(render(r).html,/필수 정보를 안전하게 검증하지/);assert.doesNotMatch(render(r).html,/같은 페이지 안에서/);
 });

@@ -29,7 +29,7 @@ function expandedRunFailureDiagnostic(error,{stage,universeSnapshot}={}){
     universeRequests:counter('requestCount'),
     officialTypeChecks:counter('officialTypeChecks'),
     officialTypeRequests:counter('officialTypeRequests'),
-    universeCoverage:code==='UNIVERSE_TOP_500_NOT_PROVEN'?safeUniverseCoverage(error?.universeCoverage):null,
+    universeCoverage:['UNIVERSE_TOP_500_NOT_PROVEN','UNIVERSE_DUPLICATE_SYMBOL'].includes(code)?safeUniverseCoverage(error?.universeCoverage):null,
     ...(duplicate?{universeDuplicate:duplicate}:{}),
     blockedSymbol:typeBlocked&&isNaverKrStockItemCode(error?.blockedSymbol)?error.blockedSymbol:null,
     blockedMarket:typeBlocked&&['KOSPI','KOSDAQ'].includes(error?.blockedMarket)?error.blockedMarket:null,

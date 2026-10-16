@@ -74,8 +74,8 @@ test('TEST_ONLY multiple ordered prefix overlaps and intra-page value inversion 
   assert.equal(s.universeCoverage.KOSPI.lastPageMax,1503);
 });
 
-for(const [field,value]of [['marketValueRaw','1504'],['stockName','TEST_ONLY_CONFLICT'],
-  ['localTradedAt','2026-10-14T14:47:09+09:00'],['stockEndType','preferred']])
+for(const [field,value]of [['stockName','TEST_ONLY_CONFLICT'],
+  ['localTradedAt','2026-10-15T14:47:09+09:00'],['stockEndType','preferred']])
   test('TEST_ONLY below-cutoff conflicting '+field+' remains blocked without screening/retry',async()=>{
     await rejected((r,a,m)=>{overlap(r,a,m);if(a.market==='KOSPI'&&a.page===6)r.stocks[0][field]=value;});
   });
@@ -87,15 +87,20 @@ for(const delta of [0,1])test('TEST_ONLY whole-page max at or above cutoff canno
   const cutoff=(await fixture().load()).universeCoverage.globalCutoff;
   await rejected((r,a,m)=>{overlap(r,a,m);if(a.market==='KOSPI'&&a.page===6)r.stocks[99].marketValueRaw=String(cutoff+delta);});
 });
-test('TEST_ONLY a non-prefix duplicate cannot use the boundary exception',async()=>{
-  await rejected((r,a,m)=>{if(a.market==='KOSPI'&&a.page===6)r.stocks[1]=structuredClone(m.KOSPI[497]);});
+test('TEST_ONLY a non-prefix duplicate below the already-proven cutoff leaves unique500 and fingerprints unchanged',async()=>{
+  const clean=await fixture().load(),f=fixture((r,a,m)=>{if(a.market==='KOSPI'&&a.page===6)r.stocks[1]=structuredClone(m.KOSPI[497]);}),s=await f.load();
+  proof(s);assert.equal(s.boundaryOverlapCount,1);assert.equal(s.snapshotFingerprint,clean.snapshotFingerprint);assert.equal(s.requestCount,9);
+});
+for(const [field,value]of [['marketValueRaw','1504'],['localTradedAt','2026-10-14T14:47:09+09:00']])test('TEST_ONLY below-cutoff live refresh '+field+' cannot affect the selected500',async()=>{
+  const clean=await fixture().load(),f=fixture((r,a,m)=>{overlap(r,a,m);if(a.market==='KOSPI'&&a.page===6)r.stocks[0][field]=value;}),s=await f.load();
+  proof(s);assert.equal(s.boundaryOverlapCount,1);assert.equal(s.boundaryRefreshCount,1);assert.equal(s.snapshotFingerprint,clean.snapshotFingerprint);assert.equal(s.requestCount,9);
 });
 test('TEST_ONLY same-page repetition after an allowed prefix still fails closed',async()=>{
   const f=fixture((r,a,m)=>{overlap(r,a,m);if(a.market==='KOSPI'&&a.page===6)r.stocks[1]=structuredClone(r.stocks[0]);});
   await assert.rejects(f.load(),e=>e.code==='UNIVERSE_DUPLICATE_SYMBOL'&&e.universeDuplicate.kind==='WITHIN_PAGE'&&e.requestCount===9);
 });
-test('TEST_ONLY reversed prefix order and nonadjacent overlap are rejected',async()=>{
-  await rejected((r,a,m)=>{if(a.market==='KOSPI'&&a.page===6)r.stocks.splice(0,2,...structuredClone([m.KOSPI[499],m.KOSPI[497]]));});
+test('TEST_ONLY reversed below-cutoff boundary positions preserve proof; nonadjacent overlaps remain rejected',async()=>{
+  const s=await fixture((r,a,m)=>{if(a.market==='KOSPI'&&a.page===6)r.stocks.splice(0,2,...structuredClone([m.KOSPI[499],m.KOSPI[497]]));}).load();proof(s);assert.equal(s.boundaryOverlapCount,2);
   const f=fixture((r,a,m)=>{if(a.market==='KOSPI'&&a.page===4){r.stocks[99].marketValueRaw='1503';m.KOSPI[399].marketValueRaw='1503';}
     if(a.market==='KOSPI'&&a.page===6)r.stocks[0]=structuredClone(m.KOSPI[399]);});
   await assert.rejects(f.load(),{code:'UNIVERSE_DUPLICATE_SYMBOL'});
@@ -121,7 +126,7 @@ test('TEST_ONLY identical overlaps before a unique500 cutoff exists remain block
 });
 test('TEST_ONLY proof success retains fast500/deep40/no automatic Gemini and failure starts none',async()=>{
   for(const fail of [false,true]){
-    const f=fixture((r,a,m)=>{overlap(r,a,m);if(fail&&a.market==='KOSPI'&&a.page===6)r.stocks[0].marketValueRaw='1504';});
+    const f=fixture((r,a,m)=>{overlap(r,a,m);if(fail&&a.market==='KOSPI'&&a.page===6)r.stocks[0].stockName='TEST_ONLY_CONFLICT';});
     const calls={fast:0,deep:0,ai:0},store=createExpandedRecommendationRuns({loadUniverse:f.load,logFailure:()=>{},
       fastScreen:async stock=>{calls.fast++;return {symbol:stock.symbol,status:'READY',preScreenScore:2,volumeRatio:2,requestCount:1};},
       deepReview:async stock=>{calls.deep++;return {symbol:stock.symbol,stockName:stock.stockName,grade:'WATCH_CANDIDATE',score:3};},

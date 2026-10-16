@@ -48,7 +48,8 @@ for(const scenario of cases)test('TEST_ONLY '+scenario.name+' fails closed with 
   const run=await store.wait(store.start().runId);
   assert.equal(run.status,'FAILED');assert.equal(run.failureStage,'UNIVERSE_LOAD');
   assert.equal(run.failureReason,'UNIVERSE_DUPLICATE_SYMBOL');assert.equal(run.stats.universeCount,0);
-  assert.deepEqual(run.failureDiagnostic.universeDuplicate,scenario.expected);
+  const {reason,...positions}=run.failureDiagnostic.universeDuplicate;assert.deepEqual(positions,scenario.expected);
+  assert.equal(reason,scenario.expected.kind==='WITHIN_PAGE'?'WITHIN_PAGE':scenario.expected.kind==='CROSS_MARKET'?'CROSS_MARKET':'CUTOFF_NOT_ESTABLISHED');
   assert.equal(run.failureDiagnostic.universeRequests,scenario.requests);assert.equal(f.requests.length,scenario.requests);
   assert.deepEqual(calls,{fast:0,deep:0,ai:0});assert.equal(run.universeSnapshot,null);
   assert.equal(new Set(f.requests.map(x=>x.market+':'+x.page)).size,f.requests.length);

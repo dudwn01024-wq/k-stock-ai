@@ -23,7 +23,7 @@ function failure(code,requestCount=0,diagnostic={}){
     if(isNaverKrStockItemCode(diagnostic?.blockedSymbol))error.blockedSymbol=diagnostic.blockedSymbol;
     if(MARKETS.includes(diagnostic?.blockedMarket))error.blockedMarket=diagnostic.blockedMarket;
   }
-  if(code==='UNIVERSE_TOP_500_NOT_PROVEN'){
+  if(code==='UNIVERSE_TOP_500_NOT_PROVEN'||code==='UNIVERSE_DUPLICATE_SYMBOL'){
     const coverage=safeUniverseCoverage(diagnostic?.universeCoverage);
     if(coverage)error.universeCoverage=coverage;
   }
@@ -54,11 +54,11 @@ function integer(value){
 
 function hash(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 
-// Compare selection-relevant provider facts, never the local receipt timestamp.
+// Stable security facts. Mutable value/quote time are checked separately and may
+// only differ on overlaps proven irrelevant to the already populated top500.
 function rowIdentity(item,raw){
-  const {fetchedAt,...stock}=item.stock;
-  return hash({stock,excluded:item.excluded,stockEndType:raw.stockEndType??null,
-    localTradedAt:raw.localTradedAt??null});
+  const {fetchedAt,marketValue,marketValueRaw,...stock}=item.stock;
+  return hash({stock,excluded:item.excluded,stockEndType:raw.stockEndType??null});
 }
 
 function normalizedRow(row,market,fetchedAt){
@@ -119,7 +119,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,
       pageMaxMarketValue:null,pageMinMarketValue:null,rows:[]}]));
     const seen=new Map();
-    let requestCount=0,excludedCount=0,globalCutoff=null,boundaryOverlapCount=0;
+    let requestCount=0,excludedCount=0,globalCutoff=null,boundaryOverlapCount=0,boundaryRefreshCount=0;
     const covered=market=>state[market].done||(globalCutoff!==null&&state[market].pageMaxMarketValue!==null&&
       state[market].pageMaxMarketValue<globalCutoff);
     const coverage=()=>({globalCutoff,...Object.fromEntries(MARKETS.map(market=>[market,{
@@ -143,27 +143,28 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
       // Commit only a fully validated page. Bounds include valid excluded securities
       // too, so filtering cannot make an unproven market appear covered.
       const pageSeen=new Map(),pageRows=[],pageExcluded=[],pageOverlaps=[];
-      let pageMaxMarketValue=null,pageMinMarketValue=null,pageExcludedCount=0;
+      let pageMaxMarketValue=null,pageMinMarketValue=null,pageExcludedCount=0,pageRefreshCount=0;
       for(const [index,raw] of result.stocks.entries()){
         let item;
         try{item=normalizedRow(raw,market,fetchedAt);}catch(error){throw failure(error.code??'UNIVERSE_ROW_INVALID',requestCount);}
         const first=pageSeen.get(item.stock.symbol)??seen.get(item.stock.symbol);
         const position={market,page,row:index+1};
         const identity=rowIdentity(item,raw);
-        const duplicate=first?{symbol:item.stock.symbol,first:first.position,repeated:position}:null;
-        // Only an identical prefix from the immediately preceding market page,
-        // strictly below an already populated unique-500 cutoff, may be considered.
-        // Validate the ENTIRE new page below that cutoff before committing it.
-        if(first&&(first.position.market!==market||first.position.page!==page-1||
-          index!==pageOverlaps.length||globalCutoff===null||item.stock.marketValue>=globalCutoff||
-          first.identity!==identity||
-          (pageOverlaps.length&&first.position.row<=pageOverlaps.at(-1).first.row)))
-          throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:duplicate});
-        pageSeen.set(item.stock.symbol,{position,identity});
         const value=item.stock.marketValue;
+        const observation=hash({identity,marketValueRaw:item.stock.marketValueRaw,localTradedAt:raw.localTradedAt??null});
+        const duplicate=first?{symbol:item.stock.symbol,first:first.position,repeated:position}:null;
+        // Positions inside an adjacent page and live quote refreshes do not
+        // affect top500 when BOTH copies and the ENTIRE page are below cutoff.
+        // Stable identity conflicts, same-page/cross-market/nonadjacent repeats
+        // remain errors. No candidate-range row is deduplicated or replaced.
+        const reason=!first?null:first.position.market!==market?'CROSS_MARKET':first.position.page===page?'WITHIN_PAGE':
+          first.position.page!==page-1?'NON_ADJACENT_PAGE':globalCutoff===null?'CUTOFF_NOT_ESTABLISHED':
+          first.marketValue>=globalCutoff||value>=globalCutoff?'OVERLAP_REACHES_CUTOFF':first.identity!==identity?'ROW_FACTS_CONFLICT':null;
+        if(reason)throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:{...duplicate,reason}});
+        pageSeen.set(item.stock.symbol,{position,identity,marketValue:value,observation});
         pageMaxMarketValue=pageMaxMarketValue===null?value:Math.max(pageMaxMarketValue,value);
         pageMinMarketValue=pageMinMarketValue===null?value:Math.min(pageMinMarketValue,value);
-        if(first){pageOverlaps.push(duplicate);continue;}
+        if(first){pageOverlaps.push(duplicate);if(first.observation!==observation)pageRefreshCount++;continue;}
         if(requiresOfficialStockType(item.stock.symbol)){
           const classification=typeClassifier.classify(item.stock);
           Object.assign(item.stock,classification);
@@ -186,9 +187,11 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
         }else pageRows.push(item.stock);
       }
       if(pageOverlaps.length&&(pageMaxMarketValue>=globalCutoff||pageSeen.size===pageOverlaps.length))
-        throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:pageOverlaps[0]});
+        throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:{...pageOverlaps[0],
+          reason:pageMaxMarketValue>=globalCutoff?'PAGE_REACHES_CUTOFF':'NO_NEW_SYMBOLS'}});
       for(const [symbol,record] of pageSeen)if(!seen.has(symbol))seen.set(symbol,record);
       boundaryOverlapCount+=pageOverlaps.length;
+      boundaryRefreshCount+=pageRefreshCount;
       entry.rows.push(...pageRows);
       excludedSecurities.push(...pageExcluded);
       excludedCount+=pageExcludedCount;
@@ -216,6 +219,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
           universeProof:'PROVIDER_MARKET_VALUE_PAGES_WITH_PAGE_MAX_GUARD',universeCoverage:coverage(),
           officialTypeRequests:typeClassifier.requestCount(),officialTypeChecks:typeClassifier.checkCount(),
           ...(boundaryOverlapCount?{boundaryOverlapCount}:{}),
+          ...(boundaryRefreshCount?{boundaryRefreshCount}:{}),
           sourceBusinessDate:dates.length===1?dates[0]:null,
           fetchedAt:clock().toISOString(),snapshotConsistency:'NOT_PROVEN',
           universeFingerprint:hash(stocks.map(stock=>stock.symbol).sort()),

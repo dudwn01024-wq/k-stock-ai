@@ -38,12 +38,23 @@ const failureStages=new Map([
   ['FAST_SCREEN','1단계 빠른 분석'],['DEEP_REVIEW','2단계 정밀 분석'],
   ['HISTORY_WRITE','분석 이력 저장'],['AI_EXPLANATION','AI 해설']
 ]);
+const duplicateMessages=new Map([
+  ['WITHIN_PAGE','같은 페이지 안에서 종목 코드가 반복되어 분석을 중단했습니다.'],
+  ['CROSS_MARKET','서로 다른 시장에 같은 종목 코드가 있어 분석을 중단했습니다.'],
+  ['NON_ADJACENT_PAGE','떨어진 페이지 사이의 중복 자료를 확인하지 못해 분석을 중단했습니다.'],
+  ['CUTOFF_NOT_ESTABLISHED','종목 목록이 겹쳤지만 상위 500종목 기준을 아직 확인하지 못했습니다.'],
+  ['OVERLAP_REACHES_CUTOFF','순위 경계에 걸친 중복 종목을 안전하게 확인하지 못했습니다.'],
+  ['ROW_FACTS_CONFLICT','중복 종목의 이름·시장·유형·거래일 정보가 달라 분석을 중단했습니다.'],
+  ['PAGE_REACHES_CUTOFF','겹친 페이지의 순위 범위를 안전하게 확인하지 못해 분석을 중단했습니다.'],
+  ['NO_NEW_SYMBOLS','이미 조회한 종목 목록만 반복되어 분석을 중단했습니다.']
+]);
 export function expandedRunFailureMessage(run){
   const code=run?.failureReason??run?.failureDiagnostic?.code;
   const symbol=run?.failureDiagnostic?.blockedSymbol,market=run?.failureDiagnostic?.blockedMarket;
   const blocked=code==='TOP500_PROOF_BLOCKED_BY_UNVERIFIED_TYPE';
   return {
-    message:code==='UNIVERSE_ORDER_INVALID'&&run?.failureDiagnostic?.orderRetryAttempted===true&&run.failureDiagnostic.orderRetryCount===1
+    message:code==='UNIVERSE_DUPLICATE_SYMBOL'&&duplicateMessages.has(run?.failureDiagnostic?.universeDuplicate?.reason)
+      ?duplicateMessages.get(run.failureDiagnostic.universeDuplicate.reason):code==='UNIVERSE_ORDER_INVALID'&&run?.failureDiagnostic?.orderRetryAttempted===true&&run.failureDiagnostic.orderRetryCount===1
       ?'시가총액 순서를 재확인했지만 일관된 목록을 확인하지 못했습니다.'
       :failureMessages.get(code)||'분석을 완료하지 못했습니다. 새 분석은 자동으로 시작하지 않습니다.',
     stageLabel:failureStages.get(run?.failureStage)||'미확인',
@@ -144,7 +155,7 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
     </div>}
     {display&&<div className="expanded-result">
       {projected?.supplyProjection&&<p role={projected.supplyUnavailable?'alert':'status'} className="expanded-result-context">{projected.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':noSupplyCollected?'오늘 KIS 수급 자료 미수집 · 오늘 수집은 종료됐으며 수급 판정을 보류합니다. 수급 외 자료는 원래 분석 기준입니다.':display?.provider==='KIS_DAILY_INVESTOR'&&!dailyConfirmed?'장후 조회는 종료됐지만 당일 유효자료를 확인하지 못했습니다. 수급 판정을 보류하며 수급 외 자료는 원래 분석 기준입니다.':'수급만 갱신해 후보를 재계산·재정렬했습니다. 가격·차트·거래량·뉴스와 AI 설명은 이전 관측 자료이며 매수 허가가 아닙니다.'}</p>}
-      {run?.status==='FAILED'&&display===saved&&<p className="expanded-result-context">아래 목록은 이전에 저장된 분석 결과입니다.</p>}
+      {run?.status==='FAILED'&&<p className="expanded-result-context">아래 목록은 이전에 저장된 분석 결과입니다. 이번 실행 결과가 아닙니다.</p>}
       {display===latestKis&&<p className="expanded-result-context">{noSupplyCollected?'서버에 저장된 분석 후보 · 오늘 수급 자료 미수집':display.historical?'마지막 KIS 관측 당시 저장 추천 · 현재 수급 확인 대기/장 마감':display.provider==='KIS_DAILY_INVESTOR'?(dailyConfirmed?'거래일을 확인한 장후 일별 수급 재평가 · 최종 확정 여부 미확인':'장후 일별 수급 조회 결과 · 당일 유효자료 미확인'):'서버에 저장된 최신 KIS 수급 재평가'} · 수급 외 자료는 원래 분석 기준입니다. 출처 분석 {display.sourceAnalysisId}</p>}
       {display===saved&&<p className="expanded-result-context">과거 저장 이력입니다. NAVER 기반 수급·점수를 현재 KIS 판정으로 사용하지 않습니다.</p>}
       <p className="expanded-result-context">{display===latestKis?(noSupplyCollected?'저장된 분석 후보 · 오늘 KIS 수급 미수집':display.historical?'과거 KIS 저장 결과 · 오늘 수급 판정 대기/장 마감':'저장된 KIS 재평가 결과'):display.reused?'최근 분석 재사용':display===saved?'저장된 분석 결과':'이번 실행 결과'} · 실시간 시세가 아닙니다.</p>

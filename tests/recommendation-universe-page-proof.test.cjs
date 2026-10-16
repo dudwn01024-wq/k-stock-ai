@@ -146,7 +146,9 @@ for(const [code,change] of [
   ['UNIVERSE_PROVIDER_REQUEST_FAILED',()=>{throw Error(privateText);}]
 ])test('TEST_ONLY structural/eligibility '+code+' fails immediately with no same-page retry',async()=>{
   const f=fixture(change),e=await errorOf(f);assert.equal(e.code,code);assert.equal(e.requestCount,1);assert.equal(f.requests.length,1);
-  const d=expandedRunFailureDiagnostic(e,{stage:'UNIVERSE_LOAD'});assert.equal(d.code,code);assert.equal(d.universeCoverage,null);
+  const d=expandedRunFailureDiagnostic(e,{stage:'UNIVERSE_LOAD'});assert.equal(d.code,code);
+  if(code==='UNIVERSE_DUPLICATE_SYMBOL'){assert.equal(d.universeDuplicate.reason,'WITHIN_PAGE');assert.equal(d.universeCoverage.globalCutoff,null);assert.equal(d.universeCoverage.KOSPI.pagesFetched,0);}
+  else assert.equal(d.universeCoverage,null);
   assert.doesNotMatch(JSON.stringify(d),/TEST_ONLY_PRIVATE|rawResponse|headers|token|env/);
 });
 
