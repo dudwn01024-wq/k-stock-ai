@@ -38,10 +38,13 @@ test('TEST_ONLY deterministic boundary-position/refresh matrix preserves every s
     proof(s);assert.deepEqual(s.stocks,clean.stocks);assert.equal(s.snapshotFingerprint,clean.snapshotFingerprint);assert.equal(s.requestCount,clean.requestCount);assert.equal(s.boundaryRefreshCount,1);
   }
 });
-test('TEST_ONLY local fix leaves KIS schedules, quota, security classification, calculators and existing storage byte-identical',()=>{
+test('TEST_ONLY local fix leaves protected source identical except the exact reviewed resistance-evidence patch',()=>{
+  const file='services/tradingStrategy.js';
+  assert.equal(require('./helpers/without-missing-resistance.cjs')(require('node:fs').readFileSync(file,'utf8'),file),
+    execFileSync('git',['show','137907b:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
   const paths=['server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/tradingStrategy.js','services/recommendationFastScreen.js',
     'services/recommendationVolumePolicy.js','services/stockDetailNews.js','services/recommendationHistory.js','services/expandedRecommendationRuns.js','package.json','package-lock.json','frontend/package-lock.json'];
-  assert.equal(execFileSync('git',['diff','137907b','--',...paths],{encoding:'utf8',windowsHide:true}),'');
+  assert.equal(execFileSync('git',['diff','137907b','--',...paths,':!'+file],{encoding:'utf8',windowsHide:true}),'');
 });
 for(const [field,value]of [['marketValueRaw','1302'],['localTradedAt','2026-10-16T14:04:30+09:00']])test('TEST_ONLY below-cutoff '+field+' refresh never changes selected data or price order',async()=>{
   const s=await fixture((r,a,m)=>{recurrence(r,a,m);if(a.market==='KOSDAQ'&&a.page===3)r.stocks[1][field]=value;}).load(),clean=await fixture().load();

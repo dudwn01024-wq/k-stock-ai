@@ -97,8 +97,10 @@ test('TEST_ONLY original source dates/news and daily receipt survive repeated ca
  assert.equal(r.strategy.dataMetadata.daily.receivedAt,'2026-10-19T08:18:00Z');assert.equal(r.strategy.dataMetadata.supply.receivedAt,observedAt);assert.equal(r.strategy.detailReference.sourceBusinessDate,'2026-10-19');}
  assert.equal(JSON.stringify(f.base),before);
 });
-test('TEST_ONLY backend prices,calculators,news,source guards,quota,timers and requests are byte-identical to approved production',()=>{
- assert.equal(execFileSync('git',['diff','e70e194','--','server.js','services','frontend/src/App.jsx','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json'],{encoding:'utf8',windowsHide:true}),'');
+test('TEST_ONLY backend source stays identical except the exact reviewed missing-resistance evidence patch',()=>{
+ const file='services/tradingStrategy.js';
+ assert.equal(require('./helpers/without-missing-resistance.cjs')(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show','e70e194:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
+ assert.equal(execFileSync('git',['diff','e70e194','--','server.js','services','frontend/src/App.jsx','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',':!services/tradingStrategy.js'],{encoding:'utf8',windowsHide:true}),'');
 });
 test('TEST_ONLY historical boundaries reverse only the exact two-file detail patch and reject an unreviewed edit',()=>{
  const inverse=require('./helpers/without-detail-preservation.cjs');for(const file of ['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx']){

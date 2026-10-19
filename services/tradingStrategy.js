@@ -1525,6 +1525,28 @@ const calculateTradingStrategy = ({
     );
 
 
+  // A missing upper level blocks the price plan, not independent measured conditions.
+  // Never replace a missing resistance with the current price or an invented target.
+  if (price > 0 && support > 0 && Number.isFinite(atr14) && atr14 > 0 &&
+      !Number.isFinite(resistance)) {
+    return {
+      ...empty,
+      sourceIntegrity,
+      currentPrice: price,
+      nearestSupport: support,
+      nearestResistance: null,
+      atr14,
+      technicalAssessment: evaluateTechnicalConditions({currentPrice: price, chartAnalysis}),
+      marketAssessment: evaluateMarketContext(marketContext),
+      finalAssessment: {
+        ...empty.finalAssessment,
+        missingRequired: ['resistance'],
+        reason: '저항선을 확인하지 못해 상단 가격 기준과 손익비를 계산할 수 없습니다. 확인된 개별 조건만 표시하며 진입 후보를 생성하지 않습니다.'
+      }
+    };
+  }
+
+
   if (
     !Number.isFinite(
       support

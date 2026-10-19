@@ -87,11 +87,10 @@ test('TEST_ONLY failed identity overlap leaves previous source untouched and sta
   const run=await runs.wait(runs.start().runId);assert.equal(run.status,'FAILED');assert.equal(run.failureStage,'UNIVERSE_LOAD');assert.equal(run.stats.universeCount,0);assert.equal(run.universeSnapshot,null);
   assert.deepEqual(calls,{fast:0,deep:0,ai:0,history:0,adopt:0});assert.equal(JSON.stringify(previous),before);runs.get(run.runId);assert.equal(f.requests.length,6);
 });
-test('TEST_ONLY schedules,2-second pacing,quota,source freshness,classification,calculators,AI,storage and UI remain byte-identical',()=>{
-  // Later approved detail-display changes are reversed exactly, not excluded as
-  // an open-ended UI exception. Every other frontend byte is still compared.
-  const referenceFiles=['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx'];
-  for(const file of referenceFiles)assert.equal(require('./helpers/without-detail-preservation.cjs')(require('node:fs').readFileSync(file,'utf8'),file),
+test('TEST_ONLY source stays byte-identical except exact reviewed detail-display and resistance-evidence patches',()=>{
+  // Exact SHA-checked inverses protect every other source byte.
+  const referenceFiles=['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx','services/tradingStrategy.js'];
+  for(const file of referenceFiles)assert.equal(require(file==='services/tradingStrategy.js'?'./helpers/without-missing-resistance.cjs':'./helpers/without-detail-preservation.cjs')(require('node:fs').readFileSync(file,'utf8'),file),
     execFileSync('git',['show','4742ac2:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
   assert.equal(execFileSync('git',['diff','4742ac2','--','server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js',
     'services/tradingStrategy.js','services/chartAnalysis.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js',
