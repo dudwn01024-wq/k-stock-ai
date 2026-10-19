@@ -4,6 +4,8 @@ const number=value=>Number.isSafeInteger(value)?value:null;
 const ready=a=>a?.status==='READY'&&a.eligibleForSupplyScore===true&&
   number(a.foreignerNet)!==null&&number(a.institutionNet)!==null&&number(a.netSupplyTotal)!==null;
 const same=(a,b)=>a?.symbol===b?.symbol&&a?.source===b?.source&&a?.observedAt===b?.observedAt&&a?.sourceTradeDate===b?.sourceTradeDate;
+const dayOf=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))?
+  new Date(Date.parse(value)+9*60*60*1000).toISOString().slice(0,10):null;
 function collectionEvidence(view,symbol){
   const report=view.afterClose,unknown={membership:'UNKNOWN',targetDate:null,result:null};
   const recurring=report?.protocolVersion==='KIS_AFTER_CLOSE_DAILY_V1';
@@ -25,21 +27,25 @@ function collectionEvidence(view,symbol){
 export function detailSupplyPresentation(view,symbol){
   if(!view||view.symbol&&view.symbol!==symbol||view.assessment?.symbol&&view.assessment.symbol!==symbol)return null;
   const current=view.assessment,closed=view.currentSupplyState==='CLOSED'||current?.status==='CLOSED';
-  const stored=view.lastKnownAssessment??view.recommendations?.find(x=>x.symbol===symbol)?.supplyAssessment;
+  const serverDay=view.dailySchedule?.serverDate??view.scheduling?.budget?.day;
+  const currentDay=current?.sourceTradeDate??current?.observedDate??dayOf(current?.observedAt);
+  const outdated=ready(current)&&serverDay&&currentDay&&currentDay<serverDay;
+  const currentReady=ready(current)&&(!serverDay||currentDay===serverDay);
+  const stored=view.lastKnownAssessment??view.recommendations?.find(x=>x.symbol===symbol)?.supplyAssessment??(outdated?current:null);
   const historyReady=stored?.symbol===symbol&&stored?.historicalOnly===true&&stored?.historicalReady===true&&stored.status==='READY'&&
     ['KIS_INTRADAY_ESTIMATE','KIS_DAILY_INVESTOR'].includes(stored.source)&&Number.isFinite(Date.parse(stored.observedAt))&&
     [stored.foreignerNet,stored.institutionNet,stored.netSupplyTotal].every(Number.isSafeInteger)&&
     BigInt(stored.foreignerNet)+BigInt(stored.institutionNet)===BigInt(stored.netSupplyTotal);
-  const historical=!view.cacheUnavailable&&!ready(current)&&(view.historical===true||historyReady)&&(ready(stored)||historyReady);
+  const historical=!view.cacheUnavailable&&!currentReady&&(view.historical===true||historyReady||outdated)&&(ready(stored)||historyReady);
   const assessment=view.cacheUnavailable?null:historical?stored:current,daily=assessment?.source==='KIS_DAILY_INVESTOR';
-  const storedDay=stored?.sourceTradeDate??stored?.observedDate,serverDay=view.scheduling?.budget?.day;
+  const storedDay=stored?.sourceTradeDate??stored?.observedDate??dayOf(stored?.observedAt);
   const previousDay=historical&&storedDay&&serverDay&&storedDay<serverDay;
   const collection=collectionEvidence(view,symbol),sameCollectionDay=collection.targetDate===serverDay;
   // Recommendation membership is a screening result, never collection evidence.
-  const outside=closed&&!ready(current)&&sameCollectionDay&&collection.membership==='NOT_INCLUDED';
+  const outside=closed&&!currentReady&&sameCollectionDay&&collection.membership==='NOT_INCLUDED';
   const included=closed&&sameCollectionDay&&collection.membership==='INCLUDED';
   const partial=!view.cacheUnavailable&&current?.status==='PENDING'&&current.reason==='INSTITUTION_FIRST_INPUT_PENDING';
-  const available=!view.cacheUnavailable&&(historical||ready(current));
+  const available=!view.cacheUnavailable&&(historical||currentReady);
   const baseLabel=view.cacheUnavailable?'저장 수급 확인 실패':historical?previousDay?'이전 거래일 수급 · 현재 판정 제외':'이전 저장 수급 · 현재 판정 제외':available?
     daily?'장마감 일별 수급':'장중 누적 추정 수급':partial?'외국인 일부 확인 · 기관 수급 대기':outside?
     collection.targetDate+' 장마감 보완 미대상 · 미수집':included&&collection.result.status==='LOOKUP_FAILED'?'장마감 수급 조회 실패':closed?
@@ -71,9 +77,11 @@ export function detailSupplyPresentation(view,symbol){
   };
 }
 export function reconcileDetailSupply(base,view,mapStrategy){
+  if(!base||base.strategy?.symbol&&base.strategy.symbol!==base.symbol||base.quote?.symbol&&base.quote.symbol!==base.symbol)return null;
   const presentation=detailSupplyPresentation(view,base?.symbol);if(!base||!presentation)return null;
-  const a=presentation.currentAssessment,currentReady=!view.cacheUnavailable&&ready(a),projection=view.projection;
-  const projected=!view.cacheUnavailable&&projection?.symbol===base.symbol&&same(projection.marketContext?.supplyAssessment,a)?projection:null;
+  const original=base.strategy??{},a=presentation.currentAssessment;
+  const currentReady=!view.cacheUnavailable&&presentation.available&&!presentation.historical&&ready(a),projection=view.projection;
+  const projected=currentReady&&projection?.symbol===base.symbol&&same(projection.marketContext?.supplyAssessment,a)?projection:null;
   const matches=currentReady&&same(base.strategy?.supplyAssessment,a);
   const partial=!view.cacheUnavailable&&a?.status==='PENDING'&&a.reason==='INSTITUTION_FIRST_INPUT_PENDING';
   const values={foreignerNet:currentReady||partial?number(a.foreignerNet):null,institutionNet:currentReady?a.institutionNet:null,
@@ -83,19 +91,39 @@ export function reconcileDetailSupply(base,view,mapStrategy){
       receivedAt:a?.observedAt??null,freshnessStatus:'UNCONFIRMED'};
   const pending=!presentation.historical&&!presentation.outside&&view.currentSupplyState!=='CLOSED'&&a?.status==='PENDING';
   const supply={status:pending?'PENDING':'UNAVAILABLE',label:presentation.label,detail:presentation.note};
-  const conditions={...base.strategy?.marketAssessment?.conditions,supply};
+  // The projection has a supply-only role. It is never a replacement for the
+  // original chart, news, price plan or non-supply condition objects.
+  const mapped=projected?mapStrategy(base.symbol,projected):null;
+  const projectedSupply=mapped?.marketAssessment?.conditions?.supply;
+  const hasSupplyVerdict=projectedSupply&&['FAVORABLE','NEUTRAL','CAUTION','PENDING','UNAVAILABLE'].includes(projectedSupply.status);
+  const conditions={...original.marketAssessment?.conditions,supply:hasSupplyVerdict?projectedSupply:supply};
   const entries=Object.entries(conditions),all=entries.map(([,value])=>value);
-  const strategy=projected?{...base.strategy,...mapStrategy(base.symbol,projected)}:matches?{...base.strategy}:{...base.strategy,
-    supplyPassed:null,marketAssessment:{...base.strategy?.marketAssessment,available:all.every(x=>x.status!=='UNAVAILABLE'),conditions,
-      availableCount:all.filter(x=>x.status!=='UNAVAILABLE').length,favorableCount:all.filter(x=>x.status==='FAVORABLE').length,
-      cautionCount:all.filter(x=>x.status==='CAUTION').length,pendingCount:all.filter(x=>x.status==='PENDING').length,
-      missingRequired:entries.filter(([,x])=>x.status==='UNAVAILABLE').map(([key])=>key),pendingRequired:entries.filter(([,x])=>x.status==='PENDING').map(([key])=>key)}};
+  const strategy=matches?{...original}:{...original,
+    supplyPassed:hasSupplyVerdict&&typeof mapped.supplyPassed==='boolean'?mapped.supplyPassed:null,
+    marketAssessment:{...original.marketAssessment,available:all.every(x=>x?.status&&x.status!=='UNAVAILABLE'),conditions,
+      availableCount:all.filter(x=>x?.status&&x.status!=='UNAVAILABLE').length,favorableCount:all.filter(x=>x?.status==='FAVORABLE').length,
+      cautionCount:all.filter(x=>x?.status==='CAUTION').length,pendingCount:all.filter(x=>x?.status==='PENDING').length,
+      missingRequired:entries.filter(([,x])=>!x?.status||x.status==='UNAVAILABLE').map(([key])=>key),pendingRequired:entries.filter(([,x])=>x?.status==='PENDING').map(([key])=>key)}};
   // A cache-only update has no execution role, even when supply is complete.
-  if(!projected&&!matches)Object.assign(strategy,{entryPrice:null,takeProfitPrice:null,stopLossPrice:null,riskRewardRatio:null,
+  const detailDay=original.dataMetadata?.daily?.sourceBusinessDate??original.dataMetadata?.price?.sourceBusinessDate??base.quote?.dataMetadata?.price?.sourceBusinessDate??null;
+  const serverDay=view.dailySchedule?.serverDate??view.scheduling?.budget?.day;
+  const staleDetail=Boolean(detailDay&&serverDay&&detailDay!==serverDay);
+  if(!matches||staleDetail)Object.assign(strategy,{entryPrice:null,takeProfitPrice:null,stopLossPrice:null,riskRewardRatio:null,
+    currentToEntryRate:null,entryToTargetRate:null,entryToStopRate:null,
     riskRewardAssessment:{available:false,status:'UNAVAILABLE'},executionAssessment:{status:'UNAVAILABLE'}});
+  const incomplete=!original.technicalAssessment||!original.marketAssessment||['DATA_INSUFFICIENT','INVALID_PRICE_PLAN'].includes(original.finalAssessment?.status);
+  const missing=incomplete?[['ATR',original.atr14],['지지선',original.nearestSupport],['저항선',original.nearestResistance]]
+    .filter(([,value])=>!Number.isFinite(value)||value<=0).map(([name])=>name):[];
+  const originalReason=typeof original.finalAssessment?.reason==='string'?original.finalAssessment.reason:null;
+  const detailReason=incomplete?(originalReason??'원래 상세 분석의 판정 자료를 확인하지 못했습니다.')+
+    (missing.length?' 미확인 입력: '+missing.join(' · ')+'.':''):null;
+  const cacheReason=presentation.available&&!presentation.historical?'저장 수급을 표시합니다. 다른 자료 최신성과 상세 판정 확인이 필요합니다.':presentation.note;
   Object.assign(strategy,values,{available:false,signal:'WAIT',tradeSignal:'WAIT',
     finalAssessment:{status:'WAIT',label:presentation.available?'수급 캐시 참고':'수급 자료 확인 필요',
-      reason:presentation.available&&!presentation.historical?'저장 수급을 표시합니다. 다른 자료 최신성과 상세 판정 확인이 필요합니다.':presentation.note},
+      reason:(detailReason?'원래 상세 분석: '+detailReason+' ':'')+cacheReason},
+    originalDetail:original,
+    detailReference:{role:'ORIGINAL_DETAIL_REFERENCE',incomplete,stale:staleDetail,sourceBusinessDate:detailDay,
+      originalStatus:original.finalAssessment?.status??null,originalReason,missingInputs:missing},
     dataPoints:base.strategy?.dataPoints,newsSnapshotId:base.strategy?.newsSnapshotId,newsReceivedAt:base.strategy?.newsReceivedAt,
     newsStatus:base.strategy?.newsStatus,supplyAssessment:a,supplyPresentation:presentation,
     dataMetadata:{...base.strategy?.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'}});

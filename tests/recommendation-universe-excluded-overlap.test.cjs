@@ -88,10 +88,15 @@ test('TEST_ONLY failed identity overlap leaves previous source untouched and sta
   assert.deepEqual(calls,{fast:0,deep:0,ai:0,history:0,adopt:0});assert.equal(JSON.stringify(previous),before);runs.get(run.runId);assert.equal(f.requests.length,6);
 });
 test('TEST_ONLY schedules,2-second pacing,quota,source freshness,classification,calculators,AI,storage and UI remain byte-identical',()=>{
+  // Later approved detail-display changes are reversed exactly, not excluded as
+  // an open-ended UI exception. Every other frontend byte is still compared.
+  const referenceFiles=['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx'];
+  for(const file of referenceFiles)assert.equal(require('./helpers/without-detail-preservation.cjs')(require('node:fs').readFileSync(file,'utf8'),file),
+    execFileSync('git',['show','4742ac2:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
   assert.equal(execFileSync('git',['diff','4742ac2','--','server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js',
     'services/tradingStrategy.js','services/chartAnalysis.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js',
     'services/stockDetailNews.js','services/recommendationHistory.js','services/expandedRecommendationRuns.js','frontend/src',
-    'package.json','package-lock.json','frontend/package.json','frontend/package-lock.json'],{encoding:'utf8',windowsHide:true}),'');
+    'package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',...referenceFiles.map(x=>':!'+x)],{encoding:'utf8',windowsHide:true}),'');
 });
 test('TEST_ONLY accepted excluded overlap completes fast500/deep40 without Gemini and preserves proof in run snapshot',async()=>{
   const f=fixture(),calls={fast:0,deep:0,ai:0},runs=createExpandedRecommendationRuns({loadUniverse:f.load,logFailure:()=>{},rank:x=>x,

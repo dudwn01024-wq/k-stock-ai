@@ -46,13 +46,14 @@ test('TEST_ONLY READY cache with no projection preserves values, source date and
   assert.equal(result.strategy.supplyPassed,null);assert.equal(result.strategy.tradeSignal,'WAIT');assert.equal(result.strategy.entryPrice,null);
   assert.equal(result.quote.supplyPresentation.label,'장마감 일별 수급 · 외국인 순매도 · 기관 순매수');assert.equal(JSON.stringify(input),before);
 });
-test('TEST_ONLY projection can supply the existing server verdict while retaining the original detail news identity',async()=>{
+test('TEST_ONLY supply-only projection supplies its verdict without borrowing its price plan or news identity',async()=>{
   const {reconcileDetailSupply}=await helpers,input=base(),cached=view();cached.projection={symbol:'003380',marketContext:{supplyAssessment:assessment}};
   let mapped=0;const result=reconcileDetailSupply(input,cached,(symbol,payload)=>{mapped++;assert.equal(symbol,'003380');assert.equal(payload,cached.projection);
     return {marketAssessment:{conditions:{supply:{status:'NEUTRAL'}}},supplyPassed:false,newsSnapshotId:'WRONG',entryPrice:11000,takeProfitPrice:13000,stopLossPrice:10000};});
   assert.equal(mapped,1);assert.equal(result.strategy.marketAssessment.conditions.supply.status,'NEUTRAL');assert.equal(result.strategy.supplyPassed,false);
   assert.equal(result.strategy.newsSnapshotId,'TEST-ONLY-DETAIL');assert.equal(result.strategy.tradeSignal,'WAIT');
-  assert.equal(result.strategy.entryPrice,11000);assert.equal(result.strategy.takeProfitPrice,13000);assert.equal(result.strategy.stopLossPrice,10000);
+  assert.equal(result.strategy.entryPrice,null);assert.equal(result.strategy.takeProfitPrice,null);assert.equal(result.strategy.stopLossPrice,null);
+  assert.equal(result.strategy.originalDetail,input.strategy);assert.equal(result.strategy.detailReference.role,'ORIGINAL_DETAIL_REFERENCE');
 });
 test('TEST_ONLY matching server detail preserves its supply verdict and other measured conditions without recalculating',async()=>{
   const {reconcileDetailSupply}=await helpers,input=base();input.strategy.supplyAssessment=assessment;input.strategy.supplyPassed=false;
