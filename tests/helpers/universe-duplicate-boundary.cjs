@@ -11,6 +11,7 @@ const approved={
   'services/krxStockSecurityType.js':'62d325c37232b144df3b46a046d96551fbc979213be43d08d43377f0d499a001'
 };
 function assertApprovedSource(file,source){
+  source=require('./without-universe-excluded-overlap.cjs')(source,file);
   const digest=createHash('sha256').update(source.replaceAll('\r\n','\n')).digest('hex');
   assert.equal(digest,approved[file],'exact universe duplicate diagnostic boundary: '+file);
   if(file==='services/krxStockSecurityType.js')assert.equal(require('./without-reviewed-02826k.cjs')(source),

@@ -119,7 +119,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
     const state=Object.fromEntries(MARKETS.map(market=>[market,{page:0,totalCount:null,done:false,
       pageMaxMarketValue:null,pageMinMarketValue:null,rows:[]}]));
     const seen=new Map();
-    let requestCount=0,excludedCount=0,globalCutoff=null,boundaryOverlapCount=0,boundaryRefreshCount=0;
+    let requestCount=0,excludedCount=0,globalCutoff=null,boundaryOverlapCount=0,boundaryRefreshCount=0,excludedOverlapCount=0;
     const covered=market=>state[market].done||(globalCutoff!==null&&state[market].pageMaxMarketValue!==null&&
       state[market].pageMaxMarketValue<globalCutoff);
     const coverage=()=>({globalCutoff,...Object.fromEntries(MARKETS.map(market=>[market,{
@@ -155,16 +155,20 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
         const duplicate=first?{symbol:item.stock.symbol,first:first.position,repeated:position}:null;
         // Positions inside an adjacent page and live quote refreshes do not
         // affect top500 when BOTH copies and the ENTIRE page are below cutoff.
+        // An officially verified non-candidate may also repeat before500 exists.
+        // It cannot enter the candidate union, but still contributes to page bounds.
         // Stable identity conflicts, same-page/cross-market/nonadjacent repeats
         // remain errors. No candidate-range row is deduplicated or replaced.
+        const excludedOverlap=first?.officiallyExcluded===true&&first.identity===identity;
         const reason=!first?null:first.position.market!==market?'CROSS_MARKET':first.position.page===page?'WITHIN_PAGE':
-          first.position.page!==page-1?'NON_ADJACENT_PAGE':globalCutoff===null?'CUTOFF_NOT_ESTABLISHED':
+          first.position.page!==page-1?'NON_ADJACENT_PAGE':first.officiallyExcluded&&first.identity!==identity?'ROW_FACTS_CONFLICT':
+          excludedOverlap?null:globalCutoff===null?'CUTOFF_NOT_ESTABLISHED':
           first.marketValue>=globalCutoff||value>=globalCutoff?'OVERLAP_REACHES_CUTOFF':first.identity!==identity?'ROW_FACTS_CONFLICT':null;
         if(reason)throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:{...duplicate,reason}});
         pageSeen.set(item.stock.symbol,{position,identity,marketValue:value,observation});
         pageMaxMarketValue=pageMaxMarketValue===null?value:Math.max(pageMaxMarketValue,value);
         pageMinMarketValue=pageMinMarketValue===null?value:Math.min(pageMinMarketValue,value);
-        if(first){pageOverlaps.push(duplicate);if(first.observation!==observation)pageRefreshCount++;continue;}
+        if(first){pageOverlaps.push({...duplicate,officiallyExcluded:excludedOverlap});if(first.observation!==observation)pageRefreshCount++;continue;}
         if(requiresOfficialStockType(item.stock.symbol)){
           const classification=typeClassifier.classify(item.stock);
           Object.assign(item.stock,classification);
@@ -179,6 +183,10 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
           item.exclusionReason=classification.securityType==='NON_COMMON'?
             'OFFICIAL_NON_COMMON_SECURITY':'OFFICIAL_'+classification.securityType+'_SECURITY';
         }
+        // Only existing exact-code official evidence enables the non-candidate
+        // exception. A provider type label or missing business date cannot do so.
+        pageSeen.get(item.stock.symbol).officiallyExcluded=item.excluded&&
+          Boolean(item.stock.securityTypeEvidence)&&item.stock.sourceBusinessDate!==null;
         if(item.excluded){
           pageExcludedCount++;
           if(item.stock.securityTypeEvidence)pageExcluded.push({symbol:item.stock.symbol,
@@ -186,12 +194,14 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
             exclusionReason:item.exclusionReason,securityTypeEvidence:item.stock.securityTypeEvidence});
         }else pageRows.push(item.stock);
       }
-      if(pageOverlaps.length&&(pageMaxMarketValue>=globalCutoff||pageSeen.size===pageOverlaps.length))
-        throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:{...pageOverlaps[0],
-          reason:pageMaxMarketValue>=globalCutoff?'PAGE_REACHES_CUTOFF':'NO_NEW_SYMBOLS'}});
+      const candidateOverlap=pageOverlaps.find(overlap=>!overlap.officiallyExcluded);
+      if(pageOverlaps.length&&((candidateOverlap&&pageMaxMarketValue>=globalCutoff)||pageSeen.size===pageOverlaps.length))
+        throw failure('UNIVERSE_DUPLICATE_SYMBOL',requestCount,{universeDuplicate:{...(candidateOverlap??pageOverlaps[0]),
+          reason:candidateOverlap&&pageMaxMarketValue>=globalCutoff?'PAGE_REACHES_CUTOFF':'NO_NEW_SYMBOLS'}});
       for(const [symbol,record] of pageSeen)if(!seen.has(symbol))seen.set(symbol,record);
       boundaryOverlapCount+=pageOverlaps.length;
       boundaryRefreshCount+=pageRefreshCount;
+      excludedOverlapCount+=pageOverlaps.filter(overlap=>overlap.officiallyExcluded).length;
       entry.rows.push(...pageRows);
       excludedSecurities.push(...pageExcluded);
       excludedCount+=pageExcludedCount;
@@ -220,6 +230,7 @@ function createRecommendationUniverse({fetchPage,fetchImpl=globalThis.fetch,head
           officialTypeRequests:typeClassifier.requestCount(),officialTypeChecks:typeClassifier.checkCount(),
           ...(boundaryOverlapCount?{boundaryOverlapCount}:{}),
           ...(boundaryRefreshCount?{boundaryRefreshCount}:{}),
+          ...(excludedOverlapCount?{excludedOverlapCount}:{}),
           sourceBusinessDate:dates.length===1?dates[0]:null,
           fetchedAt:clock().toISOString(),snapshotConsistency:'NOT_PROVEN',
           universeFingerprint:hash(stocks.map(stock=>stock.symbol).sort()),
