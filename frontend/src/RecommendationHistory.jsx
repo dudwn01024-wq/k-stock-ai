@@ -9,6 +9,7 @@ import './recommendation-history.css';
 const time=v=>v&&Number.isFinite(Date.parse(v))?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'medium'}).format(new Date(v)):'미확인';
 const number=v=>typeof v==='number'&&Number.isFinite(v)?v.toLocaleString('ko-KR'):'자료 없음';
 const condition=v=>v===true?'통과':v===false?'미충족':'미확인';
+const shortage=v=>({INSUFFICIENT_HISTORY:'필요한 일봉 이력 부족',INVALID_DAILY_HISTORY:'제공된 일봉 필수값·날짜·가격 범위 검증 불충족'}[v]||'저장된 상세 사유 미확인');
 const grade=v=>({PRIORITY_CANDIDATE:'조건 우수 후보',CHASE_CAUTION:'가격 추격 주의',WATCH_CANDIDATE:'관심 후보',EXCLUDED:'후보 제외'}[v]??v??'미확인');
 const safeLink=v=>{try{const u=new URL(v);return ['http:','https:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null;}catch{return null;}};
 const fields=[['ma5','MA5'],['ma20','MA20'],['currentVolume','거래량'],['averageVolume20','20일 평균 거래량'],['volumeRatio','거래량 비율'],['foreignerNet','외국인 순수급'],['institutionNet','기관 순수급'],['recentHigh20','20일 고가'],['recentLow20','20일 저가']];
@@ -69,7 +70,7 @@ export function ExpandedHistoryRecord({detail,service}){
     </li>)}</ol>:<p>당시 저장된 최종 후보가 없습니다.</p>}
     {detail.failures?.length>0&&<p className="home-warning">2단계 조회 실패: {detail.failures.map(x=>x.symbol).join(', ')}. 정책상 탈락으로 해석하지 않습니다.</p>}
     <details><summary>1단계 전체 상태 펼쳐보기</summary><ul className="history-runs">
-      {detail.fastResults.map(x=><li key={x.symbol}>{x.symbol} · {x.status} · 사전 점수 {number(x.preScreenScore)} / 2 · 거래량 비율 {number(x.volumeRatio)} · 대상일 {x.sourceBusinessDate||'미확인'}</li>)}
+      {detail.fastResults.map(x=><li key={x.symbol}>{x.symbol} · {x.status} · 사전 점수 {number(x.preScreenScore)} / 2 · 거래량 비율 {number(x.volumeRatio)} · 대상일 {x.sourceBusinessDate||'미확인'}{(x.fastStatus==='INSUFFICIENT_DATA'||x.status==='INSUFFICIENT_DATA')&&<> · 자료 부족 사유: {shortage(x.reason)} · 제공처 {x.provider||'미확인'}</>}</li>)}
     </ul></details>
     <p className="home-warning">이 V2 실행과 기존 V1 이력은 종목군·계산 범위가 달라 점수 변화를 직접 비교하지 않습니다.</p>
   </div>;

@@ -42,6 +42,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
   const conditions=[['추세',strategy.trendPassed],['거래량',strategy.volumePassed],['수급',strategy.supplyPassed],['뉴스',assessment.newsPassed]];
   return <>
     <div className="expanded-card-heading">{screening&&onSelect?<button type="button" className="expanded-stock-name" onClick={()=>onSelect({code:item.symbol,name:item.stockName||item.symbol})}>{item.stockName||item.symbol}</button>:<strong>{item.stockName||item.symbol}</strong>}<small>{item.symbol}</small></div>
+    <p className="home-warning expanded-basis-warning"><strong>관측 자료 기준 후보</strong> · {dataDates.basisLabel}</p>
     <p className="expanded-card-grade">{gradeLabels[item.grade]||text(item.grade)} · {historical?'저장 당시 조건 점수':'분석 조건 점수'} {number(item.score)} / 4</p>
     {historical&&<p className="expanded-card-note">과거 저장값입니다. 아래 수급 조건은 저장 당시 판정이며, 오늘 수급 판정은 확인 대기/장 마감으로 구분합니다.</p>}
     {!screening&&<dl className="expanded-card-prices">
@@ -72,7 +73,7 @@ export default function ExpandedCandidateCard({item,children,screening=false,onS
       <h4>데이터 기준</h4>
       {dataDates.mismatch&&<p className="expanded-data-date-warning">데이터 기준일이 서로 다릅니다. 아래 항목별 기준을 확인하세요.</p>}
       <dl>{dataDates.rows.map(row=><div key={row.key}>
-        <dt>{row.label}</dt><dd><span>{row.value}</span><small>제공처: {row.source}{row.lookup&&<> · {row.lookup}</>}</small></dd>
+        <dt>{row.label}</dt><dd><span>{row.value}</span><small>제공처: {row.source}{row.asOf&&<> · {row.asOf}</>}{row.lookup&&<> · {row.lookup}</>}</small></dd>
       </div>)}</dl>
     </section>
     <details className="expanded-card-evidence"><summary>상세 근거 보기</summary>

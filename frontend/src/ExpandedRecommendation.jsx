@@ -135,8 +135,9 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
   return <section className="expanded-recommendation" aria-label="추천 후보">
     <div className="expanded-home-toolbar">
       <p className="expanded-risk-note">분석은 참고용이며, 주식 투자는 원금 손실 위험이 있습니다.</p>
-      <div className="expanded-home-actions"><button className="home-secondary expanded-start" onClick={start} disabled={starting||Boolean(run&&!terminal.has(run.status))}>500종목 분석 요청</button></div></div>
+      <div className="expanded-home-actions"><button className="home-secondary expanded-start" onClick={start} disabled={starting||Boolean(run&&!terminal.has(run.status))}>500종목 분석 요청</button>{onHistory&&<button className="home-secondary" onClick={onHistory}>저장 이력 보기</button>}</div></div>
     <InvestmentNotice/>
+    <p className="expanded-result-context"><strong>요청 완료시각과 자료 기준시각은 다릅니다.</strong> 가격·거래량·뉴스·수급은 항목별 원래 거래일과 관측시각을 사용합니다. 수급을 새로 반영해도 다른 자료가 오늘 자료로 바뀌지 않습니다.</p>
     {storage==='NOT_CONFIGURED'&&!latestKis&&<p className="home-warning">이력 저장 미설정 · 완료된 실행은 서버 재시작 후 보존되지 않습니다.</p>}
     {storage==='UNAVAILABLE'&&<p className="home-warning">저장 이력을 읽지 못했습니다. 새 분석을 자동 시작하지 않습니다.</p>}
     {error&&<p role="alert" className="home-warning">{error}</p>}
@@ -154,6 +155,8 @@ export default function ExpandedRecommendation({service,onHistory,onSelect,aiEna
       </div></details>
     </div>}
     {display&&<div className="expanded-result">
+      {run&&!terminal.has(run.status)&&<p role="status" className="home-warning">새 분석이 진행 중입니다. 아래는 이전 저장 목록이며 이번 실행 결과가 아닙니다.</p>}
+      {error&&<p className="home-warning">요청 또는 상태 확인에 오류가 있습니다. 아래 표시된 저장 목록의 최신성은 확인되지 않았습니다.</p>}
       {projected?.supplyProjection&&<p role={projected.supplyUnavailable?'alert':'status'} className="expanded-result-context">{projected.supplyUnavailable?'예약 수급 확인 실패 · 현재 후보 판정을 보류합니다.':noSupplyCollected?'오늘 KIS 수급 자료 미수집 · 오늘 수집은 종료됐으며 수급 판정을 보류합니다. 수급 외 자료는 원래 분석 기준입니다.':display?.provider==='KIS_DAILY_INVESTOR'&&!dailyConfirmed?'장후 조회는 종료됐지만 당일 유효자료를 확인하지 못했습니다. 수급 판정을 보류하며 수급 외 자료는 원래 분석 기준입니다.':'수급만 갱신해 후보를 재계산·재정렬했습니다. 가격·차트·거래량·뉴스와 AI 설명은 이전 관측 자료이며 매수 허가가 아닙니다.'}</p>}
       {run?.status==='FAILED'&&<p className="expanded-result-context">아래 목록은 이전에 저장된 분석 결과입니다. 이번 실행 결과가 아닙니다.</p>}
       {display===latestKis&&<p className="expanded-result-context">{noSupplyCollected?'서버에 저장된 분석 후보 · 오늘 수급 자료 미수집':display.historical?'마지막 KIS 관측 당시 저장 추천 · 현재 수급 확인 대기/장 마감':display.provider==='KIS_DAILY_INVESTOR'?(dailyConfirmed?'거래일을 확인한 장후 일별 수급 재평가 · 최종 확정 여부 미확인':'장후 일별 수급 조회 결과 · 당일 유효자료 미확인'):'서버에 저장된 최신 KIS 수급 재평가'} · 수급 외 자료는 원래 분석 기준입니다. 출처 분석 {display.sourceAnalysisId}</p>}

@@ -29,10 +29,10 @@ export function recommendationDataDates(item={}){
   const day=value=>years.size>1?value.replaceAll('-','.'):value.slice(5).replace('-','/');
   const time=value=>day(value.date)+' '+value.time;
   const row=(key,label,metadata,date,suffix='기준')=>{
-    const received=date&&metadata?.source!=='KIS_DAILY_INVESTOR'?null:lookupTime(metadata?.receivedAt);
+    const received=lookupTime(metadata?.receivedAt),asOf=lookupTime(metadata?.sourceTimestamp);
     const observed=key==='supply'&&metadata?.source==='KIS_INTRADAY_ESTIMATE'?validDay(metadata.observedBusinessDate):null;
     return {key,label,value:date?day(date)+' '+suffix:observed?'원천 기준일 미확인 · 관측일 '+day(observed)+' (추론)':'기준일 미확인',source:source(metadata),
-      lookup:received?'조회 '+time(received):null};
+      lookup:received?'조회 '+time(received):null,asOf:asOf?'원천 시각 '+time(asOf):null};
   };
   const assessmentMatches=!assessment?.sourceBusinessDate||validDay(assessment.sourceBusinessDate)===volumeDate;
   const volumeSuffix=assessmentMatches&&['INTRADAY_PENDING','INTRADAY_CONFIRMED_STRONG'].includes(assessment?.status)?'장중':
@@ -43,7 +43,11 @@ export function recommendationDataDates(item={}){
     newsValue=(first===last?first:first+' ~ '+last)+' 조회'+(knownTimes.length<news.length?' · 일부 미확인':'');
   }
   const providers=[...new Set(news.map(x=>source(x.dataMetadata)))];
-  return {mismatch:new Set(dates).size>1,rows:[row('price','가격',price,priceDate),
+  const mismatch=new Set(dates).size>1;
+  const basisLabel=mismatch?'서로 다른 거래일의 자료를 조합한 후보입니다. 오늘의 동일 시점 종합 판정이 아닙니다.':
+    dates.length<3?'거래일 미확인 자료가 포함되어 있습니다. 조회시각이 오늘이어도 오늘 기준 추천으로 확정할 수 없습니다.':
+    `${dates[0]} 거래일의 관측 자료 기준입니다. 같은 거래일이어도 원천 시각·최신성은 별도 확인이 필요합니다.`;
+  return {mismatch,basisLabel,rows:[row('price','가격',price,priceDate),
     row('volume','거래량',volume,volumeDate,volumeSuffix),row('supply','수급',supply,supplyDate),
     {key:'news',label:'뉴스',value:newsValue,source:providers.join(' · ')||'미확인',lookup:null}]};
 }

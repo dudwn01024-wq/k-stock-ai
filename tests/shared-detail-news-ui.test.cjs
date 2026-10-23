@@ -13,6 +13,20 @@ const visit=(node,predicate)=>{
   for(const child of React.Children.toArray(node.props?.children)){const found=visit(child,predicate);if(found)return found;}
 };
 const tick=()=>new Promise(setImmediate);
+
+test('TEST_ONLY repeated recommendation selections cannot inherit prior metrics or provenance',async()=>{
+  let finish;
+  const pending=new Promise(resolve=>{finish=resolve;});
+  const h=harness({quoteResponse:async symbol=>symbol==='005930'?pending:{symbol,stockName:'TEST_ONLY '+symbol,currentPrice:100,
+    volume:0,tradingValue:null,dataMetadata:{quoteMetrics:{source:'TEST_ONLY '+symbol,sourceBusinessDate:'2026-10-22'}}}});
+  await h.select('005930');await h.select('000660');
+  finish({symbol:'005930',stockName:'OLD_TEST_ONLY',volume:999,tradingValue:999,dataMetadata:{quoteMetrics:{source:'OLD_TEST_ONLY'}}});
+  await tick();assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('quoteData').volume,0);
+  assert.equal(h.state('quoteData').tradingValue,null);assert.equal(h.state('quoteData').dataMetadata.quoteMetrics.source,'TEST_ONLY 000660');
+  h.navigate('171090');await tick();assert.equal(h.state('quoteData').symbol,'171090');
+  assert.equal(h.state('quoteData').dataMetadata.quoteMetrics.source,'TEST_ONLY 171090');
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/quote')).length,3);assert.equal(h.calls.filter(x=>x.pathname.endsWith('/ai-analysis')).length,0);
+});
 const strategy=()=>({testOnly:true,currentPrice:100,entryPrice:98,takeProfitPrice:120,stopLossPrice:90,
   technicalAssessment:{status:'FAVORABLE',conditions:{}},marketAssessment:{available:true,conditions:{}},finalAssessment:{status:'WAIT'}});
 const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'+symbol,newsReceivedAt:'2026-10-07T00:00:00Z',newsStatus:'READY',

@@ -52,3 +52,6 @@
  .candidate-context { grid-column:1 / -1; }
  .candidate-time { flex-direction:column; }
 }
+.quote-provenance { margin-top: 1rem; padding: .75rem; border: 1px solid var(--ui-border); border-radius: .75rem; background: var(--ui-subtle); font-size: .75rem; line-height: 1.65; color: var(--ui-muted); overflow-wrap: anywhere; }
+.quote-provenance p { margin: .25rem 0; }
+.quote-source-line strong { color: var(--ui-text); }

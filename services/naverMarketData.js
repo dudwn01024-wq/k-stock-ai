@@ -2,6 +2,7 @@
 // Existing server readers extracted without changing normalization or news rules.
 const {dataFreshness,dateConsistency}=require('./dataFreshness');
 const {MAX_PAGES}=require('./observationNewsContract');
+const {quoteMetrics,snapshotMetadata}=require('./naverQuoteSnapshot');
 const NAVER_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -280,318 +281,47 @@ const assessLatestNews = (news) => {
 
 function createNaverMarketData({fetchImpl=(...args)=>globalThis.fetch(...args),failFast=false,allowNewsPageSize20=false}={}) {
 const fetch=fetchImpl;
-const fetchStockQuoteData =
-  async (symbol, {includeSupply=true}={}) => {
-    const basicResponse =
-      await fetch(
-        `https://m.stock.naver.com/api/stock/${symbol}/basic`,
-        {
-          headers:
-            NAVER_HEADERS
-        }
-      );
-
-    if (
-      !basicResponse.ok
-    ) {
-      throw new Error(
-        `Failed to fetch stock basic data: HTTP ${basicResponse.status}`
-      );
+const fetchStockQuoteData = async function(symbol,{includeSupply=true}={}){
+  const basicResponse=await fetch(`https://m.stock.naver.com/api/stock/${symbol}/basic`,{headers:NAVER_HEADERS});
+  if(!basicResponse.ok)throw Error(`Failed to fetch stock basic data: HTTP ${basicResponse.status}`);
+  const basicData=await basicResponse.json(),basicReceivedAt=new Date().toISOString();
+  if(basicData?.itemCode&&basicData.itemCode!==symbol)throw Error('Stock basic symbol mismatch');
+  const priceMetadata=snapshotMetadata(basicData,'Naver basic',basicReceivedAt);
+  const basicMetrics=quoteMetrics({basic:basicData,basicReceivedAt});
+  let integrationData=null,integrationReceivedAt=null;
+  // Use one response for the entire metrics group. A KRX polling amount must
+  // never fill a hole in a different market/session's volume or OHLC snapshot.
+  if(includeSupply||['volume','tradingValue','highPrice','lowPrice'].some(key=>basicMetrics[key]===null)){
+    try{
+      const response=await fetch(`https://m.stock.naver.com/api/stock/${symbol}/integration`,{headers:NAVER_HEADERS});
+      if(response.ok){
+        const data=await response.json();
+        if(data?.itemCode&&data.itemCode!==symbol)throw Error('Stock integration symbol mismatch');
+        integrationData=data;integrationReceivedAt=new Date().toISOString();
+      }else if(failFast)throw Error(`Integration fetch failed: HTTP ${response.status}`);
+    }catch(error){
+      if(failFast)throw error;
+      console.warn(`[K-Stock AI] Integration fetch failed for ${symbol}:`,error.message);
     }
-
-    const basicData =
-      await basicResponse.json();
-
-    const basicReceivedAt = new Date().toISOString();
-    const priceMetadata = dataFreshness({ source: 'Naver basic',
-      date: basicData.localTradedAt ?? basicData.bizdate ?? null,
-      timestamp: basicData.localTradedAt ?? null, receivedAt: basicReceivedAt });
-    let volumeMetadata = { ...priceMetadata };
-    let supplyMetadata = dataFreshness({ source: includeSupply?'Naver integration':'NOT_REQUESTED' });
-
-    const currentPrice =
-      parseNumber(
-        basicData.closePrice ||
-        basicData.nowPrice
-      );
-
-    const priceChange =
-      parseNumber(
-        basicData.compareToPreviousClosePrice
-      );
-
-    const changeRate =
-      parseNumber(
-        basicData.fluctuationsRatio
-      );
-
-    const stockName =
-      basicData.stockName ||
-      null;
-
-    let volume =
-      parseNumber(
-        basicData.accumulatedTradingVolume ??
-        basicData.volume ??
-        basicData.tradingVolume ??
-        basicData.executedVolume
-      );
-
-    let tradingValue =
-      parseNumber(
-        basicData.accumulatedTradingValue ||
-        basicData.tradingValue
-      );
-
-    let highPrice =
-      parseNumber(
-        basicData.highPrice ||
-        basicData.maxPrice
-      );
-
-    let lowPrice =
-      parseNumber(
-        basicData.lowPrice ||
-        basicData.minPrice
-      );
-
-    if (
-      volume === null ||
-      tradingValue === null ||
-      highPrice === null ||
-      lowPrice === null
-    ) {
-      try {
-        const priceResponse =
-          await fetch(
-            `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=1&page=1`,
-            {
-              headers:
-                NAVER_HEADERS
-            }
-          );
-
-        if (
-          priceResponse.ok
-        ) {
-          const priceData =
-            await priceResponse.json();
-
-          if (
-            Array.isArray(
-              priceData
-            ) &&
-            priceData.length >
-              0
-          ) {
-            const latest =
-              priceData[0];
-
-            if (
-              highPrice ===
-              null
-            ) {
-              highPrice =
-                parseNumber(
-                  latest.highPrice
-                );
-            }
-
-            if (
-              lowPrice ===
-              null
-            ) {
-              lowPrice =
-                parseNumber(
-                  latest.lowPrice
-                );
-            }
-
-            if (
-              volume ===
-              null
-            ) {
-              volume =
-                parseNumber(
-                  latest.accumulatedTradingVolume ??
-                  latest.volume
-                );
-              volumeMetadata = dataFreshness({ source: 'Naver daily price', date: latest.localTradedAt ?? latest.bizdate ?? null, timestamp: latest.localTradedAt ?? null, receivedAt: new Date().toISOString() });
-            }
-
-            if (
-              tradingValue ===
-              null
-            ) {
-              tradingValue =
-                parseNumber(
-                  latest.accumulatedTradingValue ||
-                  latest.tradingValue
-                );
-            }
-          }
-        }
-      } catch (error) {
-        if (failFast) throw error;
-        console.warn(
-          `[K-Stock AI] Latest price fallback failed for ${symbol}:`,
-          error.message
-        );
-      }
-    }
-
-    if (
-      tradingValue ===
-      null
-    ) {
-      try {
-        const realtimeResponse =
-          await fetch(
-            `https://polling.finance.naver.com/api/realtime?query=SERVICE_ITEM:${symbol}`,
-            {
-              headers:
-                NAVER_HEADERS
-            }
-          );
-
-        if (
-          realtimeResponse.ok
-        ) {
-          const realtimeData =
-            await realtimeResponse.json();
-
-          const realtimeItem =
-            realtimeData
-              ?.result
-              ?.areas
-              ?.[0]
-              ?.datas
-              ?.[0] ||
-            null;
-
-          if (
-            realtimeItem
-          ) {
-            tradingValue =
-              parseNumber(
-                realtimeItem.aa ||
-                realtimeItem.accumulatedTradingValue
-              );
-          }
-        }
-      } catch (error) {
-        if (failFast) throw error;
-        console.warn(
-          `[K-Stock AI] Realtime trading value fetch failed for ${symbol}:`,
-          error.message
-        );
-      }
-    }
-
-    let foreignerNet =
-      null;
-
-    let institutionNet =
-      null;
-
-    let supplyDate =
-      null;
-
-    if(includeSupply||tradingValue===null)try {
-      const integrationResponse =
-        await fetch(
-          `https://m.stock.naver.com/api/stock/${symbol}/integration`,
-          {
-            headers:
-              NAVER_HEADERS
-          }
-        );
-
-      if (
-        integrationResponse.ok
-      ) {
-        const integrationData =
-          await integrationResponse.json();
-
-        if (
-          tradingValue ===
-          null
-        ) {
-          tradingValue =
-            parseNumber(
-              getIntegrationInfoValue(
-                integrationData,
-                'accumulatedTradingValue'
-              )
-            );
-        }
-
-        const latestTrend = includeSupply?
-          getLatestDealTrend(
-            integrationData
-          ):null;
-
-        if (
-          latestTrend
-        ) {
-          foreignerNet =
-            parseNumber(
-              latestTrend.foreignerPureBuyQuant
-            );
-
-          institutionNet =
-            parseNumber(
-              latestTrend.organPureBuyQuant
-            );
-
-          supplyMetadata = dataFreshness({ source: 'Naver integration', date: latestTrend.localTradedAt ?? latestTrend.tradeDate ?? latestTrend.bizdate ?? latestTrend.date ?? latestTrend.localDate ?? null, timestamp: latestTrend.localTradedAt ?? null, receivedAt: new Date().toISOString() });
-          supplyDate =
-            latestTrend.localTradedAt ||
-            latestTrend.tradeDate ||
-            latestTrend.bizdate ||
-            latestTrend.date ||
-            latestTrend.localDate ||
-            null;
-        }
-      }
-    } catch (error) {
-        if (failFast) throw error;
-      console.warn(
-        `[K-Stock AI] Integration fetch failed for ${symbol}:`,
-        error.message
-      );
-    }
-
-    return {
-      symbol,
-      stockName,
-      currentPrice,
-      priceChange,
-      changeRate,
-      volume,
-      tradingValue,
-      highPrice,
-      lowPrice,
-      foreignerNet,
-      institutionNet,
-
-      foreignerBuy:
-        null,
-
-      foreignerSell:
-        null,
-
-      institutionBuy:
-        null,
-
-      institutionSell:
-        null,
-
-      dataMetadata: { price: priceMetadata, volume: volumeMetadata, supply: supplyMetadata,
-        dateConsistency: dateConsistency([priceMetadata, volumeMetadata, supplyMetadata]) },
-      supplyDate
-    };
-  };
+  }
+  const metrics=quoteMetrics({basic:basicData,basicReceivedAt,integration:integrationData,integrationReceivedAt});
+  let foreignerNet=null,institutionNet=null,supplyDate=null;
+  let supplyMetadata=dataFreshness({source:includeSupply?'Naver integration':'NOT_REQUESTED'});
+  const latestTrend=includeSupply?getLatestDealTrend(integrationData):null;
+  if(latestTrend){
+    foreignerNet=parseNumber(latestTrend.foreignerPureBuyQuant);
+    institutionNet=parseNumber(latestTrend.organPureBuyQuant);
+    supplyDate=latestTrend.localTradedAt??latestTrend.tradeDate??latestTrend.bizdate??latestTrend.date??latestTrend.localDate??null;
+    supplyMetadata=dataFreshness({source:'Naver integration',date:supplyDate,
+      timestamp:latestTrend.localTradedAt??null,receivedAt:integrationReceivedAt});
+  }
+  return {symbol,stockName:basicData.stockName||null,currentPrice:parseNumber(basicData.closePrice??basicData.nowPrice),
+    priceChange:parseNumber(basicData.compareToPreviousClosePrice),changeRate:parseNumber(basicData.fluctuationsRatio),
+    openPrice:metrics.openPrice,highPrice:metrics.highPrice,lowPrice:metrics.lowPrice,volume:metrics.volume,tradingValue:metrics.tradingValue,
+    foreignerNet,institutionNet,foreignerBuy:null,foreignerSell:null,institutionBuy:null,institutionSell:null,supplyDate,
+    dataMetadata:{price:priceMetadata,quoteMetrics:metrics.metadata,volume:metrics.metadata,tradingValue:metrics.metadata,
+      ohlc:metrics.metadata,supply:supplyMetadata,dateConsistency:dateConsistency([priceMetadata,metrics.metadata,supplyMetadata])}};
+};
 
 const fetchStockNewsBySymbol =
   async (symbol, {page=1,pageSize=10}={}) => {

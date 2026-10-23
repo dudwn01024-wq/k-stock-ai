@@ -97,10 +97,22 @@ test('TEST_ONLY original source dates/news and daily receipt survive repeated ca
  assert.equal(r.strategy.dataMetadata.daily.receivedAt,'2026-10-19T08:18:00Z');assert.equal(r.strategy.dataMetadata.supply.receivedAt,observedAt);assert.equal(r.strategy.detailReference.sourceBusinessDate,'2026-10-19');}
  assert.equal(JSON.stringify(f.base),before);
 });
-test('TEST_ONLY backend source stays identical except the exact reviewed missing-resistance evidence patch',()=>{
+test('TEST_ONLY trading core stays identical while the reviewed quote reader and provenance presentation may change',()=>{
  const file='services/tradingStrategy.js';
  assert.equal(require('./helpers/without-missing-resistance.cjs')(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show','e70e194:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
- assert.equal(execFileSync('git',['diff','e70e194','--','server.js','services','frontend/src/App.jsx','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',':!services/tradingStrategy.js'],{encoding:'utf8',windowsHide:true}),'');
+ assert.equal(execFileSync('git',['diff','e70e194','--','server.js','services','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',':!services/tradingStrategy.js',':!services/naverMarketData.js',':!services/naverQuoteSnapshot.js'],{encoding:'utf8',windowsHide:true}),'');
+ const app=fs.readFileSync('frontend/src/App.jsx','utf8').replaceAll('\r\n','\n');
+ const previous=execFileSync('git',['show','e70e194:frontend/src/App.jsx'],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
+ for(const [start,end]of [['  mapStockStrategy(symbol,payload) {','  unlockHoldingGuidance('],
+   ['  const loadRealStockData =','  const requestAIAnalysis ='],['  const requestAIAnalysis =','  const initialDetailSymbol='],
+   ['  const handleSearch =','  const handlePopularStock =']]){
+  assert.ok(app.indexOf(start)>=0&&app.indexOf(end)>app.indexOf(start));
+  assert.equal(app.slice(app.indexOf(start),app.indexOf(end)),previous.slice(previous.indexOf(start),previous.indexOf(end)),start+' unchanged');
+ }
+ const naver=fs.readFileSync('services/naverMarketData.js','utf8').replaceAll('\r\n','\n');
+ const oldNaver=execFileSync('git',['show','e70e194:services/naverMarketData.js'],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
+ assert.equal(naver.slice(naver.indexOf('const assessLatestNews ='),naver.indexOf('function createNaverMarketData')),oldNaver.slice(oldNaver.indexOf('const assessLatestNews ='),oldNaver.indexOf('function createNaverMarketData')),'news assessment unchanged');
+ assert.equal(naver.slice(naver.indexOf('const fetchStockNewsBySymbol =')),oldNaver.slice(oldNaver.indexOf('const fetchStockNewsBySymbol =')),'news reader unchanged');
 });
 test('TEST_ONLY historical boundaries reverse only the exact two-file detail patch and reject an unreviewed edit',()=>{
  const inverse=require('./helpers/without-detail-preservation.cjs');for(const file of ['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx']){

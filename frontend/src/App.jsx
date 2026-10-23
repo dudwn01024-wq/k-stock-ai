@@ -18,6 +18,7 @@ import { strategyExplanation } from './utils/strategyExplanation.js';
 import './public-home.css';
 import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
+import QuoteProvenance from './QuoteProvenance.jsx';
 import PageMeta from './components/PageMeta.jsx';
 import { POPULAR_STOCKS } from './stockCatalog.js';
 import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
@@ -1314,24 +1315,26 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                     </span>
                   </div>
                   <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">당일 고가</span>
+                    <span className="text-[11px] text-slate-400 block">제공처 집계 고가</span>
                     <span className="text-sm font-semibold font-mono text-red-400">
                       {formatKRW(quoteData.highPrice)}
                     </span>
                   </div>
                   <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <span className="text-[11px] text-slate-400 block">당일 저가</span>
+                    <span className="text-[11px] text-slate-400 block">제공처 집계 저가</span>
                     <span className="text-sm font-semibold font-mono text-blue-400">
                       {formatKRW(quoteData.lowPrice)}
                     </span>
                   </div>
                 </div>
               </div>
+              <QuoteProvenance quote={quoteData}/>
                 <p>{quoteData?.dataMetadata?.dateConsistency === 'MISMATCH' || strategyData?.dataMetadata?.dateConsistency === 'MISMATCH'
                   ? '데이터 기준일 불일치: 서로 다른 날짜의 값이 포함되어 있습니다.' : '항목별 기준일과 최신성은 별도 확인이 필요합니다.'}</p>
               <details className="detail-source-info"><summary>데이터 제공처 · 기준일 확인</summary><div className="text-xs text-slate-400 space-y-1">
                 <p>가격 — {describeDataMetadata(quoteData?.dataMetadata?.price)}</p>
                 <p>거래량 — {describeDataMetadata(quoteData?.dataMetadata?.volume)}</p>
+                <p>거래대금·시고저 — {describeDataMetadata(quoteData?.dataMetadata?.quoteMetrics)}</p>
                 <p>수급 — {quoteData.supplyPresentation?.historical?'이전 거래일 저장 자료 · ':''}{describeDataMetadata(quoteData.supplyPresentation?.historical?quoteData.supplyPresentation.assessment.metadata:quoteData?.dataMetadata?.supply)}</p>
                 <p>상세 일봉 — {describeDataMetadata(strategyData?.dataMetadata?.daily)}</p>
 
@@ -1789,6 +1792,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         <span className="text-sm font-bold font-mono text-white block">
           {formatNumberWithUnit(strategyData?.currentVolume, '주')}
         </span>
+        <p className="text-[11px] text-slate-400">KIS 기술분석 일봉 관측값 · {describeDataMetadata(strategyData?.dataMetadata?.daily)} · 시장·세션·조정 여부 미확인</p>
 
         <span
           className={`text-xs font-semibold block mt-2 ${
@@ -1935,6 +1939,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                 </div>
 
                 <p className="text-xs text-slate-400">마지막 일봉 — {describeDataMetadata(chartData.at(-1)?.dataMetadata)}</p>
+                <p className="text-xs text-slate-400">차트의 OHLC·거래량은 Naver 일별 응답 기준입니다. 시장·세션 범위와 조정주가 여부는 미확인입니다. 위 시세 집계 및 KIS 분석의 거래량과 같다고 가정하지 마세요.</p>
                 <div className="flex items-center bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto">
                   {TIMEFRAMES.map((tf) => (
                     <button
