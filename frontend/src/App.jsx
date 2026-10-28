@@ -19,6 +19,8 @@ import './public-home.css';
 import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
 import QuoteProvenance from './QuoteProvenance.jsx';
+import PricePlanReference from './PricePlanReference.jsx';
+import {pricePlanState} from './utils/pricePlan.js';
 import PageMeta from './components/PageMeta.jsx';
 import { POPULAR_STOCKS } from './stockCatalog.js';
 import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
@@ -52,8 +54,8 @@ const TIMEFRAMES = [
   { label: '1년', code: '1Y' }
 ];
 
-const formatKRW = (num) => {
-  return formatKRWDisplay(num);
+const formatKRW = (num, missing) => {
+  return formatKRWDisplay(num, missing);
 };
 
 const formatNumberWithUnit = (num, unit = '') => {
@@ -431,9 +433,14 @@ recentLow20:
     const response = await fetch(
       `${this.baseUrl}/stock/ai-analysis?symbol=${encodeURIComponent(symbol)}&newsSnapshotId=${encodeURIComponent(newsSnapshotId)}`
     );
-    const body=await response.json();
-    if (!response.ok) throw new Error(aiAnalysisError({code:body.error,status:response.status,
-      message:body.message||body.error||`AI 분석 API 오류 (${response.status})`}).message);
+    const body=await response.json().catch(()=>null);
+    if (!response.ok || !body || typeof body!=='object' || Array.isArray(body)) {
+      const code=body?.error||'GEMINI_UNAVAILABLE';
+      const failureReasons=Array.isArray(body?.failureReasons)?body.failureReasons:
+        body?.error?undefined:response.status===504?['TIMEOUT']:response.status>=500?['SERVICE_BUSY']:['INVALID_RESPONSE'];
+      throw Object.assign(new Error(aiAnalysisError({code,status:response.status,failureReasons,
+        message:body?.message||body?.error}).message),{code,status:response.status,failureReasons});
+    }
     if(body.symbol!==symbol || body.newsSnapshotId!==newsSnapshotId)throw Error('AI 해설의 종목·뉴스 묶음이 일치하지 않습니다.');
     return body;
   }
@@ -640,7 +647,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       const result=await backendService.getAIAnalysis(snapshot.symbol,snapshot.id);
       if(request===aiRequestRef.current && detailSnapshotRef.current===snapshot)setAiAnalysis(result);
     }catch(error){
-      if(request===aiRequestRef.current)setAiError(error.message||'AI 해설을 가져오지 못했습니다.');
+      if(request===aiRequestRef.current)setAiError(error);
     }finally{
       if(request===aiRequestRef.current){aiPendingRef.current=false;setAiLoading(false);}
     }
@@ -1441,6 +1448,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       1. 가격 기준선
     </h4>
 
+    <PricePlanReference strategy={strategyData}/>
     <div className="strategy-price-grid">
       <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
         <span className="text-[11px] text-slate-400 block">
@@ -1458,7 +1466,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         </span>
 
         <span className="text-sm font-bold font-mono text-emerald-300 mt-1 block">
-          {formatKRW(strategyData?.entryPrice)}
+          {formatKRW(strategyData?.entryPrice,pricePlanState(strategyData)?.withheld?'현재 판정 보류':'계산 불가')}
         </span>
       </div>
 
@@ -1468,7 +1476,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         </span>
 
         <span className="text-sm font-bold font-mono text-red-400 mt-1 block">
-          {formatKRW(strategyData?.takeProfitPrice)}
+          {formatKRW(strategyData?.takeProfitPrice,pricePlanState(strategyData)?.withheld?'현재 판정 보류':'계산 불가')}
         </span>
       </div>
 
@@ -1478,7 +1486,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         </span>
 
         <span className="text-sm font-bold font-mono text-blue-400 mt-1 block">
-          {formatKRW(strategyData?.stopLossPrice)}
+          {formatKRW(strategyData?.stopLossPrice,pricePlanState(strategyData)?.withheld?'현재 판정 보류':'계산 불가')}
         </span>
       </div>
 
@@ -1542,7 +1550,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   : strategyData?.riskRewardAssessment?.status === 'FAIL'
     ? '미통과'
     : strategyData?.riskRewardAssessment?.status === 'UNAVAILABLE'
-      ? '데이터 부족'
+      ? (pricePlanState(strategyData)?.withheld?'현재 판정 보류':'데이터 부족')
       : '데이터 없음'}
         </span>
       </div>

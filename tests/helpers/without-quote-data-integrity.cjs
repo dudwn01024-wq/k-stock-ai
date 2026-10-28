@@ -60,14 +60,14 @@ const base='94bb1c4bbf9550804243f2f20ca971c7e5ed6326',edits={
   }
 };
 const hash=s=>createHash('sha256').update(s).digest('hex');
-function restore(source,file){const s=source.replaceAll('\r\n','\n'),e=edits[file];if(!e)return s;
+function restore(source,file){source=require('./without-analysis-diagnostics.cjs')(source,file);const s=source.replaceAll('\r\n','\n'),e=edits[file];if(!e)return s;
  const digest=hash(s);if(digest===e.baseline)return s;
  if(digest!==e.current){if(s.includes(e.marker))assert.fail('exact quote data integrity boundary (exact detail preservation boundary): '+file);return s;}
  if(e.baseline===null)return '';
  const previous=execFileSync('git',['show',base+':'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
  assert.equal(hash(previous),e.baseline);return previous;}
-restore.files=Object.keys(edits);
-restore.assertAll=()=>{for(const [file,e]of Object.entries(edits))assert.equal(hash(fs.readFileSync(file,'utf8').replaceAll('\r\n','\n')),e.current,'exact quote data integrity boundary: '+file);};
+restore.files=[...new Set([...Object.keys(edits),...require('./without-analysis-diagnostics.cjs').files])];
+restore.assertAll=()=>{const inverse=require('./without-analysis-diagnostics.cjs');inverse.assertAll();for(const [file,e]of Object.entries(edits))assert.equal(hash(inverse(fs.readFileSync(file,'utf8'),file)),e.current,'exact quote data integrity boundary: '+file);};
 module.exports=restore;
 restore.protectedDiff=(base,paths)=>{restore.assertAll();return execFileSync('git',['diff',base,'--',...paths,
   ...restore.files.map(file=>':!'+file)],{encoding:'utf8',windowsHide:true});};

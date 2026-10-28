@@ -2072,7 +2072,7 @@ const extractGeminiText =
 
     return parts
       .map((part) =>
-        typeof part?.text ===
+        part?.thought !== true && typeof part?.text ===
           'string'
           ? part.text
           : ''
@@ -2120,6 +2120,23 @@ const parseGeminiJson =
 // GEMINI SINGLE MODEL CALL
 // ========================================
 
+// Explanation only: keep the existing token, timeout and call limits. Explicitly
+// lower reasoning only for model IDs with documented thinking-level support.
+const geminiThinkingConfig = model => {
+  if (model === 'gemini-3.8-flash') return { thinkingConfig: { thinkingLevel: 'LOW', includeThoughts: false } };
+  if (['gemini-3.6-flash', 'gemini-3.5-flash-lite'].includes(model))
+    return { thinkingConfig: { thinkingLevel: 'MINIMAL', includeThoughts: false } };
+  return {};
+};
+const geminiFailureReason = error => {
+  const allowed = ['TIMEOUT','SERVICE_BUSY','RATE_LIMITED','OUTPUT_LIMIT','INVALID_RESPONSE','CONTENT_BLOCKED','REQUEST_REJECTED','NETWORK_ERROR'];
+  if (allowed.includes(error?.reason)) return error.reason;
+  if (error?.status === 504 || error?.status === 408) return 'TIMEOUT';
+  if (error?.status === 429) return 'RATE_LIMITED';
+  if (error?.status >= 500) return 'SERVICE_BUSY';
+  if (error?.status >= 400) return 'REQUEST_REJECTED';
+  return 'NETWORK_ERROR';
+};
 const callGeminiModelOnce =
   async ({
     model,
@@ -2179,7 +2196,8 @@ const callGeminiModelOnce =
                     1600,
 
                   responseMimeType:
-                    'application/json'
+                    'application/json',
+                  ...geminiThinkingConfig(model)
                 }
               })
           }
@@ -2217,6 +2235,7 @@ const callGeminiModelOnce =
           new Error(
             `Gemini returned non-JSON HTTP response for ${model}`
           );
+        error.reason = 'INVALID_RESPONSE';
 
         error.status =
           502;
@@ -2227,6 +2246,16 @@ const callGeminiModelOnce =
         throw error;
       }
 
+      // A truncated or blocked candidate must never be treated as a complete
+      // explanation, even if an early JSON object happens to parse.
+      const finish = payload?.candidates?.[0]?.finishReason;
+      if (finish && finish !== 'STOP') {
+        const error = new Error('Gemini explanation did not complete');
+        error.status = 502;
+        error.reason = ['MAX_TOKENS','CONTINUATION'].includes(finish) ? 'OUTPUT_LIMIT' :
+          ['SAFETY','RECITATION','BLOCKLIST','PROHIBITED_CONTENT','SPII'].includes(finish) ? 'CONTENT_BLOCKED' : 'INVALID_RESPONSE';
+        throw error;
+      }
       const text =
         extractGeminiText(
           payload
@@ -2237,11 +2266,13 @@ const callGeminiModelOnce =
           text
         );
 
-      if (!parsed) {
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+          !((typeof parsed.summary === 'string' && parsed.summary.trim()) || Array.isArray(parsed.recommendations))) {
         const error =
           new Error(
             `Gemini returned invalid analysis JSON for ${model}`
           );
+        error.reason = 'INVALID_RESPONSE';
 
         error.status =
           502;
@@ -2263,6 +2294,7 @@ const callGeminiModelOnce =
             `Gemini request timed out after ${GEMINI_REQUEST_TIMEOUT_MS}ms for ${model}`
           );
 
+        timeoutError.reason = 'TIMEOUT';
         timeoutError.status =
           504;
 
@@ -2363,6 +2395,7 @@ const callGeminiPromptWithRetry =
           errors.push({
             model,
             attempt,
+            reason: geminiFailureReason(error),
 
             status:
               error.status ||
@@ -2371,7 +2404,7 @@ const callGeminiPromptWithRetry =
 
           console.warn(
             `[K-Stock AI] Gemini failed model=${model} attempt=${attempt}:`,
-            { status: error.status || null }
+            { status: error.status || null, reason: geminiFailureReason(error) }
           );
 
           const shouldRetrySameModel =
@@ -2411,6 +2444,7 @@ const callGeminiPromptWithRetry =
       );
 
     finalError.code = 'GEMINI_ALL_MODELS_FAILED';
+    finalError.failureReasons = [...new Set(errors.map(error => error.reason))];
     finalError.details =
       errors;
 
@@ -2479,7 +2513,7 @@ const buildGeminiPrompt =
 7. 뉴스 분석은 반드시 suppliedNews 배열에 포함된 기사만 사용한다.
 8. 기사에 없는 사실을 추론해서 확정적으로 말하지 않는다.
 9. 투자 수익을 보장하는 표현을 사용하지 않는다.
-10. 출력은 반드시 JSON만 반환한다.
+10. 출력은 반드시 JSON만 반환한다. 각 설명은 1~2문장으로 짧게 작성하고 요인·기사 근거 목록은 각각 최대 3개로 제한한다.
 
 개별 분석의 최종 판정은 상세 ENTRY_GATE 전략의 finalAssessment이다. 추천 SCREENING 결과로 대체하지 마라. 상태와 가격을 재결정하지 말고 전달된 상세 전략을 설명만 하라.
 분석 대상 실제 데이터:
@@ -3183,7 +3217,9 @@ app.get(
       );
 
       if (error?.code === 'GEMINI_ALL_MODELS_FAILED') {
-        return res.status(503).json({ error: error.code, message: GEMINI_UNAVAILABLE_MESSAGE });
+        return res.status(503).json({ error: error.code, message: GEMINI_UNAVAILABLE_MESSAGE,
+          failureReasons: Array.isArray(error.failureReasons) ? error.failureReasons.filter(reason =>
+            ['TIMEOUT','SERVICE_BUSY','RATE_LIMITED','OUTPUT_LIMIT','INVALID_RESPONSE','CONTENT_BLOCKED','REQUEST_REJECTED','NETWORK_ERROR'].includes(reason)).slice(0,8) : undefined });
       }
 
       return res

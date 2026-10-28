@@ -149,7 +149,7 @@ test('TEST_ONLY AI error leaves quote, news, strategy and holder intact',async()
   const h=harness({ai:async()=>{throw Error('TEST_ONLY_AI_FAILED');}});await h.select('005930');
   const before=['quoteData','newsList','strategyData'].map(h.state);
   await h.button().props.onClick();
-  assert.equal(h.state('aiError'),'TEST_ONLY_AI_FAILED');assert.equal(h.state('aiAnalysis'),null);
+  assert.equal(h.state('aiError').message,'TEST_ONLY_AI_FAILED');assert.equal(h.state('aiAnalysis'),null);
   assert.deepEqual(['quoteData','newsList','strategyData'].map(h.state),before);
   assert.equal(h.calls.length,4);
 });
@@ -183,7 +183,8 @@ test('TEST_ONLY snapshot expiry shows the short title and reread instruction wit
   const h=harness({aiStatus:410,ai:async()=>({error:'DETAIL_NEWS_SNAPSHOT_UNAVAILABLE',
     message:'상세 뉴스 묶음이 만료되었거나 없습니다. 상세 자료를 다시 조회한 뒤 AI 해설을 요청하세요. 자동 재조회하지 않습니다.'})});
   await h.select('005930');const before=h.state('strategyData');await h.button().props.onClick();
-  assert.equal(h.state('aiError'),'뉴스 정보가 만료되었습니다.');
+  assert.equal(h.state('aiError').message,'뉴스 정보가 만료되었습니다.');
+  assert.equal(h.state('aiError').code,'DETAIL_NEWS_SNAPSHOT_UNAVAILABLE');
   const tree=h.render();
   assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='뉴스 정보가 만료되었습니다.'));
   assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='종목을 다시 조회한 뒤 AI 해설을 요청해주세요.'));
@@ -196,12 +197,21 @@ test('TEST_ONLY other AI failures retain their meaning instead of displaying exp
     [400,'DETAIL_NEWS_SYMBOL_MISMATCH','TEST_ONLY 종목·뉴스 묶음 불일치']]){
     const h=harness({aiStatus:status,ai:async()=>({error,message})});await h.select('005930');
     await h.button().props.onClick();const tree=h.render();
-    assert.equal(h.state('aiError'),message);
+    assert.equal(h.state('aiError').message,message);assert.equal(h.state('aiError').code,error);
     assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='AI 해설을 가져오지 못했습니다.'));
     assert.ok(visit(tree,n=>n.type==='p'&&n.props.children===message));
     assert.equal(visit(tree,n=>n.type==='p'&&n.props.children==='뉴스 정보가 만료되었습니다.'),undefined);
     assert.equal(h.calls.length,4);
   }
+});
+
+test('TEST_ONLY provider cause survives the actual manual AI state update, without modifying the detail or auto retrying',async()=>{
+  const h=harness({aiStatus:503,ai:async()=>({error:'GEMINI_ALL_MODELS_FAILED',message:'TEST_ONLY_PRIVATE_PROVIDER',failureReasons:['TIMEOUT','INVALID_RESPONSE']})});
+  await h.select('005930');const before=['quoteData','newsList','strategyData'].map(h.state);await h.button().props.onClick();
+  assert.deepEqual(Array.from(h.state('aiError').failureReasons),['TIMEOUT','INVALID_RESPONSE']);const tree=h.render();
+  assert.ok(visit(tree,n=>n.type==='p'&&typeof n.props.children==='string'&&n.props.children.includes('응답 시간이 초과되었습니다.')));
+  assert.equal(visit(tree,n=>n.type==='p'&&typeof n.props.children==='string'&&n.props.children.includes('TEST_ONLY_PRIVATE_PROVIDER')),undefined);
+  assert.deepEqual(['quoteData','newsList','strategyData'].map(h.state),before);assert.equal(h.calls.length,4);
 });
 
 test('TEST_ONLY presentation mapper recognizes expiry code, HTTP 410 and the specific legacy message only',async()=>{

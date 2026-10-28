@@ -97,6 +97,13 @@ test('TEST_ONLY original source dates/news and daily receipt survive repeated ca
  assert.equal(r.strategy.dataMetadata.daily.receivedAt,'2026-10-19T08:18:00Z');assert.equal(r.strategy.dataMetadata.supply.receivedAt,observedAt);assert.equal(r.strategy.detailReference.sourceBusinessDate,'2026-10-19');}
  assert.equal(JSON.stringify(f.base),before);
 });
+test('TEST_ONLY actual engine+mapper+cache reconciliation exposes valid original levels only in the dated reference UI',async()=>{
+  const f=await fixture(),before=JSON.stringify(f.base),r=f.reconcile();blocked(r);
+  const View=load(require.resolve('../frontend/src/PricePlanReference.jsx')).default;
+  const markup=renderToStaticMarkup(React.createElement(View,{strategy:r.strategy}));
+  for(const value of ['100원','120원','95원','2026-10-19','원래 상세 분석의 가격 기준','현재 판정 제외'])assert.ok(markup.includes(value),value);
+  assert.equal(r.strategy.entryPrice,null);assert.equal(JSON.stringify(f.base),before);
+});
 test('TEST_ONLY trading core stays identical while the reviewed quote reader and provenance presentation may change',()=>{
  const file='services/tradingStrategy.js';
  assert.equal(require('./helpers/without-missing-resistance.cjs')(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show','e70e194:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
