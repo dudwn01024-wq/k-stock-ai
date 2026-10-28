@@ -54,7 +54,11 @@ const server=http.createServer(async(req,res)=>{try{
   if(url.pathname==='/api/stock/detail-analysis')return send(res,200,{symbol,newsSnapshotId:'TEST_ONLY_'+symbol,newsReceivedAt:'2026-10-23T12:00:00Z',newsStatus:'READY',
     news:[{title:'TEST_ONLY 상세 뉴스'}],strategy:{currentPrice:100,entryPrice:null,takeProfitPrice:null,stopLossPrice:null,
       finalAssessment:{status:'WAIT'},technicalAssessment:{conditions:{}},marketAssessment:{available:false,conditions:{}}},
-    chartAnalysis:{},marketContext:{volume:0},dataMetadata:{daily:metadata('2026-10-22','TEST_ONLY KIS')}});
+    priceBasis:symbol==='000660'?'KIS_DAILY_CLOSE_FALLBACK':'PROVIDER_QUOTE',
+    chartAnalysis:{},marketContext:{volume:0},dataMetadata:{
+      price:{...metadata(symbol==='000660'?'2026-10-22':'2026-10-23','TEST_ONLY KIS'),
+        priceBasis:symbol==='000660'?'KIS_DAILY_CLOSE_FALLBACK':'PROVIDER_QUOTE'},
+      daily:metadata('2026-10-22','TEST_ONLY KIS'),supply:metadata('2026-10-21','TEST_ONLY KIS 수급'),dateConsistency:'MISMATCH'}});
   if(url.pathname.startsWith('/api/')){counters.unexpected.push(url.pathname);return send(res,403,{error:'TEST_ONLY_UNEXPECTED_API'});}
   const asset=url.pathname.startsWith('/assets/');
   const file=asset?path.resolve(dist,'.'+url.pathname):path.join(dist,'spa-fallback.html');

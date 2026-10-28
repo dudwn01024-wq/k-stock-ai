@@ -19,6 +19,7 @@ function assertApprovedSource(file,source){
     'all type validation and classification logic remains outside the single reviewed record edit');
 }
 function protectedDiff(base,paths){
+  const quoteBoundary=require('./without-quote-snapshot.cjs');quoteBoundary.assertAll();
   assert.equal(execFileSync('git',['diff',baseline,base,'--',...Object.keys(approved)],{encoding:'utf8'}),'',
     'historical base has the same universe implementation as the approved starting main');
   for(const file of Object.keys(approved))assertApprovedSource(file,fs.readFileSync(file,'utf8'));
@@ -26,7 +27,7 @@ function protectedDiff(base,paths){
   const kisFiles=require('./kis-intraday-boundary-hashes.cjs'),stripKis=require('./without-kis-intraday.cjs');
   for(const [file,digest]of Object.entries(kisFiles))assert.equal(createHash('sha256').update(require('./without-universe-recurrence.cjs')(fs.readFileSync(file,'utf8'),file).replaceAll('\r\n','\n')).digest('hex'),digest,'exact manual KIS reference boundary: '+file);
   for(const [file,digest]of Object.entries(privateFiles))assert.equal(createHash('sha256').update(stripKis(fs.readFileSync(file,'utf8'),file)).digest('hex'),digest,'exact private access boundary: '+file);
-  return execFileSync('git',['diff',base,'--',...paths,...[...Object.keys(approved),...Object.keys(privateFiles),...Object.keys(kisFiles)].map(file=>':!'+file)],{encoding:'utf8'});
+  return execFileSync('git',['diff',base,'--',...paths,...[...Object.keys(approved),...Object.keys(privateFiles),...Object.keys(kisFiles),...quoteBoundary.files,...require('./without-quote-data-integrity.cjs').files].map(file=>':!'+file)],{encoding:'utf8'});
 }
 module.exports=protectedDiff;
 module.exports.assertApprovedSource=assertApprovedSource;

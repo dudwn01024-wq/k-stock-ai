@@ -13,6 +13,18 @@ function loader(react=React){const cache=new Map();function load(file){
 const load=loader(),Provenance=load(require.resolve('../frontend/src/QuoteProvenance.jsx')).default;
 const m=patch=>({source:'TEST_ONLY',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:'2026-10-23T12:00:00Z',sameResponse:true,...patch});
 const render=q=>renderToStaticMarkup(React.createElement(Provenance,{quote:q}));
+test('TEST_ONLY fallback analysis price and actual supply source/day are visible independently of the quote',()=>{
+  const analysis={priceBasis:'KIS_DAILY_CLOSE_FALLBACK',dataMetadata:{
+    price:m({source:'TEST_ONLY KIS daily',sourceBusinessDate:'2026-10-22'}),daily:m({sourceBusinessDate:'2026-10-22'}),
+    supply:m({source:'KIS_DAILY_INVESTOR',sourceBusinessDate:'2026-10-23'})}};
+  const html=renderToStaticMarkup(React.createElement(Provenance,{quote:{},analysis}));
+  assert.match(html,/role="alert"/);assert.match(html,/일봉 종가 대체값/);assert.match(html,/현재가 또는 실시간 시세로 해석하지/);
+  assert.match(html,/상세 분석에 사용한 수급/);assert.match(html,/KIS_DAILY_INVESTOR/);
+  assert.match(html,/거래일 2026-10-22/);assert.match(html,/거래일 2026-10-23/);
+});
+test('TEST_ONLY timestamp-derived KST date exposes its calendar-day basis instead of claiming confirmed session freshness',()=>{
+  assert.match(render({dataMetadata:{price:m({dateBasis:'SOURCE_TIMESTAMP_KST_CALENDAR_DATE'})}}),/한국 달력일\(거래소 영업일 별도 확인\)/);
+});
 test('TEST_ONLY visible provenance separates lookup, trade date, source time and session',()=>{
   const q={dataMetadata:{price:m({sourceTimestamp:'2026-10-23T20:00:00+09:00',session:'afterMarket'}),
     quoteMetrics:m({sourceBusinessDate:'2026-10-22',amountText:'20만',amountPrecision:'PROVIDER_ABBREVIATED'})}};

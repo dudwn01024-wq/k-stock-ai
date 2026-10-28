@@ -100,8 +100,8 @@ test('TEST_ONLY original source dates/news and daily receipt survive repeated ca
 test('TEST_ONLY trading core stays identical while the reviewed quote reader and provenance presentation may change',()=>{
  const file='services/tradingStrategy.js';
  assert.equal(require('./helpers/without-missing-resistance.cjs')(fs.readFileSync(file,'utf8'),file),execFileSync('git',['show','e70e194:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
- assert.equal(execFileSync('git',['diff','e70e194','--','server.js','services','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',':!services/tradingStrategy.js',':!services/naverMarketData.js',':!services/naverQuoteSnapshot.js'],{encoding:'utf8',windowsHide:true}),'');
- const app=fs.readFileSync('frontend/src/App.jsx','utf8').replaceAll('\r\n','\n');
+ assert.equal(require('./helpers/without-quote-data-integrity.cjs').protectedDiff('e70e194',['server.js','services','package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',':!services/tradingStrategy.js',':!services/naverMarketData.js',':!services/naverQuoteSnapshot.js']),'');
+ const app=require('./helpers/without-quote-data-integrity.cjs')(fs.readFileSync('frontend/src/App.jsx','utf8'),'frontend/src/App.jsx');
  const previous=execFileSync('git',['show','e70e194:frontend/src/App.jsx'],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
  for(const [start,end]of [['  mapStockStrategy(symbol,payload) {','  unlockHoldingGuidance('],
    ['  const loadRealStockData =','  const requestAIAnalysis ='],['  const requestAIAnalysis =','  const initialDetailSymbol='],

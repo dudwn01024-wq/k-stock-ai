@@ -35,5 +35,5 @@ const edits={
     ]
   }
 };
-module.exports=(source,file)=>{let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;const hash=x=>createHash('sha256').update(x).digest('hex'),digest=hash(value);if(digest===edit.baseline)return value;
+module.exports=(source,file)=>{source=require('./without-quote-data-integrity.cjs')(source,file);let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;const hash=x=>createHash('sha256').update(x).digest('hex'),digest=hash(value);if(digest===edit.baseline)return value;
 if(digest!==edit.current){if(edit.chunks.some(([from])=>value.includes(from)))assert.fail('exact detail preservation boundary: '+file);return value;}for(const[from,to]of[...edit.chunks].reverse()){assert.ok(value.includes(from));value=value.replace(from,to);}assert.equal(hash(value),edit.baseline);return value;};

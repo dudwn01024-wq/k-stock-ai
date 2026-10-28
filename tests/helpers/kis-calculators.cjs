@@ -9,7 +9,7 @@ module.exports=()=>{
   let assessment=null;const requests=[];
   const missing=()=>{const a=assessIntradaySupply({symbol:'005930',now:Date.parse('2026-10-15T10:01:00+09:00'),calendarState:'STANDARD_OPEN',scoreEnabled:true});return {...a,metadata:supplyMetadata(a)};};
   const prices=()=>Array.from({length:21},(_,i)=>({bizdate:new Date(Date.UTC(2026,9,15-i)).toISOString().slice(0,10),closePrice:i===0?100:99,highPrice:120,lowPrice:90,volume:i===0?200:100}));
-  const context={module:{exports:{}},dataFreshness,dateConsistency,sourceDate,isIntradayVolumePending,assessRecommendationVolume,
+  const context={withDataMetadata:require('../../services/dataFreshness').withDataMetadata,module:{exports:{}},dataFreshness,dateConsistency,sourceDate,isIntradayVolumePending,assessRecommendationVolume,
     NAVER_HEADERS:{},scheduledSupply:{resolve:()=>assessment??missing()},Date,console,
     parseNumber:value=>value===null||value===undefined||value===''?null:Number(value),round2:value=>Number.isFinite(value)?Number(value.toFixed(2)):null,
     average:nums=>Math.round(nums.reduce((a,b)=>a+b,0)/nums.length),

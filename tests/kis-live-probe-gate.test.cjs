@@ -1,7 +1,8 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {createFakeProbeExecution}=require('../services/kisAccountProbe');
+const {createFakeProbeExecution}=offlineKis('kisAccountProbe');
 const config=()=>({environment:'KIS_LIVE',KIS_ACCOUNT_READ_ENABLED:'true',KIS_ACCOUNT_PROBE_ENABLED:'true',
   KIS_LIVE_ACCOUNT_READ_ENABLED:'true',KIS_LIVE_ACCOUNT_PROBE_ENABLED:'true',
   KIS_LIVE_BASE_URL:'https://openapi.koreainvestment.com:9443',KIS_LIVE_APP_KEY:'DUMMY_LIVE_KEY',
@@ -69,3 +70,5 @@ test('shared scope cannot reset budget by switching environment',async()=>{
     account:{environment:'KIS_VTS',cano:'00000000',productCode:'00'},timeoutMs:200});
   assert.equal(r.errorCode,'PROBE_BUDGET_EXHAUSTED');assert.equal(f.calls.length,2);
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

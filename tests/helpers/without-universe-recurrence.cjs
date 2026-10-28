@@ -72,5 +72,5 @@ const edits={
     ]
   }
 };
-module.exports=(source,file)=>{source=require('./without-missing-resistance.cjs')(source,file);source=require('./without-detail-preservation.cjs')(source,file);source=require('./without-universe-excluded-overlap.cjs')(source,file);let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;const hash=x=>createHash('sha256').update(x).digest('hex'),digest=hash(value);if(digest===edit.baseline)return value;
+module.exports=(source,file)=>{source=require('./without-quote-snapshot.cjs')(source,file);source=require('./without-missing-resistance.cjs')(source,file);source=require('./without-detail-preservation.cjs')(source,file);source=require('./without-universe-excluded-overlap.cjs')(source,file);let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;const hash=x=>createHash('sha256').update(x).digest('hex'),digest=hash(value);if(digest===edit.baseline)return value;
 if(digest!==edit.current){if(edit.chunks.some(([from])=>value.includes(from)))assert.fail('exact universe recurrence boundary: '+file);return value;}for(const[from,to]of[...edit.chunks].reverse()){assert.ok(value.includes(from),'exact recurrence inverse: '+file);value=value.replace(from,to);}assert.equal(hash(value),edit.baseline,'exact pre-recurrence source: '+file);return value;};

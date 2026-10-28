@@ -1,8 +1,9 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {parseMockPages}=require('../services/kisAccountReadOnly');
-const {mapUnfilledDisplaySnapshot,createMockUnfilledTransport}=require('../services/kisUnfilledReadOnly');
+const {parseMockPages}=offlineKis('kisAccountReadOnly');
+const {mapUnfilledDisplaySnapshot,createMockUnfilledTransport}=offlineKis('kisUnfilledReadOnly');
 const row=()=>({pdno:'005930',sll_buy_dvsn_cd:'02',rmn_qty:'2',ord_unpr:'100',ord_dvsn_cd:'00'});
 const page=(rows=[row()],code='D',environment='KIS_LIVE')=>({operation:'UNFILLED_ORDERS',environment,
   headers:{tr_cont:code},body:{rt_cd:'0',output1:rows,ctx_area_fk100:'DUMMY_CURSOR',ctx_area_nk100:'DUMMY_CURSOR'}});
@@ -112,3 +113,5 @@ test('module graph has no network, env, Risk, PAPER, storage or order capability
   assert.deepEqual(Object.keys(modules.kisUnfilledReadOnly),['mapUnfilledDisplaySnapshot','createMockUnfilledTransport','isUnfilledDisplayCandidate']);
   assert.equal(modules.kisUnfilledReadOnly.mapUnfilledDisplaySnapshot({environment:'KIS_LIVE'}).riskReady,false);assert.equal(forbiddenCalls,0);
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

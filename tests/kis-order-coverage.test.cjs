@@ -1,8 +1,9 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const test=require('node:test'),assert=require('node:assert/strict');
-const {parseMockOrderQuery,composeOrderCoverage}=require('../services/kisOrderCoverage');
-const {parseMockPages}=require('../services/kisAccountReadOnly');
-const {mapUnfilledDisplaySnapshot}=require('../services/kisUnfilledReadOnly');
+const {parseMockOrderQuery,composeOrderCoverage}=offlineKis('kisOrderCoverage');
+const {parseMockPages}=offlineKis('kisAccountReadOnly');
+const {mapUnfilledDisplaySnapshot}=offlineKis('kisUnfilledReadOnly');
 const environment='KIS_LIVE';
 const raw={pdno:'005930',sll_buy_dvsn_cd:'02',odno:'MOCK01',psbl_qty:'0',rsvn_ord_seq:'MOCK01',ord_rsvn_qty:'1',ord_rsvn_unpr:'100'};
 const page=(operation,rows=[],state='D')=>({operation,environment,provenance:'MOCK_FIXTURE',headers:{tr_cont:state},body:{rt_cd:'0',output:rows,ctx_area_fk100:'mock',ctx_area_nk100:'cursor',ctx_area_fk200:'mock',ctx_area_nk200:'cursor'}});
@@ -32,3 +33,5 @@ test('explicit query window calendar validation',()=>assert.equal(query('RESERVA
 test('allowlist projection drops sensitive extras and cursors',()=>{const r=compose({reservationCandidate:query('RESERVATION',[{...raw,CANO:'DUMMY_SECRET',appkey:'DUMMY_SECRET',rawResponse:'DUMMY_SECRET',ctac_tlno:'DUMMY_SECRET'}])});const s=JSON.stringify(r);assert.ok(!s.includes('DUMMY_SECRET'));assert.ok(!s.includes('cursor'));assert.ok(!s.includes('ctx_area'));});
 test('reservation metadata remains optional candidates, no fill id',()=>{const q=query('RESERVATION',[{...raw,rsvn_ord_rcit_dt:'20260922',rsvn_ord_rcit_tmd:'123456',rsvn_end_dt:'20260923',prcs_rslt:'01'}]);assert.equal(q.rows[0].receiptDate,'20260922');assert.equal(q.rows[0].receiptTime,'123456');assert.equal(q.rows[0].eventId,undefined);});
 test('module import graph has no network or ledger or paper connection',()=>{const fs=require('node:fs');const text=fs.readFileSync(require.resolve('../services/kisOrderCoverage'),'utf8');assert.ok(!/fetch\(|axios|https?\.request|liveRiskLedger|riskManager|paperTrading|process\.env/.test(text));});
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

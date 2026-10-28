@@ -92,10 +92,10 @@ test('TEST_ONLY source stays byte-identical except exact reviewed detail-display
   const referenceFiles=['frontend/src/utils/detailSupply.js','frontend/src/CurrentAnalysisSummary.jsx','services/tradingStrategy.js'];
   for(const file of referenceFiles)assert.equal(require(file==='services/tradingStrategy.js'?'./helpers/without-missing-resistance.cjs':'./helpers/without-detail-preservation.cjs')(require('node:fs').readFileSync(file,'utf8'),file),
     execFileSync('git',['show','4742ac2:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
-  assert.equal(execFileSync('git',['diff','4742ac2','--','server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js',
+  assert.equal(require('./helpers/without-quote-snapshot.cjs').protectedDiff('4742ac2',['server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js',
     'services/tradingStrategy.js','services/chartAnalysis.js','services/recommendationFastScreen.js','services/recommendationVolumePolicy.js',
     'services/stockDetailNews.js','services/recommendationHistory.js','services/expandedRecommendationRuns.js','frontend/src',
-    'package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',...referenceFiles.map(x=>':!'+x)],{encoding:'utf8',windowsHide:true}),'');
+    'package.json','package-lock.json','frontend/package.json','frontend/package-lock.json',...referenceFiles.map(x=>':!'+x)]),'');
 });
 test('TEST_ONLY accepted excluded overlap completes fast500/deep40 without Gemini and preserves proof in run snapshot',async()=>{
   const f=fixture(),calls={fast:0,deep:0,ai:0},runs=createExpandedRecommendationRuns({loadUniverse:f.load,logFailure:()=>{},rank:x=>x,

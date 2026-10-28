@@ -1,7 +1,8 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {createFakeUnfilledProbeExecution}=require('../services/kisUnfilledProbe');
+const {createFakeUnfilledProbeExecution}=offlineKis('kisUnfilledProbe');
 const config=()=>({KIS_ACCOUNT_READ_ENABLED:'true',KIS_ACCOUNT_PROBE_ENABLED:'true',
   KIS_LIVE_UNFILLED_READ_ENABLED:'true',KIS_LIVE_UNFILLED_PROBE_ENABLED:'true',environment:'KIS_LIVE',
   KIS_LIVE_BASE_URL:'https://openapi.koreainvestment.com:9443',KIS_LIVE_APP_KEY:'DUMMY_KEY',
@@ -83,8 +84,8 @@ test('invalid mapped values are not a complete probe',async()=>{
   const r=await f.run();assert.equal(r.mappingValid,false);assert.equal(r.orderCount,null);assert.equal(r.probeCompleted,false);
 });
 test('network decoder preserves provenance and exposure rules without HTTP',()=>{
-  const {parseNetworkUnfilled}=require('../services/kisAccountReadOnly');
-  const {mapUnfilledDisplaySnapshot}=require('../services/kisUnfilledReadOnly');
+  const {parseNetworkUnfilled}=offlineKis('kisAccountReadOnly');
+  const {mapUnfilledDisplaySnapshot}=offlineKis('kisUnfilledReadOnly');
   for(const [change,amount] of [[{},200],[{ord_unpr:'0'},null],[{ord_dvsn_cd:'01'},null]]){
     const parsed=parseNetworkUnfilled('KIS_LIVE',{environment:'KIS_LIVE',operation:'UNFILLED_ORDERS',headers:{tr_cont:'D'},body:{rt_cd:'0',output1:[{...row(),...change}]}});
     const r=mapUnfilledDisplaySnapshot({environment:'KIS_LIVE',unfilledOrders:parsed});
@@ -96,9 +97,11 @@ test('production module budget shared across runner recreation; fake HTTP only i
   const fs=require('node:fs'),vm=require('node:vm');let calls=0;
   const module={exports:{}};const dependencies=['./dataFreshness','./kisAccountReadOnly','./kisUnfilledReadOnly'];
   vm.runInNewContext(fs.readFileSync(require.resolve('../services/kisUnfilledProbe'),'utf8'),{module,
-    require:id=>{assert.ok(dependencies.includes(id));return require('../services/'+id.slice(2));},
+    require:id=>{assert.ok(dependencies.includes(id));return offlineKis(id.slice(2));},
     fetch:async()=>{calls++;return response(calls===1?{access_token:'DUMMY_TOKEN'}:{rt_cd:'0',output1:[]});},
     URL,AbortController,setTimeout,clearTimeout});
   assert.equal(calls,0);const api=module.exports;assert.deepEqual(Object.keys(api),['createUnfilledProbeRunner','createFakeUnfilledProbeExecution']);
   await api.createUnfilledProbeRunner().runUnfilled(config());await api.createUnfilledProbeRunner().runUnfilled(config());assert.equal(calls,2);
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

@@ -44,7 +44,7 @@ test('TEST_ONLY local fix leaves protected source identical except the exact rev
     execFileSync('git',['show','137907b:'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n'));
   const paths=['server.js','services/kis*.js','services/krxStockSecurityType.js','services/naverKrStockItemCode.js','services/tradingStrategy.js','services/recommendationFastScreen.js',
     'services/recommendationVolumePolicy.js','services/stockDetailNews.js','services/recommendationHistory.js','services/expandedRecommendationRuns.js','package.json','package-lock.json','frontend/package-lock.json'];
-  assert.equal(execFileSync('git',['diff','137907b','--',...paths,':!'+file],{encoding:'utf8',windowsHide:true}),'');
+  assert.equal(require('./helpers/without-quote-data-integrity.cjs').protectedDiff('137907b',[...paths,':!'+file]),'');
 });
 for(const [field,value]of [['marketValueRaw','1302'],['localTradedAt','2026-10-16T14:04:30+09:00']])test('TEST_ONLY below-cutoff '+field+' refresh never changes selected data or price order',async()=>{
   const s=await fixture((r,a,m)=>{recurrence(r,a,m);if(a.market==='KOSDAQ'&&a.page===3)r.stocks[1][field]=value;}).load(),clean=await fixture().load();

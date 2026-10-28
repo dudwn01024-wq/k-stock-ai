@@ -224,7 +224,7 @@ const edits={
     ]
   }
 };
-module.exports=(source,file)=>{let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;
+module.exports=(source,file)=>{source=require('./without-quote-snapshot.cjs')(source,file);let value=source.replaceAll('\r\n','\n');const edit=edits[file];if(!edit)return value;
  const hash=x=>createHash('sha256').update(x).digest('hex'),digest=hash(value);if(digest===edit.baseline)return value;
  if(digest!==edit.current){if(edit.chunks.some(([from])=>value.includes(from)))assert.fail('exact autonomous KIS boundary: '+file);return value;}
  for(const [from,to]of [...edit.chunks].reverse()){assert.ok(value.includes(from),'exact autonomous KIS inverse: '+file);value=value.replace(from,to);}

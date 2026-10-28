@@ -1,5 +1,6 @@
 // Presentation/cache reconciliation only. No provider request or score calculation.
 import {supplyDirection} from './supplyDirection.js';
+import {withDataMetadata} from './dataMetadata.js';
 const number=value=>Number.isSafeInteger(value)?value:null;
 const ready=a=>a?.status==='READY'&&a.eligibleForSupplyScore===true&&
   number(a.foreignerNet)!==null&&number(a.institutionNet)!==null&&number(a.netSupplyTotal)!==null;
@@ -126,8 +127,8 @@ export function reconcileDetailSupply(base,view,mapStrategy){
       originalStatus:original.finalAssessment?.status??null,originalReason,missingInputs:missing},
     dataPoints:base.strategy?.dataPoints,newsSnapshotId:base.strategy?.newsSnapshotId,newsReceivedAt:base.strategy?.newsReceivedAt,
     newsStatus:base.strategy?.newsStatus,supplyAssessment:a,supplyPresentation:presentation,
-    dataMetadata:{...base.strategy?.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'}});
+    dataMetadata:withDataMetadata(base.strategy?.dataMetadata,{supply:metadata})});
   return {strategy,quote:{...base.quote,...values,supplyDate:currentReady?a.sourceTradeDate??null:null,supplyAssessment:a,supplyPresentation:presentation,
     naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
-    dataMetadata:{...base.quote.dataMetadata,supply:metadata,dateConsistency:'UNKNOWN'}}};
+    dataMetadata:withDataMetadata(base.quote.dataMetadata,{supply:metadata})}};
 }

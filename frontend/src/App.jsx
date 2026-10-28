@@ -229,6 +229,7 @@ class RealStockBackendService {
     decisionRole: strategy?.decisionRole ?? null,
     supplyAssessment: market?.supplyAssessment ?? null,
     dataMetadata: payload?.dataMetadata ?? null,
+    priceBasis: payload?.priceBasis ?? strategy?.priceBasis ?? null,
     // 기존 App.jsx와 호환
     symbol,
 
@@ -1328,7 +1329,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                   </div>
                 </div>
               </div>
-              <QuoteProvenance quote={quoteData}/>
+              <QuoteProvenance quote={quoteData} analysis={strategyData}/>
                 <p>{quoteData?.dataMetadata?.dateConsistency === 'MISMATCH' || strategyData?.dataMetadata?.dateConsistency === 'MISMATCH'
                   ? '데이터 기준일 불일치: 서로 다른 날짜의 값이 포함되어 있습니다.' : '항목별 기준일과 최신성은 별도 확인이 필요합니다.'}</p>
               <details className="detail-source-info"><summary>데이터 제공처 · 기준일 확인</summary><div className="text-xs text-slate-400 space-y-1">

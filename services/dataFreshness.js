@@ -30,4 +30,24 @@ function dateConsistency(items = []) {
   return new Set(dates.filter(Boolean)).size > 1 ? 'MISMATCH' :
     dates.length && dates.every(Boolean) ? 'SAME_DATE_FRESHNESS_UNKNOWN' : 'UNKNOWN';
 }
-module.exports = { dataFreshness, dateConsistency, sourceDate };
+// Only an explicitly zoned source timestamp can establish a KST calendar day.
+// This does not establish an exchange/session business date or freshness.
+function sourceKstDate(value) {
+  const timestamp=sourceTime(value);
+  if(!timestamp||!/(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp))return null;
+  const instant=Date.parse(timestamp.replace(' ','T'));
+  if(!Number.isFinite(instant))return null;
+  return sourceDate(new Date(instant+9*60*60*1000).toISOString().slice(0,10));
+}
+function withDataMetadata(metadata={},patch={}) {
+  const result={...metadata,...patch};
+  // Compare the actual inputs; an unknown third input cannot hide two known,
+  // conflicting dates. Never retain an old supply date after replacing values.
+  const inputs=[result.price??result.quote?.price,
+    result.quoteMetrics??result.quote?.quoteMetrics??result.volume,
+    result.supply??result.quote?.supply];
+  for(const key of ['daily','volume','tradingValue','ohlc'])if(result[key])inputs.push(result[key]);
+  result.dateConsistency=dateConsistency(inputs);
+  return result;
+}
+module.exports = { dataFreshness, dateConsistency, sourceDate, sourceKstDate, withDataMetadata };

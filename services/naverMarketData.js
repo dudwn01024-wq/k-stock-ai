@@ -94,13 +94,7 @@ const getLatestDealTrend = (
   }
 
   const getDateValue =
-    (item) =>
-      item.localTradedAt ||
-      item.tradeDate ||
-      item.bizdate ||
-      item.date ||
-      item.localDate ||
-      null;
+    (item) => snapshotMetadata(item,'Naver integration',null).sourceBusinessDate;
 
   const withDate =
     list.filter((item) =>
@@ -311,9 +305,8 @@ const fetchStockQuoteData = async function(symbol,{includeSupply=true}={}){
   if(latestTrend){
     foreignerNet=parseNumber(latestTrend.foreignerPureBuyQuant);
     institutionNet=parseNumber(latestTrend.organPureBuyQuant);
-    supplyDate=latestTrend.localTradedAt??latestTrend.tradeDate??latestTrend.bizdate??latestTrend.date??latestTrend.localDate??null;
-    supplyMetadata=dataFreshness({source:'Naver integration',date:supplyDate,
-      timestamp:latestTrend.localTradedAt??null,receivedAt:integrationReceivedAt});
+    supplyMetadata=snapshotMetadata(latestTrend,'Naver integration',integrationReceivedAt);
+    supplyDate=supplyMetadata.sourceBusinessDate;
   }
   return {symbol,stockName:basicData.stockName||null,currentPrice:parseNumber(basicData.closePrice??basicData.nowPrice),
     priceChange:parseNumber(basicData.compareToPreviousClosePrice),changeRate:parseNumber(basicData.fluctuationsRatio),

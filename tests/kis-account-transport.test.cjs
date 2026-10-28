@@ -1,8 +1,9 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {createMockKisAuth} = require('../services/kisAuth');
-const {createMockAccountTransport:create} = require('../services/kisAccountTransport');
+const {createMockKisAuth} = offlineKis('kisAuth');
+const {createMockAccountTransport:create} = offlineKis('kisAccountTransport');
 const response = () => ({status:200,provenance:'MOCK_FIXTURE',environment:'KIS_LIVE',headers:{tr_cont:'D'},
   body:{rt_cd:'0',output1:[],output2:[{nass_amt:'100',dnca_tot_amt:'50'}]}});
 function setup(overrides = {}) {
@@ -119,3 +120,5 @@ test('imports and execution require no network, environment, logs or PAPER/Risk 
   const {config}=setup();const r=await modules.kisAccountTransport.createMockAccountTransport(config).query({operation:'BALANCE'});
   assert.equal(r.ok,true);assert.equal(forbiddenCalls,0);
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

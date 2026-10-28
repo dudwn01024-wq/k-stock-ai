@@ -1,5 +1,5 @@
 'use strict';
-const {dataFreshness}=require('./dataFreshness');
+const {dataFreshness,sourceDate,sourceKstDate}=require('./dataFreshness');
 
 // Naver totalInfos uses explicit Korean KRW units (e.g. "5조 5,936억").
 // Decode that published amount, never estimate it from price * volume.
@@ -21,8 +21,13 @@ function parseKrwAmount(value){
   return Number.isSafeInteger(n)&&n>=0?n:null;
 }
 function snapshotMetadata(data,source,receivedAt){
-  return {...dataFreshness({source,date:data?.bizdate??data?.localTradedAt??null,
+  const businessDate=data?.bizdate??data?.tradeDate??data?.date??data?.localDate;
+  const date=businessDate!=null?sourceDate(businessDate):sourceDate(data?.localTradedAt)??sourceKstDate(data?.localTradedAt);
+  const dateBasis=date===null?'UNCONFIRMED':businessDate!=null||sourceDate(data?.localTradedAt)?
+    'SOURCE_DATE_FIELD':'SOURCE_TIMESTAMP_KST_CALENDAR_DATE';
+  return {...dataFreshness({source,date,
     timestamp:data?.localTradedAt??null,receivedAt}),
+    dateBasis,dateTimeZone:dateBasis==='SOURCE_TIMESTAMP_KST_CALENDAR_DATE'?'Asia/Seoul':null,
     // KOSPI/KOSDAQ is a listing market, not proof of KRX-only trading.
     marketScope:'UNCONFIRMED',session:typeof data?.marketSessionType==='string'?data.marketSessionType:null,
     adjustmentStatus:'UNCONFIRMED'};

@@ -1,4 +1,5 @@
-const { dataFreshness, dateConsistency, sourceDate } = require('./services/dataFreshness');
+const { dataFreshness, dateConsistency, sourceDate, withDataMetadata } = require('./services/dataFreshness');
+const {selectAnalysisPrice,analysisMetadata}=require('./services/analysisProvenance');
 const {assessRecommendationVolume,isIntradayVolumePending}=require('./services/recommendationVolumePolicy');
 const express = require('express');
 const dotenv = require('dotenv');
@@ -1731,7 +1732,8 @@ const buildRecommendationResult =
           10
         ),
 
-      dataMetadata: {...quote.dataMetadata,supply:strategy.dataMetadata?.supply??scheduledSupply.resolve(stock.symbol).metadata,dateConsistency:'UNKNOWN'},
+      dataMetadata: withDataMetadata(quote.dataMetadata,{daily:strategy.dataMetadata?.price,
+        supply:strategy.dataMetadata?.supply??scheduledSupply.resolve(stock.symbol).metadata}),
       strategy: {
         decisionRole: 'SCREENING',
         currentPrice: strategy.currentPrice,
@@ -2840,18 +2842,11 @@ app.get(
       // 실제 수급
       // ==================================
 
-      const foreignerNet =
-        parseNumber(
-          quote
-            ?.foreignerNet
-        );
+      const currentSupply=scheduledSupply.resolve(symbol);
+      const foreignerNet = currentSupply?currentSupply.foreignerNet:parseNumber(quote?.foreignerNet);
 
 
-      const institutionNet =
-        parseNumber(
-          quote
-            ?.institutionNet
-        );
+      const institutionNet = currentSupply?currentSupply.institutionNet:parseNumber(quote?.institutionNet);
 
 
       const quoteCurrentPrice =
@@ -2861,16 +2856,9 @@ app.get(
         );
 
 
-      // 현재가는 실제 시세 우선
-      // 없으면 최신 KIS 종가
-      const currentPrice =
-        Number.isFinite(
-          quoteCurrentPrice
-        )
-          ? quoteCurrentPrice
-          : chartAnalysis
-              ?.latestClose ??
-            null;
+      const analysisPrice=selectAnalysisPrice(quote,latestRow);
+      const currentPrice=analysisPrice.currentPrice;
+      const dataMetadata=analysisMetadata(quote,latestRow,analysisPrice,currentSupply?currentSupply.metadata??null:undefined);
 
 
       // ==================================
@@ -2941,6 +2929,7 @@ app.get(
 
 
       // 측정값을 유지하고 엔진에서 필수 데이터 부족을 차단
+      if(currentSupply)rawMarketContext.supplyAssessment=currentSupply;
       const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
@@ -2960,6 +2949,8 @@ app.get(
             strategyMarketContext,
           sourceIntegrity: rows.latestSourceIntegrity
         });
+      strategy.priceBasis=analysisPrice.priceBasis;
+      strategy.dataMetadata=dataMetadata;
 
 
       // ==================================
@@ -3004,8 +2995,9 @@ app.get(
 
 
       const strategyForAI = {
-        dataMetadata: { quote: quote.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null },
         ...strategy,
+        priceBasis:analysisPrice.priceBasis,
+        dataMetadata,
 
         // 기존 AI prompt 호환값
         signal:
@@ -3136,13 +3128,14 @@ app.get(
         quote,
 
         chartAnalysis,
-        dataMetadata: { quote: quote?.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null,
-          dateConsistency: dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata]) },
+        priceBasis:analysisPrice.priceBasis,
+        dataMetadata,
 
         marketContext: {
           complete:
-            marketContextComplete,
+            marketContextComplete&&(!currentSupply||currentSupply.eligibleForSupplyScore===true),
 
+          supplyDate:currentSupply?currentSupply.sourceTradeDate??null:quote?.supplyDate??null,
           ...rawMarketContext
         },
 
@@ -4043,8 +4036,8 @@ app.get(
       return res.json({
         ...quote,
         ...(currentSupply?{naverDailySupply:{foreignerNet:quote.foreignerNet,institutionNet:quote.institutionNet,supplyDate:quote.supplyDate},
-          foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:null,
-          supplyAssessment:currentSupply,dataMetadata:{...quote.dataMetadata,supply:currentSupply.metadata,dateConsistency:'UNKNOWN'}}: {}),
+          foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:currentSupply.sourceTradeDate??null,
+          supplyAssessment:currentSupply,dataMetadata:withDataMetadata(quote.dataMetadata,{supply:currentSupply.metadata})}: {}),
 
         source:
           'Naver stock data',
@@ -5009,15 +5002,8 @@ const recentLow20 =
       // 2순위 = KIS 최신 종가
       // ==================================
 
-      const currentPrice =
-        Number.isFinite(
-          quoteCurrentPrice
-        )
-          ? quoteCurrentPrice
-
-          : chartAnalysis
-              ?.latestClose ??
-            null;
+      const analysisPrice=selectAnalysisPrice(quote,latestRow);
+      const currentPrice=analysisPrice.currentPrice;
 
 
       // ==================================
@@ -5100,6 +5086,9 @@ const recentLow20 =
       scheduledSupply.rememberDetail(symbol,{symbol,currentPrice,chartAnalysis,marketContext:rawMarketContext,sourceIntegrity:rows.latestSourceIntegrity});
       const currentSupply=scheduledSupply.resolve(symbol);
       if(currentSupply){rawMarketContext.foreignerNet=currentSupply.foreignerNet;rawMarketContext.institutionNet=currentSupply.institutionNet;rawMarketContext.supplyAssessment=currentSupply;}
+      const dataMetadata=analysisMetadata(quote,latestRow,analysisPrice,currentSupply?currentSupply.metadata??null:undefined);
+      const effectiveForeignerNet=currentSupply?currentSupply.foreignerNet:foreignerNet;
+      const effectiveInstitutionNet=currentSupply?currentSupply.institutionNet:institutionNet;
       const strategyMarketContext = rawMarketContext; // Preserve measured conditions; engine gates missing requirements.
 
 
@@ -5119,11 +5108,13 @@ const recentLow20 =
             strategyMarketContext,
           sourceIntegrity: rows.latestSourceIntegrity
         });
+      strategy.priceBasis=analysisPrice.priceBasis;
+      strategy.dataMetadata=dataMetadata;
 
 
       // Retain only server-calculated detail data for the private, no-fetch judgment.
       if(includeNewsSnapshot)holdingGuidanceAccess.rememberStrategy({symbol,snapshotId:newsResult.snapshot?.id,
-        strategy:{...strategy,currentPrice,dataMetadata:{dateConsistency:dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata])}}});
+        strategy:{...strategy,currentPrice,priceBasis:analysisPrice.priceBasis,dataMetadata}});
       // ==================================
       // RESULT
       // ==================================
@@ -5143,8 +5134,8 @@ const recentLow20 =
         dataPoints:
           rows.length,
 
-        dataMetadata: { quote: quote?.dataMetadata ?? null, daily: latestRow?.dataMetadata ?? null,
-          dateConsistency: dateConsistency([quote?.dataMetadata?.price, quote?.dataMetadata?.supply, latestRow?.dataMetadata]) },
+        priceBasis:analysisPrice.priceBasis,
+        dataMetadata,
         latestChartDate:
           chartAnalysis
             ?.latestDate ??
@@ -5159,7 +5150,9 @@ recentLow20,
           volumeAssessment,
 
           complete:
-            marketContextComplete&&(!currentSupply||currentSupply.eligibleForSupplyScore===true),
+            Number.isFinite(currentVolume)&&Number.isFinite(averageVolume20)&&
+            Number.isFinite(effectiveForeignerNet)&&Number.isFinite(effectiveInstitutionNet)&&
+            typeof hasCautionSignal==='boolean'&&(!currentSupply||currentSupply.eligibleForSupplyScore===true),
 
           volume:
             currentVolume,
@@ -5206,7 +5199,7 @@ recentLow20,
               newsResult?.ok ===
               true
           }
-          ,...(currentSupply?{foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:null,
+          ,...(currentSupply?{foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:currentSupply.sourceTradeDate??null,
             supplyAssessment:currentSupply,naverDailySupply:{foreignerNet,institutionNet,supplyDate:quote?.supplyDate??null}}: {})
         },
 

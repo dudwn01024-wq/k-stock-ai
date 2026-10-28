@@ -43,8 +43,8 @@ async function setup(t,options={}) {
 }
 test('observation -> existing KIS/Naver functions -> shared budget -> fake HTTP -> saved record',async t=>{
   const {run,calls,dir,journal}=await setup(t,{missingQuote:true});const result=await run.observe('005930',{targetBusinessDate:'2026-05-10'});
-  assert.deepEqual(result.requests.counts,{kisDaily:2,naverQuote:4,naverNews:1,kisToken:1});assert.equal(calls.length,8);
-  assert.deepEqual(calls.map(c=>c.path.split('/').at(-1)),['tokenP','inquire-daily-itemchartprice','inquire-daily-itemchartprice','basic','price','realtime','integration','005930']);
+  assert.deepEqual(result.requests.counts,{kisDaily:2,naverQuote:2,naverNews:1,kisToken:1});assert.equal(calls.length,6);
+  assert.deepEqual(calls.map(c=>c.path.split('/').at(-1)),['tokenP','inquire-daily-itemchartprice','inquire-daily-itemchartprice','basic','integration','005930']);
   const r=result.record;assert.equal(r.testData,true);assert.equal(r.status,'HELD');assert.ok(r.reasonCodes.includes('DAILY_EOD_UNVERIFIED'));
   assert.equal(r.inputs.observed.currentPrice,229);assert.equal(r.inputs.observed.foreignerNet,0);assert.equal(r.inputs.derived.averageVolume20,1118.5);
   assert.equal(r.metadata.daily.sourceBusinessDate,'2026-05-10');assert.equal(r.metadata.daily.sourceTimestamp,null);
@@ -52,7 +52,7 @@ test('observation -> existing KIS/Naver functions -> shared budget -> fake HTTP 
   assert.equal(r.riskReady,false);assert.equal(r.ledgerInputReady,false);
   const file=path.join(dir,'test',r.id+'.json');assert.deepEqual(JSON.parse(await fs.readFile(file,'utf8')),r);
   assert.doesNotMatch(JSON.stringify(result)+await fs.readFile(journal,'utf8'),/INTEGRATION_TEST_(?:TOKEN|KEY|SECRET)/);
-  await assert.rejects(run.observe('005930',{targetBusinessDate:'2026-05-10'}),/OBSERVATION_ALREADY_USED/);assert.equal(calls.length,8);
+  await assert.rejects(run.observe('005930',{targetBusinessDate:'2026-05-10'}),/OBSERVATION_ALREADY_USED/);assert.equal(calls.length,6);
 });
 test('no unnecessary Naver fallback when required quote fields exist',async t=>{
   const {run,calls}=await setup(t);const result=await run.observe('005930',{targetBusinessDate:'2026-05-10'});
@@ -80,10 +80,20 @@ test('valid token already held by existing KIS reader is reused',async t=>{
   const {run,calls}=await setup(t,{reader});const result=await run.observe('005930',{targetBusinessDate:'2026-05-10'});
   assert.equal(result.requests.counts.kisToken,0);assert.equal(result.requests.counts.kisDaily,2);assert.equal(calls.length,5);
 });
-for(const pathName of ['/basic','/price','/integration','/005930'])test('Naver failure at '+pathName+' suppresses later fallbacks/news',async t=>{
+for(const pathName of ['/basic','/integration','/005930'])test('Naver failure at '+pathName+' suppresses later fallbacks/news',async t=>{
   const {run,calls}=await setup(t,{send:url=>url.hostname==='m.stock.naver.com'&&url.pathname.endsWith(pathName)?Promise.reject(Error('SECRET_FAILURE')):fakeResponse(url,{missingQuote:true})});
   const r=await run.observe('005930',{targetBusinessDate:'2026-05-10'});assert.equal(r.record.status,'HELD');assert.equal(r.requests.reason,'NETWORK_FAILED');
   assert.ok(calls.at(-1).path.endsWith(pathName));assert.doesNotMatch(JSON.stringify(r),/SECRET_FAILURE/);
+});
+test('missing basic metrics never query historical price or polling endpoints to fill a different snapshot',async t=>{
+  const {run,calls}=await setup(t,{send:url=>{
+    assert.ok(!url.pathname.endsWith('/price')&&url.hostname!=='polling.finance.naver.com','no cross-response metric fallback');
+    return fakeResponse(url,{missingQuote:true});
+  }});
+  const r=await run.observe('005930',{targetBusinessDate:'2026-05-10'});
+  assert.equal(r.requests.counts.naverQuote,2);assert.equal(calls.length,6);
+  assert.ok(calls.every(x=>!x.path.endsWith('/price')&&!x.path.endsWith('/realtime')));
+  assert.equal(r.record.inputs.observed.currentPrice,229);assert.equal(r.record.status,'HELD');
 });
 for(const base of ['https://example.onrender.com','https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/trading/order-cash'])
 test('existing KIS reader with forbidden base is blocked before HTTP: '+base,async t=>{
@@ -200,8 +210,8 @@ test('TEST DATA: existing readers -> raw evidence -> observation -> saved JSON -
   const {record:r}=await run.observe('005930',{targetBusinessDate:'2026-05-10'});
   const saved=JSON.parse(await fs.readFile(path.join(dir,'test',r.id+'.json'),'utf8'));
   assert.equal(saved.schemaVersion,'OBSERVATION_V2');assert.equal(saved.evidence.schemaVersion,'OBSERVATION_EVIDENCE_V1');
-  assert.equal(calls.length,8);assert.equal(saved.evidence.exchanges.length,7); // Never includes token response.
-  assert.equal(new Set(saved.evidence.exchanges.map(e=>e.requestId)).size,7);
+  assert.equal(calls.length,6);assert.equal(saved.evidence.exchanges.length,5); // Never includes token response or removed fallback requests.
+  assert.equal(new Set(saved.evidence.exchanges.map(e=>e.requestId)).size,5);
   const daily=saved.evidence.exchanges.find(e=>e.kind==='kisDaily');
   assert.equal(daily.request.params.FID_INPUT_ISCD,'005930');assert.equal(daily.request.params.FID_COND_MRKT_DIV_CODE,'J');
   assert.equal(daily.request.params.FID_ORG_ADJ_PRC,'0');assert.ok(daily.request.params.FID_INPUT_DATE_1);

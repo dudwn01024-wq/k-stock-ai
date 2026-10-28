@@ -1,9 +1,10 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {parseMockPages,parseNetworkUnfilled}=require('../services/kisAccountReadOnly');
-const {buildLiveDisplaySnapshot}=require('../services/kisAccountDisplaySnapshot');
-const {mapUnfilledDisplaySnapshot}=require('../services/kisUnfilledReadOnly');
-const {buildLiveAccountSnapshot:build}=require('../services/kisLiveAccountSnapshot');
+const {parseMockPages,parseNetworkUnfilled}=offlineKis('kisAccountReadOnly');
+const {buildLiveDisplaySnapshot}=offlineKis('kisAccountDisplaySnapshot');
+const {mapUnfilledDisplaySnapshot}=offlineKis('kisUnfilledReadOnly');
+const {buildLiveAccountSnapshot:build}=offlineKis('kisLiveAccountSnapshot');
 const position=()=>({pdno:'005930',hldg_qty:'2',evlu_amt:'200'});
 const order=()=>({pdno:'005930',sll_buy_dvsn_cd:'02',rmn_qty:'1',ord_unpr:'100',ord_dvsn_cd:'00'});
 const page=(operation,rows,code='D',environment='KIS_LIVE')=>({operation,environment,headers:{tr_cont:code},body:{rt_cd:'0',output1:rows,output2:[{nass_amt:'200',tot_evlu_amt:'200',dnca_tot_amt:'0'}],ctx_area_fk100:'DUMMY',ctx_area_nk100:'DUMMY'}});
@@ -44,3 +45,5 @@ test('pure import graph without network, env, storage, Risk or PAPER',()=>{
  }
  assert.equal(modules.kisLiveAccountSnapshot.buildLiveAccountSnapshot().riskReady,false);
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

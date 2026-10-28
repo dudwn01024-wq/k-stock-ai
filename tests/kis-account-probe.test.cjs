@@ -1,7 +1,8 @@
 'use strict';
+const offlineKis=require('./helpers/offline-kis-source.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
-const {createFakeProbeExecution,createBalanceProbeRunner}=require('../services/kisAccountProbe');
+const {createFakeProbeExecution,createBalanceProbeRunner}=offlineKis('kisAccountProbe');
 // Dummy credentials/account format only, never process.env or real HTTP.
 const config=()=>({KIS_ACCOUNT_READ_ENABLED:'true',KIS_ACCOUNT_PROBE_ENABLED:'true',environment:'KIS_VTS',
   baseUrl:'https://openapivts.koreainvestment.com:29443',auth:{environment:'KIS_VTS',appKey:'DUMMY_KEY',appSecret:'DUMMY_SECRET'},
@@ -201,3 +202,5 @@ test('numeric account and short product exact matches remain suppressed',async()
     assert.equal(f.calls.length,2);await f.run(config());assert.equal(f.calls.length,2);
   }
 });
+
+require('node:test').after(()=>offlineKis.assertNoAmbientAccess());

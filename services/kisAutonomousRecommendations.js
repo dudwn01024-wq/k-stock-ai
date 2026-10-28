@@ -1,5 +1,6 @@
 'use strict';
 const {createKisSupplyRuntime}=require('./kisSupplyRuntime');
+const {withDataMetadata}=require('./dataFreshness');
 const {assessIntradaySupply,supplyMetadata,kst,POLICY}=require('./kisIntradaySupplyPolicy');
 const {VERSION}=require('./kisRecommendationStore');
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
@@ -85,8 +86,8 @@ function createAutonomousKisRecommendations({env={},store,quota,now=Date.now,tim
     const clean=items.map(item=>{
       const x=structuredClone(item),a=missing(x.symbol);delete x.naverDailySupply;delete x.strategy?.naverDailySupply;
       x.strategy={...x.strategy,foreignerNet:null,institutionNet:null,netSupplyTotal:null,supplyPassed:null,supplyAssessment:a,
-        dataMetadata:{...x.strategy?.dataMetadata,supply:a.metadata,dateConsistency:'UNKNOWN'}};
-      x.dataMetadata={...x.dataMetadata,supply:a.metadata,dateConsistency:'UNKNOWN'};return x;
+        dataMetadata:withDataMetadata(x.strategy?.dataMetadata,{supply:a.metadata})};
+      x.dataMetadata=withDataMetadata(x.dataMetadata,{supply:a.metadata});return x;
     });
     state.base={provenance:VERSION,id,mode,scanStartedAt,scanCompletedAt,codeVersion,reviewSymbols:[...reviewSymbols],items:clean,stats};
     state.latest=null;state.lastPublished=null;state.dailySnapshots=[];state.dailyOperation=null;save();loadedId=null;lastProjectionHash=null;ensureScope();publish();return status();

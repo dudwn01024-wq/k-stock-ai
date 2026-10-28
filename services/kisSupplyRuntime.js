@@ -3,6 +3,7 @@ const {createKisIntradayEstimate}=require('./kisIntradayEstimate');
 const {loadScheduledSupplySettings}=require('./kisIntradaySupplyPolicy');
 const {createScheduledSupply}=require('./kisScheduledSupply');
 const {isIntradayVolumePending}=require('./recommendationVolumePolicy');
+const {withDataMetadata}=require('./dataFreshness');
 function projectScreeningRecommendations(items,resolve,{score,grade,reason,risk,rank}){
   return rank(items.map(base=>{
     const a=resolve(base.symbol)??{source:'KIS_INTRADAY_ESTIMATE',provisional:true,status:'PENDING',reason:'CURRENT_OBSERVATION_REQUIRED',sourceTradeDate:null,sourceUpdatedAt:null,
@@ -23,14 +24,15 @@ function projectScreeningRecommendations(items,resolve,{score,grade,reason,risk,
       !(strategy.stopLossPrice<strategy.entryPrice&&strategy.entryPrice<strategy.takeProfitPrice))strategy.entryPrice=strategy.takeProfitPrice=strategy.stopLossPrice=null;
     strategy.signal=a.status==='PENDING'&&strategy.trendPassed!==null?'WAIT_INTRADAY_CONFIRMATION':all&&strategy.entryPrice!==null?'BUY_CANDIDATE':a.screeningPassed===null||strategy.trendPassed===null||(strategy.volumePassed===null&&!isIntradayVolumePending(strategy))?'INSUFFICIENT_DATA':'WAIT';
     strategy.tradeSignal='WAIT'; // This projection has no execution role.
-    strategy.dataMetadata={...strategy.dataMetadata,supply:a.metadata,dateConsistency:'UNKNOWN'};
+    strategy.dataMetadata=withDataMetadata(strategy.dataMetadata,{supply:a.metadata});
     const points=score(strategy,base.newsAssessment),labels=reason(strategy,base.newsAssessment);
     if(a.status==='PENDING'){labels.pendingConditions=[...(labels.pendingConditions??[]).filter(x=>x!=='수급'),'수급'];labels.unknownConditions=labels.unknownConditions.filter(x=>x!=='수급');}
     const rr=risk(strategy);
     if(labels.unknownConditions.length)strategy.signal='INSUFFICIENT_DATA';
     const original=structuredClone(base);delete original.naverDailySupply;
     return {...original,strategy,score:points,grade:grade(points,strategy,rr,base.newsAssessment),riskReward:rr,...labels,
-      requiredDataStatus:labels.unknownConditions.length?'INSUFFICIENT_DATA':'VALID',dataMetadata:{...base.dataMetadata,supply:a.metadata,dateConsistency:'UNKNOWN'},
+      requiredDataStatus:labels.unknownConditions.length?'INSUFFICIENT_DATA':'VALID',dataMetadata:withDataMetadata(base.dataMetadata,
+        {daily:base.dataMetadata?.daily??base.strategy?.dataMetadata?.price,supply:a.metadata}),
       supplyAssessment:a,projectionRole:'SUPPLY_ONLY_REASSESSMENT',otherInputsRefreshed:false,orderAuthorized:false};
   }));
 }
