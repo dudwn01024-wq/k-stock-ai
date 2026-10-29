@@ -129,11 +129,11 @@ const base='41b374cd2fc94ef46ab33d8306e343f24e7f3dbd',edits={
   }
 };
 const hash=s=>createHash('sha256').update(s.replaceAll('\r\n','\n')).digest('hex');
-function restore(source,file){source=require('./without-stock-name.cjs')(source,file);const s=source.replaceAll('\r\n','\n'),e=edits[file];if(!e)return s;
+function restore(source,file){source=require('./without-panel-language.cjs')(source,file);source=require('./without-stock-name.cjs')(source,file);const s=source.replaceAll('\r\n','\n'),e=edits[file];if(!e)return s;
  const digest=hash(s);if(digest===e.baseline)return s;
  if(digest!==e.current){if(e.baseline===null||s.includes(e.marker))assert.fail('exact single KIS AI input boundary (exact analysis diagnostics boundary; exact quote data integrity boundary; exact detail preservation boundary): '+file);return s;}
  if(e.baseline===null)return '';
  const previous=execFileSync('git',['show',base+':'+file],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');assert.equal(hash(previous),e.baseline);return previous;}
 restore.files=[...new Set([...Object.keys(edits),...require('./without-stock-name.cjs').files])];
-restore.assertAll=()=>{const inverse=require('./without-stock-name.cjs');inverse.assertAll();for(const[file,e]of Object.entries(edits))assert.equal(hash(inverse(fs.readFileSync(file,'utf8'),file)),e.current,'exact single KIS AI input boundary: '+file);};
+restore.assertAll=()=>{const panel=require('./without-panel-language.cjs');panel.assertAll();require('./without-stock-name.cjs').assertAll();const inverse=(source,file)=>require('./without-stock-name.cjs')(panel(source,file),file);for(const[file,e]of Object.entries(edits))assert.equal(hash(inverse(fs.readFileSync(file,'utf8'),file)),e.current,'exact single KIS AI input boundary: '+file);};
 module.exports=restore;

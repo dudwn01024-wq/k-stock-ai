@@ -143,3 +143,96 @@ test('TEST_ONLY current price-scenario module keeps intraday stop touches separa
     sourceMetadata:{source:'KIS_DAILY_OHLCV',sourceBusinessDate:days[3],receivedAt:'2026-10-06T07:00:00Z'}});
   assert.match(html(data),/후보 무효 조건 관측: 2026-10-06/);
 });
+
+test('TEST_ONLY screenshot-matched unavailable panel explains the known source problem before technical rules',()=>{
+  const data={status:'UNAVAILABLE',reason:'KIS_SOURCE_INTEGRITY_UNCONFIRMED',asOfDate:null,closedThroughDate:null,
+    sourceMetadata:{source:'KIS',receivedAt:'2026-10-29T18:06:11.891Z'},patterns:null,waves:null,priceScenarios:null,
+    legacyPricePlan:{entryPrice:71600,stopLossPrice:69867,takeProfitPrice:84000}};
+  const rendered=html(freeze(data));
+  for(const value of ['추가 분석을 위한 데이터가 부족해요','온전한 자료인지 확인하지 못했어요','왜 이런 결과인가요?',
+    '지금 볼 수 있는 것:','다음에 볼 조건:','봉 개수만 부족한 것으로 단정할 수는 없어요','2026-10-30 03:06:11 (한국시간)',
+    '분석 기준 날짜</dt><dd>미확인','사용한 마감 일봉의 마지막 날</dt><dd>미확인',
+    '진입 71,600원 · 손절 69,867원 · 목표 84,000원','기존 분석에서 계산한 가격 기준','새 모양에 근거한 진입·손절·목표를 임의 생성하지 않습니다'])assert.ok(rendered.includes(value),value);
+  assert.ok(rendered.indexOf('추가 분석을 위한 데이터가 부족해요')<rendered.indexOf('기존 기술 7개'));
+  assert.doesNotMatch(rendered,/분석 기준 날짜<\/dt><dd>2026-10-30/);
+});
+
+test('TEST_ONLY no qualifying candidate differs from unverified data and never becomes a buy signal',()=>{
+  const rendered=html(fixture());assert.match(rendered,/현재 조건에 맞는 추가 후보가 없어요/);
+  assert.match(rendered,/자료 부족과는 다른 결과/);assert.match(rendered,/기존 점수·등급을 바꾸거나 매수·매도를 지시하지 않아요/);
+  assert.doesNotMatch(rendered,/data-testid="extension-status-title">추가 분석을 위한 데이터가 부족해요/);
+});
+
+test('TEST_ONLY partial bar coverage stays partial and an unknown overall state is not marked successful',()=>{
+  const data=fixture();data.waves.status='INSUFFICIENT_DATA';
+  assert.match(html(data),/일부 추가 분석에 필요한 자료가 부족해요/);
+  data.status='UNKNOWN';assert.match(html(data),/추가 분석 상태를 확인하지 못했어요/);
+  assert.doesNotMatch(html(data),/data-testid="extension-status-title">현재 조건에 맞는 추가 후보가 없어요/);
+  const pricesMissing=fixture();pricesMissing.priceScenarios.status='UNAVAILABLE';
+  assert.match(html(pricesMissing),/일부 추가 분석에 필요한 자료가 부족해요/);
+});
+
+test('TEST_ONLY each known unavailability cause has a concrete public explanation without raw diagnostic identifiers',()=>{
+  const pairs=[['KIS_DAILY_DATES_UNCONFIRMED','거래일이 올바르고 서로 중복되지 않는지'],
+    ['KIS_OBSERVATION_OR_LATEST_DATE_UNCONFIRMED','관측한 날짜와 마지막 거래일의 관계'],
+    ['KIS_ROW_SOURCE_DATE_MISMATCH','거래일과 출처의 거래일이 맞지'],
+    ['COMPLETED_DAILY_BAR_INTEGRITY_UNCONFIRMED','가격·거래량이 올바른 자료인지'],
+    ['COMPLETED_DAILY_BARS_UNAVAILABLE','거래가 끝났다고 확인할 수 있는 일별 가격 자료가 없어요']];
+  for(const[reason,message]of pairs){const rendered=html({...fixture(),status:'UNAVAILABLE',reason});assert.ok(rendered.includes(message),reason);assert.ok(!rendered.includes(reason));}
+  const rendered=html({...fixture(),status:'UNAVAILABLE',reason:'TEST_ONLY_PRIVATE_UNKNOWN'});
+  assert.match(rendered,/출처·거래일·거래가 끝난 가격 자료를 확인하지 못했어요/);assert.doesNotMatch(rendered,/TEST_ONLY_PRIVATE_UNKNOWN/);
+});
+
+test('TEST_ONLY all invalidated observations are explained as invalid while mixed observations remain separate',()=>{
+  const data=fixture();data.patterns.patterns=[pattern('ASCENDING_TRIANGLE','INVALIDATED')];
+  assert.match(html(data),/관측된 후보는 무효 조건에 닿았어요/);assert.match(html(data),/유효한 진입 지시로 보지 마세요/);
+  data.patterns.patterns.push(pattern('DESCENDING_TRIANGLE','FORMING'));
+  const rendered=html(data);assert.match(rendered,/추가로 살펴볼 모양과 가격 참고가 있어요/);
+  assert.match(rendered,/무효 조건 관측/);assert.match(rendered,/진행 중 후보/);assert.match(rendered,/확인해야 할 조건이 아직 남아 있어요/);
+});
+
+test('TEST_ONLY formulas, technical wave limits and original receipt stay available in closed detail sections',()=>{
+  const rendered=html(fixture());
+  assert.match(rendered,/<details><summary>손익비 계산식과 실제 거래의 한계<\/summary><p>상승 손익비/);
+  assert.match(rendered,/<details><summary>자세한 판정 기준과 분석 한계<\/summary>/);
+  assert.match(rendered,/<details><summary>자료 출처와 원본 시각 자세히 보기<\/summary>/);
+  assert.ok(rendered.includes('원본 조회 시각 2026-10-29T01:00:00Z'));
+  assert.doesNotMatch(rendered,/<details[^>]*\bopen(?:=|[ >])/);
+});
+
+test('TEST_ONLY novices get brief definitions of bars, Elliott waves, risk reward and scenario limits',()=>{
+  const rendered=html(fixture());
+  for(const value of ['봉’은 하루의 가격 움직임','완성 일봉’은 거래가 끝난 날','다섯 구간의 진행·되돌림 모양',
+    '반대 방향으로 움직이는 세 구간','성공 확률은 아니에요','손실 폭이 1이고 이익 폭이 2라면 손익비는 2',
+    '하루치 자료만으로는 장중 움직인 순서나 실제 거래 체결을 알 수 없어요'])assert.ok(rendered.includes(value),value);
+});
+
+test('TEST_ONLY a read-only panel preserves prices, candidate status and raw metadata byte-for-byte',()=>{
+  const data=fixture();data.patterns.patterns=[pattern()];data.waves.candidates=[wave()];data.priceScenarios.scenarios=[scenario()];
+  const frozen=freeze(data),before=JSON.stringify(frozen),rendered=html(frozen);
+  assert.equal(JSON.stringify(frozen),before);assert.match(rendered,/10,000원/);assert.match(rendered,/9,800원/);assert.match(rendered,/11,000원 ~ 11,200원/);
+  assert.doesNotMatch(source,/\bfetch\s*\(|\buseEffect\s*\(|\buseState\s*\(|\bnew Date\s*\(\s*\)/);
+});
+
+test('TEST_ONLY receipt format explicitly converts UTC or offsets to Korea time including midnight rollover',()=>{
+  for(const[receivedAt,result]of [['2026-10-29T18:06:11.891Z','2026-10-30 03:06:11 (한국시간)'],
+    ['2026-10-30T03:06:11+09:00','2026-10-30 03:06:11 (한국시간)'],
+    ['2026-10-29T01:00:00Z','2026-10-29 10:00:00 (한국시간)']]){
+    const data=fixture();data.sourceMetadata.receivedAt=receivedAt;assert.ok(html(data).includes(result),receivedAt);
+  }
+});
+
+test('TEST_ONLY missing, invalid or timezone-free receipt never uses browser local time or manufactures a business date',()=>{
+  for(const receivedAt of [null,undefined,0,'','2026-10-29T18:06:11','2026-02-30T01:00:00Z','2026-10-29T24:00:00Z','INVALID']){
+    const data=fixture();data.asOfDate=null;data.closedThroughDate=null;data.sourceMetadata.receivedAt=receivedAt;
+    const rendered=html(data);assert.match(rendered,/자료 조회 시각<\/dt><dd>미확인/);
+    assert.match(rendered,/분석 기준 날짜<\/dt><dd>미확인/);assert.match(rendered,/사용한 마감 일봉의 마지막 날<\/dt><dd>미확인/);
+  }
+});
+
+test('TEST_ONLY historical inverse permits only the reviewed explanation patch while rejecting another component edit',()=>{
+  const inverse=require('./helpers/without-panel-language.cjs');inverse.assertAll();
+  const previous=require('node:child_process').execFileSync('git',['show','2624c2f5293077e9e6ee678df378714e71fc30c8:frontend/src/AnalysisExtensions.jsx'],{encoding:'utf8',windowsHide:true}).replaceAll('\r\n','\n');
+  assert.equal(inverse(source,'frontend/src/AnalysisExtensions.jsx'),previous);
+  assert.throws(()=>inverse(source+'\n// TEST_ONLY unauthorized mutation','frontend/src/AnalysisExtensions.jsx'),/exact panel language boundary/);
+});
