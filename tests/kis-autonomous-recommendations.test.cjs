@@ -133,7 +133,9 @@ test('TEST_ONLY cache GET cannot execute providers; no caller can start or stop 
 });
 test('TEST_ONLY the real screening calculator requests price only and never parses NAVER supply',async()=>{
   calculators.setAssessment(null);const strategy=await calculators.calculateStrategy('005930');
-  assert.equal(strategy.foreignerNet,null);assert.equal(strategy.supplyPassed,null);assert.ok(calculators.requests.every(x=>x.includes('/price?')));
+  assert.equal(strategy.foreignerNet,null);assert.equal(strategy.supplyPassed,null);assert.ok(calculators.requests.every(x=>x.startsWith('KIS:')));
+  assert.ok(calculators.requests.every(x=>x.includes('\"maxBars\":30')&&x.includes('\"screeningSnapshot\":true')));
+  assert.equal(calculators.requests.some(x=>x.includes('/price?')),false);
   assert.equal(strategy.supplyAssessment.source,'KIS_INTRADAY_ESTIMATE');assert.equal(Object.hasOwn(strategy,'naverDailySupply'),false);
 });
 test('TEST_ONLY actual recommendation builder excludes NAVER quote supply from both its score and card provenance',async()=>{

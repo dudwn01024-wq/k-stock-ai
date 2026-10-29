@@ -1,3 +1,6 @@
+const {createKisQuoteService}=require('./services/kisQuoteService');
+const {buildAnalysisExtensions}=require('./services/analysisExtensions');
+const {readKisScreeningSnapshot,storedKisScreeningSnapshot,createKisRecommendationFastScreen}=require('./services/kisRecommendationDaily');
 const { dataFreshness, dateConsistency, sourceDate, withDataMetadata } = require('./services/dataFreshness');
 const {selectAnalysisPrice,analysisMetadata}=require('./services/analysisProvenance');
 const {assessRecommendationVolume,isIntradayVolumePending}=require('./services/recommendationVolumePolicy');
@@ -8,7 +11,7 @@ const {AsyncLocalStorage}=require('node:async_hooks');
 dotenv.config();
 
 const {
-  fetchKisDailyOHLCV
+  fetchKisDailyOHLCV, fetchKisChartOHLCV, fetchKisQuoteData
 } = require('./services/kisMarketData');
 
 const {
@@ -22,6 +25,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const {installPrivateSite}=require('./services/privateSiteAccess');
 const privateSite=installPrivateSite(app,{env:process.env});
+require('./services/kisChartRoutes').registerKisChartRoutes(app,{readChart:fetchKisChartOHLCV});
 const recommendationRequestContext=new AsyncLocalStorage();
 const recommendationFetch=async (...args)=>{
   const context=recommendationRequestContext.getStore();
@@ -76,6 +80,7 @@ const NAVER_HEADERS = {
 };
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const {selectKisAiSupply,withoutAiSupply,buildSingleSupplyAiInput}=require('./services/aiAnalysisInput');
 const PRIMARY_GEMINI_MODEL =
   process.env.GEMINI_MODEL ||
   'gemini-3.8-flash';
@@ -554,7 +559,8 @@ const mapWithConcurrency =
 // STOCK QUOTE DATA
 // ========================================
 
-const {fetchStockQuoteData,fetchStockNewsBySymbol}=require('./services/naverMarketData').createNaverMarketData({fetchImpl:recommendationFetch});
+const {fetchStockNewsBySymbol}=require('./services/naverMarketData').createNaverMarketData({fetchImpl:recommendationFetch});
+const fetchStockQuoteData=createKisQuoteService({fetchQuote:fetchKisQuoteData,getRequestContext:()=>recommendationRequestContext.getStore()});
 const {createStockDetailNews}=require('./services/stockDetailNews');
 const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol});
 
@@ -567,7 +573,7 @@ const stockDetailNews=createStockDetailNews({fetchNews:fetchStockNewsBySymbol});
 // ========================================
 
 const calculateStrategy =
-  async (symbol, {intradayVolume=false}={}) => {
+  async (symbol, {intradayVolume=false,dailySnapshot}={}) => {
     const emptyResult =
       () => ({
         decisionRole: 'SCREENING',
@@ -637,66 +643,36 @@ const calculateStrategy =
           0
       });
 
-    const priceResponse=await recommendationFetch(
-      `https://m.stock.naver.com/api/stock/${symbol}/price?pageSize=30&page=1`,{headers:NAVER_HEADERS});
-
-    if (
-      !priceResponse.ok
-    ) {
-      throw new Error(
-        `Failed to fetch strategy source data: HTTP ${priceResponse.status}`
-      );
-    }
-
-    let data =
-      await priceResponse.json();
-
-    if (
-      !Array.isArray(data) ||
-      data.length === 0
-    ) {
-      return emptyResult();
-    }
-
-    const datedRows = data.map(item => {
-      const localDate = sourceDate(item?.localTradedAt) ??
-        dataFreshness({ timestamp: item?.localTradedAt }).sourceTimestamp?.slice(0, 10) ?? null;
-      const businessDate = sourceDate(item?.bizdate);
-      return { item, date: localDate && businessDate && localDate !== businessDate ? null : localDate ?? businessDate };
-    });
-    if (datedRows.some(row => !row.date) || new Set(datedRows.map(row => row.date)).size !== datedRows.length) return emptyResult();
-    data = datedRows.sort((a, b) => b.date.localeCompare(a.date))
-      .map(row => ({ ...row.item, strategyBusinessDate: row.date }));
-    const latestRequired = [data[0]?.closePrice, data[0]?.highPrice, data[0]?.lowPrice,
-      data[0]?.accumulatedTradingVolume ?? data[0]?.volume];
-    if (latestRequired.some(value => !Number.isFinite(parseNumber(value)))) return emptyResult();
-
-    const receivedAt = new Date().toISOString();
+    const daily = dailySnapshot === undefined
+      ? await readKisScreeningSnapshot(symbol,{fetchDaily:fetchKisDailyOHLCV})
+      : storedKisScreeningSnapshot(symbol,dailySnapshot);
+    if (!daily.available) return {...emptyResult(),priceBasis:'KIS_DAILY_CLOSE',dataIssue:daily.reason};
+    const data = daily.rows;
+    const receivedAt = daily.receivedAt; // Preserve the exact fast-screen observation during deep reuse.
 
     const rows =
       data
         .map(
           (item) => ({
-            date: item.strategyBusinessDate,
+            date: item.date,
 
             close:
               parseNumber(
-                item.closePrice
+                item.close
               ),
 
             high:
               parseNumber(
-                item.highPrice
+                item.high
               ),
 
             low:
               parseNumber(
-                item.lowPrice
+                item.low
               ),
 
             volume:
               parseNumber(
-                item.accumulatedTradingVolume ??
                 item.volume
               )
           })
@@ -827,7 +803,7 @@ const calculateStrategy =
     const foreignerNet=intradaySupplyAssessment.foreignerNet;
     const institutionNet=intradaySupplyAssessment.institutionNet;
     const supplyMetadata=intradaySupplyAssessment.metadata;
-    const dailyMetadata = dataFreshness({ source: 'Naver daily price', date: rows[0]?.date ?? null, receivedAt });
+    const dailyMetadata = daily.metadata;
     const dataMetadata = { price: dailyMetadata, volume: dailyMetadata, supply: supplyMetadata,
       dateConsistency: dateConsistency([dailyMetadata, supplyMetadata]) };
     const netSupplyTotal =
@@ -861,6 +837,7 @@ const calculateStrategy =
       return {
         ...emptyResult(),
         dataMetadata,
+        priceBasis:'KIS_DAILY_CLOSE',
 
         currentPrice,
         ma5,
@@ -1070,6 +1047,7 @@ if (
 
 return {
   decisionRole: 'SCREENING',
+  priceBasis:'KIS_DAILY_CLOSE',
   supplyAssessment:intradaySupplyAssessment,
   dataMetadata,
   symbol,
@@ -1610,7 +1588,7 @@ const getFinalRecommendationGrade =
 // ========================================
 
 const buildRecommendationResult =
-  async (stock, {intradayVolume=false}={}) => {
+  async (stock, {intradayVolume=false,dailySnapshot}={}) => {
     const [
       quote,
       strategy,
@@ -1622,7 +1600,7 @@ const buildRecommendationResult =
         ),
 
         calculateStrategy(
-          stock.symbol, {intradayVolume}
+          stock.symbol, {intradayVolume,dailySnapshot}
         ),
 
         fetchStockNewsBySymbol(
@@ -1736,6 +1714,7 @@ const buildRecommendationResult =
         supply:strategy.dataMetadata?.supply??scheduledSupply.resolve(stock.symbol).metadata}),
       strategy: {
         decisionRole: 'SCREENING',
+        priceBasis:strategy.priceBasis??null,
         currentPrice: strategy.currentPrice,
         dataMetadata: strategy.dataMetadata ?? null,
         ma5:
@@ -2459,7 +2438,8 @@ const buildGeminiPrompt =
     quote,
     strategy,
     riskReward,
-    news
+    news,
+    onInput
   }) => {
     const safeNews =
       Array.isArray(news)
@@ -2497,8 +2477,12 @@ const buildGeminiPrompt =
             )
         : [];
 
+    const input=buildSingleSupplyAiInput({quote,strategy,riskReward,suppliedNews:safeNews});
+    onInput?.(input);
     return `
 너는 K-Stock AI의 국내주식 분석 보조 AI다.
+
+수급은 supply 객체의 단일 KIS 자료만 사용한다. sourceBusinessDate 미확인, dateConsistency의 날짜 차이, direction의 매매 방향 차이, status의 검증 불가를 서로 구분한다. quote나 과거 설명으로 수급을 채우지 마라. '수급 불일치'라고만 쓰지 말고 날짜 차이·외국인/기관 방향 차이·검증 불가 중 어떤 문제인지 구체적으로 설명한다.
 
 날짜 안전 규칙: sourceBusinessDate 또는 sourceTimestamp가 없으면 해당 날짜 또는 시각은 미확인이다. freshnessStatus가 UNKNOWN이면 최신 여부 미확인이다. 오늘·현재·실시간 데이터라고 가정하지 마라. receivedAt은 수신 시각일 뿐이다. 날짜 불일치를 명시하고 날짜를 생성하지 마라.
 
@@ -2516,19 +2500,10 @@ const buildGeminiPrompt =
 10. 출력은 반드시 JSON만 반환한다. 각 설명은 1~2문장으로 짧게 작성하고 요인·기사 근거 목록은 각각 최대 3개로 제한한다.
 
 개별 분석의 최종 판정은 상세 ENTRY_GATE 전략의 finalAssessment이다. 추천 SCREENING 결과로 대체하지 마라. 상태와 가격을 재결정하지 말고 전달된 상세 전략을 설명만 하라.
+analysisExtensions는 완료된 일봉에서 관측한 별도 분석 후보다. 기존 최종 판정·점수·세 가격을 바꾸는 근거로 사용하지 마라. 진행 중·종가 확인·무효·복수 해석을 구분하고, 파동과 피보나치 참고값을 확정 예측이나 자동 진입·목표가로 바꾸지 마라. 서로 반대인 시나리오는 그대로 설명하고 평균 내거나 손익비가 가장 큰 하나를 고르지 마라. 비용 미반영 손익비는 승률이나 실현 수익률이 아니다.
 분석 대상 실제 데이터:
 
-${JSON.stringify(
-  {
-    quote,
-    strategy,
-    riskReward,
-    suppliedNews:
-      safeNews
-  },
-  null,
-  2
-)}
+${JSON.stringify(input,null,2)}
 
 다음 JSON 형식으로만 답한다.
 
@@ -2678,7 +2653,7 @@ app.get(
         await Promise.all([
 
           fetchStockQuoteData(
-            symbol
+            symbol,{includeSupply:false}
           ),
 
           fetchKisDailyOHLCV(
@@ -2876,11 +2851,11 @@ app.get(
       // 실제 수급
       // ==================================
 
-      const currentSupply=scheduledSupply.resolve(symbol);
-      const foreignerNet = currentSupply?currentSupply.foreignerNet:parseNumber(quote?.foreignerNet);
+      const currentSupply=selectKisAiSupply(symbol,scheduledSupply.resolve(symbol));
+      const foreignerNet = currentSupply.foreignerNet;
 
 
-      const institutionNet = currentSupply?currentSupply.institutionNet:parseNumber(quote?.institutionNet);
+      const institutionNet = currentSupply.institutionNet;
 
 
       const quoteCurrentPrice =
@@ -2892,7 +2867,7 @@ app.get(
 
       const analysisPrice=selectAnalysisPrice(quote,latestRow);
       const currentPrice=analysisPrice.currentPrice;
-      const dataMetadata=analysisMetadata(quote,latestRow,analysisPrice,currentSupply?currentSupply.metadata??null:undefined);
+      const dataMetadata=analysisMetadata(withoutAiSupply(quote,currentSupply.metadata),latestRow,analysisPrice,currentSupply.metadata);
 
 
       // ==================================
@@ -2985,6 +2960,10 @@ app.get(
         });
       strategy.priceBasis=analysisPrice.priceBasis;
       strategy.dataMetadata=dataMetadata;
+      const analysisExtensions=buildAnalysisExtensions({rows,legacyPricePlan:{
+        entryPrice:strategy.entryPrice,stopLossPrice:strategy.stopLossPrice,takeProfitPrice:strategy.takeProfitPrice,
+        riskRewardRatio:strategy.riskRewardRatio,decisionRole:strategy.decisionRole,dataMetadata},
+        sourceMetadata:dataMetadata.daily,currentPrice,atr14:chartAnalysis?.atr14});
 
 
       // ==================================
@@ -3030,6 +3009,7 @@ app.get(
 
       const strategyForAI = {
         ...strategy,
+        analysisExtensions,
         priceBasis:analysisPrice.priceBasis,
         dataMetadata,
 
@@ -3136,7 +3116,7 @@ app.get(
 
       const result =
         await analyzeStockWithGemini({
-          quote,
+          quote:withoutAiSupply(quote,currentSupply.metadata),
 
           strategy:
             strategyForAI,
@@ -3159,9 +3139,10 @@ app.get(
             ?.stockName ??
           symbol,
 
-        quote,
+        quote:withoutAiSupply(quote,currentSupply.metadata),
 
         chartAnalysis,
+        analysisExtensions,
         priceBasis:analysisPrice.priceBasis,
         dataMetadata,
 
@@ -3183,7 +3164,8 @@ app.get(
 
         newsAssessment,
 
-        // AI 설명
+        // AI 설명의 수급 기준은 생성 당시의 단일 KIS 관측입니다.
+        supplyContext:result.supplyContext??null,
         analysis:
           result.analysis,
 
@@ -3414,12 +3396,14 @@ const analyzeStockWithGemini =
     }
 
 
+    let promptInput;
     const prompt =
       buildGeminiPrompt({
         quote,
         strategy,
         riskReward,
-        news
+        news,
+        onInput:input=>{promptInput=input;}
       });
 
 
@@ -3487,6 +3471,7 @@ const analyzeStockWithGemini =
 
     return {
       analysis,
+      supplyContext:promptInput?.supply??null,
 
       modelUsed:
         geminiResult.modelUsed,
@@ -3586,9 +3571,14 @@ const buildRecommendationGeminiPrompt =
         })
       );
 
-    onInput?.(safeCandidates);
+    const projectedCandidates=safeCandidates.map(candidate=>{
+      const input=buildSingleSupplyAiInput({quote:{symbol:candidate.symbol,stockName:candidate.stockName,currentPrice:candidate.currentPrice,changeRate:candidate.changeRate,dataMetadata:candidate.dataMetadata},strategy:candidate.strategy,riskReward:candidate.riskReward,suppliedNews:candidate.suppliedNews});
+      return {symbol:candidate.symbol,stockName:candidate.stockName,currentPrice:candidate.currentPrice,changeRate:candidate.changeRate,score:candidate.score,maxScore:candidate.maxScore,grade:candidate.grade,passedConditions:candidate.passedConditions,failedConditions:candidate.failedConditions,newsAssessment:candidate.newsAssessment,dataMetadata:withoutAiSupply(candidate.dataMetadata,input.supply),...input};
+    });
+    onInput?.(projectedCandidates);
     return `
 너는 K-Stock AI 스크리닝 후보 설명 AI다.
+수급은 각 후보의 supply 객체만 사용한다. 날짜 차이, 매매 방향 차이, 검증 불가를 구분하고 다른 출처나 과거 설명으로 수급을 채우지 마라. '수급 불일치'라는 말만 쓰지 말고 원인을 구체적으로 설명한다.
 SCREENING은 분석 후보 탐색이며 주문 허가가 아니다. 최종 진입 조건은 별도 조회한 상세 ENTRY_GATE 전략만 판단한다.
 날짜 안전 규칙: sourceBusinessDate 또는 sourceTimestamp가 없으면 해당 날짜 또는 시각은 미확인이다. freshnessStatus가 UNKNOWN이면 최신 여부 미확인이다. 오늘·현재·실시간 데이터라고 가정하지 마라. receivedAt으로 원본 날짜를 대체하지 마라. 날짜 불일치를 명시하고 날짜를 생성하지 마라.
 
@@ -3618,7 +3608,7 @@ SCREENING은 분석 후보 탐색이며 주문 허가가 아니다. 최종 진�
 backend가 계산한 실제 후보 데이터:
 
 ${JSON.stringify(
-  safeCandidates,
+  projectedCandidates,
   null,
   2
 )}
@@ -3973,7 +3963,7 @@ app.get(
               quote.stockName,
 
             source:
-              'Naver stock data'
+              'KIS_CURRENT_QUOTE'
           });
         } catch (error) {
           return res.status(404).json({
@@ -4071,12 +4061,11 @@ app.get(
       const currentSupply=scheduledSupply.resolve(symbol);
       return res.json({
         ...quote,
-        ...(currentSupply?{naverDailySupply:{foreignerNet:quote.foreignerNet,institutionNet:quote.institutionNet,supplyDate:quote.supplyDate},
-          foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:currentSupply.sourceTradeDate??null,
+        ...(currentSupply?{foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:currentSupply.sourceTradeDate??null,
           supplyAssessment:currentSupply,dataMetadata:withDataMetadata(quote.dataMetadata,{supply:currentSupply.metadata})}: {}),
 
         source:
-          'Naver stock data',
+          'KIS_CURRENT_QUOTE',
 
         fetchedAt:
           new Date().toISOString()
@@ -4489,7 +4478,6 @@ app.get(
 const {createRecommendationScans,registerRecommendationRoutes}=require('./services/recommendationScans');
 const {historyFromEnvironment,registerHistoryRoutes,hash}=require('./services/recommendationHistory');
 const {createRecommendationUniverse}=require('./services/recommendationUniverse');
-const {createRecommendationFastScreen}=require('./services/recommendationFastScreen');
 const {createExpandedRecommendationRuns,registerExpandedRecommendationRoutes,settings:expandedSettings}=require('./services/expandedRecommendationRuns');
 const recommendationHistory=historyFromEnvironment();
 const {outcomesFromEnvironment,registerOutcomeRoutes}=require('./services/recommendationOutcomes');
@@ -4510,12 +4498,12 @@ let currentFastScreen=null;
 const expandedRuns=createExpandedRecommendationRuns({
   getReuseContext:()=>scheduledSupply.reuseContext(),onCompleted:input=>autonomousKis.adopt(input),
   loadUniverse:async()=>{
-    currentFastScreen=createRecommendationFastScreen({headers:NAVER_HEADERS});
+    currentFastScreen=createKisRecommendationFastScreen({fetchDaily:fetchKisDailyOHLCV});
     return expandedUniverse.load();
   },
   fastScreen:stock=>currentFastScreen.screen(stock),
   deepReview:(stock,{recordRequest,recordFailure})=>
-    recommendationRequestContext.run({recordRequest,recordFailure},()=>buildRecommendationResult(stock,{intradayVolume:true})),
+    recommendationRequestContext.run({recordRequest,recordFailure},()=>buildRecommendationResult(stock,{intradayVolume:true,dailySnapshot:currentFastScreen.snapshot(stock.symbol)})),
   rank:rankRecommendationResults,history:recommendationHistory,
   codeVersion:process.env.RENDER_GIT_COMMIT||('SOURCE_SHA256:'+hash([buildRecommendationResult,calculateStrategy,rankRecommendationResults].map(fn=>fn.toString()).join('\n'))),
   analyze:analyzeRecommendationsWithGemini,deepLimit:expandedConfig.deepLimit,
@@ -5146,6 +5134,10 @@ const recentLow20 =
         });
       strategy.priceBasis=analysisPrice.priceBasis;
       strategy.dataMetadata=dataMetadata;
+      const analysisExtensions=buildAnalysisExtensions({rows,legacyPricePlan:{
+        entryPrice:strategy.entryPrice,stopLossPrice:strategy.stopLossPrice,takeProfitPrice:strategy.takeProfitPrice,
+        riskRewardRatio:strategy.riskRewardRatio,decisionRole:strategy.decisionRole,dataMetadata},
+        sourceMetadata:dataMetadata.daily,currentPrice,atr14:chartAnalysis?.atr14});
 
 
       // Retain only server-calculated detail data for the private, no-fetch judgment.
@@ -5159,7 +5151,7 @@ const recentLow20 =
         success: true,
 
         source:
-          'KIS_OPEN_API + NAVER_STOCK_DATA + NAVER_STOCK_NEWS',
+          'KIS_CURRENT_QUOTE + KIS_OPEN_API + NAVER_STOCK_NEWS',
 
         symbol,
 
@@ -5236,10 +5228,11 @@ recentLow20,
               true
           }
           ,...(currentSupply?{foreignerNet:currentSupply.foreignerNet,institutionNet:currentSupply.institutionNet,supplyDate:currentSupply.sourceTradeDate??null,
-            supplyAssessment:currentSupply,naverDailySupply:{foreignerNet,institutionNet,supplyDate:quote?.supplyDate??null}}: {})
+            supplyAssessment:currentSupply}: {})
         },
 
         chartAnalysis,
+        analysisExtensions,
 
         strategy
       });

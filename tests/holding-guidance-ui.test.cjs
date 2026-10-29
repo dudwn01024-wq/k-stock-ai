@@ -105,11 +105,11 @@ test('TEST_ONLY frontend cannot evaluate holding rules locally or persist privat
 test('TEST_ONLY recommendation stock selection routes to exactly the existing explicit detail requests',async()=>{
   const appFile=require.resolve('../frontend/src/App.jsx'),source=fs.readFileSync(appFile,'utf8');
   const file=require.resolve('./shared-detail-news-ui.test.cjs'),actual=createRequire(file),req=name=>name==='node:test'?{test:()=>{}}:actual(name);req.resolve=actual.resolve;
-  const context={require:req,module:{exports:{}},console,URL,setImmediate};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+  const context={require:req,module:{exports:{}},console,URL,setImmediate,AbortController,setTimeout,clearTimeout};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
   const h=context.module.exports.harness();h.render();h.runEffects();await new Promise(setImmediate);
   assert.deepEqual(Array.from(h.calls,x=>x.pathname),['/api/stock/recommendation-mode']);h.calls.length=0;
   await h.select('000001');assert.deepEqual(Array.from(h.navigations),['/stocks/000001']);
-  assert.deepEqual(Array.from(h.calls,x=>x.pathname),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+  assert.deepEqual(Array.from(h.calls,x=>x.pathname),['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart']);
   assert.equal(h.state('activeSymbol'),'000001');
   assert.doesNotMatch(source,/HoldingGuidance[^\n]*(?:quoteData|entryPrice=)/);
   assert.match(source,/<HoldingGuidance key=\{activeSymbol\} symbol=\{activeSymbol\} strategy=\{strategyData\}/);

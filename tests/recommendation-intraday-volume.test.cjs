@@ -45,7 +45,9 @@ function backend(time=at('09:30'),volume=200000,{missingSupply=false,emptyNews=f
   const kis=assessIntradaySupply({symbol:'000001',now:clock,calendarState:'STANDARD_OPEN',scoreEnabled:true,resetObservedDate:'2026-10-07',
     failure:missingSupply?'LOOKUP_FAILED':null,snapshot:{symbol:'000001',source:'KIS_INTRADAY_ESTIMATE',observedAt:time,
       rows:['1','2'].map(inputCode=>({inputCode,foreignNetQuantity:1,institutionNetQuantity:inputCode==='1'?0:1,sumNetQuantity:inputCode==='1'?1:2})).filter(x=>clock>=Date.parse(at('10:00'))||x.inputCode==='1')}});
-  const context=vm.createContext({scheduledSupply:{resolve:()=>({...kis,metadata:supplyMetadata(kis)})},...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
+  const context=vm.createContext({...require('../services/kisRecommendationDaily'),
+    fetchKisDailyOHLCV:async(symbol,options)=>{calls++;assert.equal(options.maxBars,30);assert.equal(options.screeningSnapshot,true);options.onDataRequest?.({symbol,operation:'DAILY_OHLCV'});return require('./helpers/kis-calculators.cjs').fixtureRows(daily(volume),{receivedAt:time});},
+    scheduledSupply:{resolve:()=>({...kis,metadata:supplyMetadata(kis)})},...policy,...require('../services/dataFreshness'),Date:FixedDate,console,NAVER_HEADERS:{},
     recommendationFetch:async url=>{calls++;return {ok:true,json:async()=>url.includes('/price?')?daily(volume):
       {dealTrendInfos:[{bizdate:'20261007',foreignerPureBuyQuant:1,organPureBuyQuant:missingSupply?null:1}]}};},
     getLatestDealTrend:data=>data.dealTrendInfos[0],average:x=>x.reduce((a,b)=>a+b,0)/x.length,

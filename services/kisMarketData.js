@@ -117,6 +117,13 @@ const ohlcvCache =
 const pendingOHLCVRequests =
   new Map();
 
+// Native chart periods have a separate identity/validation contract. They share
+// the token, request queue and existing TTL, never a daily-aggregation fallback.
+const nativeChartCache = new Map();
+const pendingNativeChartRequests = new Map();
+const quoteSnapshotCache = new Map();
+const pendingQuoteSnapshotRequests = new Map();
+
 
 // ========================================
 // BASIC HELPERS
@@ -524,7 +531,8 @@ const requestDailyOHLCVChunk =
   async ({
     symbol,
     startDate,
-    endDate
+    endDate,
+    onDataRequest
   }) => {
 
     const accessToken =
@@ -570,6 +578,7 @@ const requestDailyOHLCVChunk =
 
     return runKisRequest(
       async () => {
+        onDataRequest?.({symbol,operation:'DAILY_OHLCV'});
         const response =
           await fetch(
             url,
@@ -627,7 +636,9 @@ const fetchDailyOHLCVChunk =
     symbol,
     startDate,
     endDate,
-    observation = false
+    observation = false,
+    screeningSnapshot = false,
+    onDataRequest
   }) => {
 
     if (
@@ -641,7 +652,7 @@ const fetchDailyOHLCVChunk =
     }
 
 
-    const maxAttempts = observation ? 1 : 4;
+    const maxAttempts = observation || screeningSnapshot ? 1 : 4;
 
 
     for (
@@ -657,7 +668,8 @@ const fetchDailyOHLCVChunk =
         await requestDailyOHLCVChunk({
           symbol,
           startDate,
-          endDate
+          endDate,
+          onDataRequest
         });
 
 
@@ -666,7 +678,8 @@ const fetchDailyOHLCVChunk =
         data?.rt_cd ===
           '0'
       ) {
-        const rows =
+        if(screeningSnapshot&&data?.output1?.stck_shrn_iscd!==undefined&&String(data.output1.stck_shrn_iscd)!==symbol)throw Error('KIS_DAILY_SYMBOL_MISMATCH');
+      const rows =
           Array.isArray(
             data?.output2
           )
@@ -819,7 +832,9 @@ const loadKisDailyOHLCV =
       startDate,
       endDate,
       maxBars,
-      observationTargetDate
+      observationTargetDate,
+      screeningSnapshot = false,
+      onDataRequest
     }
   ) => {
 
@@ -845,7 +860,7 @@ const loadKisDailyOHLCV =
         startDate &&
       allRows.size <
         maxBars &&
-      safetyCount < (observation ? 2 : 10)
+      safetyCount < (screeningSnapshot ? 1 : observation ? 2 : 10)
     ) {
       safetyCount +=
         1;
@@ -856,7 +871,9 @@ const loadKisDailyOHLCV =
           symbol,
           startDate,
           endDate: currentEndDate,
-          observation
+          observation,
+          screeningSnapshot,
+          onDataRequest
         });
 
       if (observation) {
@@ -980,6 +997,10 @@ const fetchKisDailyOHLCV =
     }
 
 
+    const screeningSnapshot=options.screeningSnapshot===true;
+    if(options.screeningSnapshot!==undefined&&typeof options.screeningSnapshot!=='boolean')throw Error('INVALID_SCREENING_PROFILE');
+    if(screeningSnapshot&&(Number(options.maxBars)!==30||options.observationTargetDate!==undefined))throw Error('INVALID_SCREENING_PROFILE');
+    const onDataRequest=typeof options.onDataRequest==='function'?options.onDataRequest:undefined;
     const observationTargetDate=options.observationTargetDate;
     if(observationTargetDate!==undefined&&(!require('./observationDaily').isTargetDate(observationTargetDate)||
       options.endDate!==observationTargetDate.replaceAll('-','')))throw Error('INVALID_TARGET_DATE');
@@ -1018,7 +1039,7 @@ const fetchKisDailyOHLCV =
         symbol,
         startDate,
         endDate,
-        maxBars, 'J', 'D', '0', observationTargetDate ?? 'DEFAULT'
+        maxBars, 'J', 'D', '0', screeningSnapshot ? 'SCREENING30' : observationTargetDate ?? 'DEFAULT'
       ].join(':');
 
 
@@ -1071,9 +1092,18 @@ const fetchKisDailyOHLCV =
 
 
     // =====================================
+    // A screening read may consume a fresh richer ordinary snapshot. It never
+    // consumes an observation/fork request, fabricates a receipt, or expands a read.
     // NEW REQUEST
     // =====================================
 
+    if(screeningSnapshot){
+      const compatible=key=>{const parts=key.split(':');return parts.length===8&&parts[0]===symbol&&parts[1]===startDate&&parts[2]===endDate&&
+        Number(parts[3])>=30&&parts.slice(4).join(':')==='J:D:0:DEFAULT';};
+      const take=rows=>{const selected=cloneRows(rows);if(selected.length>30)selected.splice(0,selected.length-30);return selected;};
+      for(const[key,value]of ohlcvCache)if(compatible(key)&&now-value.createdAt<KIS_OHLCV_CACHE_TTL_MS)return take(value.rows);
+      for(const[key,pending]of pendingOHLCVRequests)if(compatible(key))return take(await pending);
+    }
     const requestPromise =
       loadKisDailyOHLCV(
         symbol,
@@ -1081,7 +1111,9 @@ const fetchKisDailyOHLCV =
           startDate,
           endDate,
           maxBars,
-          observationTargetDate
+          observationTargetDate,
+          screeningSnapshot,
+          onDataRequest
         }
       );
 
@@ -1125,10 +1157,158 @@ const fetchKisDailyOHLCV =
 
 
 // ========================================
+// EXPLICIT NATIVE D/W/M/Y CHART READ
+// One native provider page, one data attempt; ordinary daily reads stay intact.
+// ========================================
+const chartError = (code, status=503) => Object.assign(new Error(code), {code,status});
+const nativeChartLookbackDays = Object.freeze({D:730,W:1461,M:3653,Y:36600});
+const copyNativeChart = value => JSON.parse(JSON.stringify(value));
+const nativePeriodKey = (date,period) => {
+  if(period==='D')return date;
+  if(period==='M')return date.slice(0,7);
+  if(period==='Y')return date.slice(0,4);
+  const monday=new Date(date+'T00:00:00Z');
+  monday.setUTCDate(monday.getUTCDate()-(monday.getUTCDay()+6)%7);
+  return monday.toISOString().slice(0,10);
+};
+const strictChartDate = value => typeof value==='string'&&/^\d{8}$/.test(value)&&
+  sourceDate(value)?.replaceAll('-','')===value;
+const nativeChartNumber = value => {
+  if(typeof value==='number')return Number.isFinite(value)?value:null;
+  if(typeof value!=='string'||! /^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(value.trim()))return null;
+  const number=Number(value.trim().replaceAll(',',''));
+  return Number.isFinite(number)?number:null;
+};
+const fetchKisChartOHLCV = async (symbol,options={}) => {
+  if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))throw chartError('KIS_CHART_SYMBOL_UNSUPPORTED',400);
+  if(!options||typeof options!=='object'||Array.isArray(options)||
+    Object.keys(options).some(key=>!['period','startDate','endDate','onDataRequest'].includes(key)))
+    throw chartError('KIS_CHART_OPTIONS_INVALID',400);
+  const period=options.period;
+  if(!Object.hasOwn(nativeChartLookbackDays,period))throw chartError('KIS_CHART_PERIOD_INVALID',400);
+  if(options.onDataRequest!==undefined&&typeof options.onDataRequest!=='function')throw chartError('KIS_CHART_OPTIONS_INVALID',400);
+  const today=getKoreaToday(),endDate=options.endDate??today;
+  if(!strictChartDate(endDate)||endDate<'19000101'||endDate>today)throw chartError('KIS_CHART_DATE_RANGE_INVALID',400);
+  const earliest=[shiftDate(endDate,-nativeChartLookbackDays[period]),'19000101'].sort().at(-1);
+  const startDate=options.startDate??earliest;
+  if(!strictChartDate(startDate)||startDate<earliest||startDate>endDate)throw chartError('KIS_CHART_DATE_RANGE_INVALID',400);
+  const key=[symbol,startDate,endDate,'J',period,'0','NATIVE_CHART'].join(':'),now=Date.now();
+  const cached=nativeChartCache.get(key);
+  if(cached&&now-cached.createdAt<KIS_OHLCV_CACHE_TTL_MS)
+    return {...copyNativeChart(cached.value),requestCount:0,cacheStatus:'HIT'};
+  if(pendingNativeChartRequests.has(key))
+    return {...copyNativeChart(await pendingNativeChartRequests.get(key)),requestCount:0,cacheStatus:'COALESCED'};
+  const pending=(async()=>{
+    const accessToken=await getKisAccessToken();
+    const url=new URL(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice`);
+    for(const [name,value]of Object.entries({FID_COND_MRKT_DIV_CODE:'J',FID_INPUT_ISCD:symbol,
+      FID_INPUT_DATE_1:startDate,FID_INPUT_DATE_2:endDate,FID_PERIOD_DIV_CODE:period,FID_ORG_ADJ_PRC:'0'}))
+      url.searchParams.set(name,value);
+    const {response,data,receivedAt}=await runKisRequest(async()=>{
+      options.onDataRequest?.({symbol,operation:'NATIVE_CHART_OHLCV',period});
+      let response;
+      try{response=await fetch(url,{method:'GET',signal:AbortSignal.timeout(15000),headers:{'Content-Type':'application/json',
+        authorization:`Bearer ${accessToken}`,appkey:KIS_APP_KEY,appsecret:KIS_APP_SECRET,tr_id:'FHKST03010100'}});}
+      catch(error){throw chartError(error?.name==='TimeoutError'?'KIS_CHART_REQUEST_TIMEOUT':'KIS_CHART_REQUEST_FAILED');}
+      if(!response?.ok)throw chartError('KIS_CHART_PROVIDER_HTTP_FAILED');
+      let data;try{data=await response.json();}catch{throw chartError('KIS_CHART_RESPONSE_INVALID');}
+      return {response,data,receivedAt:new Date().toISOString()};
+    });
+    if(!response.ok||data?.rt_cd!=='0')throw chartError('KIS_CHART_PROVIDER_RESPONSE_FAILED');
+    if(!data.output1||Array.isArray(data.output1)||typeof data.output1.stck_shrn_iscd!=='string')
+      throw chartError('KIS_CHART_SYMBOL_UNVERIFIED');
+    if(data.output1.stck_shrn_iscd!==symbol)throw chartError('KIS_CHART_SYMBOL_MISMATCH');
+    if(!Array.isArray(data.output2)||data.output2.length>100)throw chartError('KIS_CHART_RESPONSE_INVALID');
+    const observedDate=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'})
+      .format(new Date(receivedAt));
+    const observedPeriod=nativePeriodKey(observedDate,period),seenDates=new Set(),seenPeriods=new Set(),rows=[];
+    for(const raw of data.output2){
+      const date=sourceDate(raw?.stck_bsop_date),open=nativeChartNumber(raw?.stck_oprc),high=nativeChartNumber(raw?.stck_hgpr),
+        low=nativeChartNumber(raw?.stck_lwpr),close=nativeChartNumber(raw?.stck_clpr),volume=nativeChartNumber(raw?.acml_vol);
+      const tradingValue=raw?.acml_tr_pbmn==null||raw.acml_tr_pbmn===''?null:nativeChartNumber(raw.acml_tr_pbmn);
+      if(!date||date.replaceAll('-','')<startDate||date.replaceAll('-','')>endDate||date>observedDate||
+        [open,high,low,close].some(value=>value===null||value<=0)||high<Math.max(open,close)||low>Math.min(open,close)||high<low||
+        volume===null||volume<0||!Number.isSafeInteger(volume)||
+        (raw?.acml_tr_pbmn!=null&&raw.acml_tr_pbmn!==''&&(tradingValue===null||tradingValue<0||!Number.isSafeInteger(tradingValue))))
+        throw chartError('KIS_CHART_ROW_INVALID');
+      const bucket=nativePeriodKey(date,period);
+      if(seenDates.has(date)||seenPeriods.has(bucket))throw chartError('KIS_CHART_PERIOD_DUPLICATE');
+      seenDates.add(date);seenPeriods.add(bucket);
+      const calendarIncomplete=bucket===observedPeriod;
+      const periodStatus=calendarIncomplete?'CURRENT_PERIOD_PROVISIONAL':'PAST_PERIOD_FINALITY_UNCONFIRMED';
+      rows.push({date,open,high,low,close,volume,tradingValue,periodStatus,calendarIncomplete,
+        dataMetadata:{...dataFreshness({source:'KIS_NATIVE_PERIOD_OHLCV',date,receivedAt}),
+          requestedMarket:'J',requestedPeriod:period,requestedAdjustment:'0',responseSymbol:symbol,
+          identityBasis:'RESPONSE_SYMBOL',marketScope:'UNKNOWN',periodStatus,calendarIncomplete,sourceFinality:'UNCONFIRMED'}});
+    }
+    rows.sort((a,b)=>a.date.localeCompare(b.date));
+    const latest=rows.at(-1),metadata={...dataFreshness({source:'KIS_NATIVE_PERIOD_OHLCV',date:latest?.date??null,receivedAt}),
+      requestedMarket:'J',requestedPeriod:period,requestedAdjustment:'0',responseSymbol:symbol,identityBasis:'RESPONSE_SYMBOL',
+      marketScope:'UNKNOWN',periodStatus:latest?.periodStatus??'UNKNOWN',calendarIncomplete:latest?.calendarIncomplete??null,
+      sourceFinality:'UNCONFIRMED',sourceBusinessDates:rows.map(row=>row.date),maxRows:100,onePage:true,fullHistory:false,
+      requestStartDate:sourceDate(startDate),requestEndDate:sourceDate(endDate),priceUnit:'KRW',volumeUnit:'SHARES'};
+    return {symbol,period,source:'KIS_NATIVE_PERIOD_OHLCV',status:rows.length?'READY':'EMPTY',rows,metadata};
+  })();
+  pendingNativeChartRequests.set(key,pending);
+  try{const value=await pending;nativeChartCache.set(key,{createdAt:Date.now(),value:copyNativeChart(value)});
+    return {...copyNativeChart(value),requestCount:1,cacheStatus:'MISS'};
+  }finally{pendingNativeChartRequests.delete(key);}
+};
+
+// ========================================
+// EXPLICIT CURRENT-QUOTE SNAPSHOT
+// A single KIS response only; never fill missing metrics from another read.
+// ========================================
+const quoteError = (code,status=503) => Object.assign(new Error(code),{code,status});
+const copyQuoteSnapshot = value => JSON.parse(JSON.stringify(value));
+const fetchKisQuoteData = async (symbol,options={}) => {
+  if(typeof symbol!=='string'||!/^\d{6}$/.test(symbol))throw quoteError('KIS_QUOTE_SYMBOL_UNSUPPORTED',400);
+  if(!options||typeof options!=='object'||Array.isArray(options)||
+    Object.keys(options).some(key=>key!=='onDataRequest')||
+    (options.onDataRequest!==undefined&&typeof options.onDataRequest!=='function'))
+    throw quoteError('KIS_QUOTE_OPTIONS_INVALID',400);
+  const key=symbol+':J:CURRENT_QUOTE',now=Date.now(),cached=quoteSnapshotCache.get(key);
+  const result=(value,requestCount,cacheStatus)=>({...copyQuoteSnapshot(value),requestCount,cacheStatus,cacheTtlMs:KIS_OHLCV_CACHE_TTL_MS});
+  if(cached&&now-cached.createdAt<KIS_OHLCV_CACHE_TTL_MS)return result(cached.value,0,'HIT');
+  if(cached)quoteSnapshotCache.delete(key);
+  if(pendingQuoteSnapshotRequests.has(key))return result(await pendingQuoteSnapshotRequests.get(key),0,'COALESCED');
+  const pending=(async()=>{
+    const {normalizeKisQuoteSnapshot}=require('./kisQuoteSnapshot');
+    let accessToken;try{accessToken=await getKisAccessToken();}catch{throw quoteError('KIS_QUOTE_AUTH_FAILED');}
+    const url=new URL(`${KIS_BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-price`);
+    url.searchParams.set('FID_COND_MRKT_DIV_CODE','J');url.searchParams.set('FID_INPUT_ISCD',symbol);
+    const {body,receivedAt}=await runKisRequest(async()=>{
+      options.onDataRequest?.({symbol,operation:'CURRENT_QUOTE',requestedMarket:'J'});
+      const signal=AbortSignal.timeout(15000);
+      const failed=error=>quoteError(error?.name==='TimeoutError'||(signal.aborted&&signal.reason?.name==='TimeoutError')?
+        'KIS_QUOTE_REQUEST_TIMEOUT':'KIS_QUOTE_REQUEST_FAILED');
+      let response;
+      try{response=await fetch(url,{method:'GET',signal,headers:{'Content-Type':'application/json',
+        authorization:`Bearer ${accessToken}`,appkey:KIS_APP_KEY,appsecret:KIS_APP_SECRET,tr_id:'FHKST01010100'}});}
+      catch(error){throw failed(error);}
+      if(!response?.ok)throw quoteError('KIS_QUOTE_PROVIDER_HTTP_FAILED');
+      let body;try{body=await response.json();}catch(error){
+        if(signal.aborted||error?.name==='TimeoutError')throw failed(error);
+        throw quoteError('KIS_QUOTE_RESPONSE_INVALID');
+      }
+      return {body,receivedAt:new Date().toISOString()};
+    });
+    return normalizeKisQuoteSnapshot(body,{symbol,requestedMarket:'J',receivedAt});
+  })();
+  pendingQuoteSnapshotRequests.set(key,pending);
+  try{const value=await pending;
+    // An unavailable current quote must not become a reusable old-price fallback.
+    if(typeof value?.currentPrice==='number'&&Number.isFinite(value.currentPrice)&&value.currentPrice>0)
+      quoteSnapshotCache.set(key,{createdAt:Date.now(),value:copyQuoteSnapshot(value)});
+    return result(value,1,'MISS');
+  }finally{pendingQuoteSnapshotRequests.delete(key);}
+};
+
+// ========================================
 // EXPORT
 // ========================================
 
-return {fetchKisDailyOHLCV,
+return {fetchKisDailyOHLCV,fetchKisChartOHLCV,fetchKisQuoteData,
   // Reuse a cached token, never another reader's pending unbudgeted request or OHLCV cache.
   forkWithTransport(fetchImpl, {waitImpl}={}) {
     if(typeof fetchImpl!=='function')throw Error('TRANSPORT_REQUIRED');

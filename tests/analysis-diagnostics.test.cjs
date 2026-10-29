@@ -5,7 +5,7 @@ const {createRequire}=require('node:module'),{execFileSync}=require('node:child_
 const current=fs.readFileSync('server.js','utf8').replaceAll('\r\n','\n');
 function transport(payload,{status=200,timeout=false,source=current}={}){
   const calls=[],logs=[],timers=[],section=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a)));
-  const context={process:{env:{GEMINI_API_KEY:'TEST_ONLY_NOT_A_KEY'}},AbortController,sleep:async()=>{},
+  const context={require:name=>{assert.equal(name,'./services/aiAnalysisInput');return require('../services/aiAnalysisInput');},process:{env:{GEMINI_API_KEY:'TEST_ONLY_NOT_A_KEY'}},AbortController,sleep:async()=>{},
     setTimeout:(cb,ms)=>{timers.push(ms);return 1;},clearTimeout(){},console:{log:(...x)=>logs.push(x),warn:(...x)=>logs.push(x)},
     fetch:async(url,options)=>{calls.push({model:decodeURIComponent(new URL(url).pathname.split('/models/')[1].split(':')[0]),body:JSON.parse(options.body)});
       if(timeout){const e=Error('TEST_ONLY_PRIVATE_ERROR');e.name='AbortError';throw e;}

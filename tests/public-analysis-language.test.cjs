@@ -59,11 +59,11 @@ test('TEST_ONLY saved candidate AI explanations are translated without rewriting
 });
 test('TEST_ONLY new AI prompt preserves canonical input and API schema while requiring plain public wording',()=>{
  const source=fs.readFileSync('server.js','utf8'),a=source.indexOf('const buildGeminiPrompt ='),b=source.indexOf('// INDIVIDUAL STOCK AI ANALYSIS',a);
- const ctx={};vm.runInNewContext(source.slice(a,b)+'\nthis.build=buildGeminiPrompt;',ctx);
+ const ctx={...require('../services/aiAnalysisInput')};vm.runInNewContext(source.slice(a,b)+'\nthis.build=buildGeminiPrompt;',ctx);
  const data={quote:{testOnly:true,currentPrice:10000},strategy:c.fixture(),riskReward:{available:true},news:[]};
  const before=JSON.stringify(data),prompt=ctx.build(c.freeze(data));
  const input=prompt.split('분석 대상 실제 데이터:')[1].split('다음 JSON 형식으로만 답한다.')[0].trim();
- assert.deepEqual(JSON.parse(input),JSON.parse(JSON.stringify({quote:data.quote,strategy:data.strategy,riskReward:data.riskReward,suppliedNews:[]})));
+ assert.deepEqual(JSON.parse(input),JSON.parse(JSON.stringify(require('../services/aiAnalysisInput').buildSingleSupplyAiInput({quote:data.quote,strategy:data.strategy,riskReward:data.riskReward,suppliedNews:[]}))));
  for(const text of ['전략 계산 기준가','상단 가격 기준','하단 위험 기준','가격 추격','Signal은 신호선',
   '제공된 숫자, 기준일, 상태, 점수, 판정과 불확실성을 그대로 유지','API JSON key, 계산값, backend 판정은 변경하지 않는다.',
   'strategy.entryPrice와 정확히 동일해야 한다.','strategy.takeProfitPrice와 정확히 동일해야 한다.','strategy.stopLossPrice와 정확히 동일해야 한다.'])assert.ok(prompt.includes(text),text);

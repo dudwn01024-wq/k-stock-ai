@@ -6,8 +6,9 @@ const {dataFreshness,dateConsistency,sourceDate}=require('../services/dataFreshn
 // Compile real calculators only. Never initialize server, dotenv, live transports or persistence.
 const source=fs.readFileSync('server.js','utf8'),part=(start,end)=>source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
 let observedSupply=null,foreign=-1,institution=-2,latestVolume=200,latestClose=100;
-const prices=()=>Array.from({length:21},(_,i)=>({bizdate:new Date(Date.UTC(2026,9,14-i)).toISOString().slice(0,10),closePrice:i===0?latestClose:99,highPrice:120,lowPrice:90,volume:i===0?latestVolume:100}));
-const context={module:{exports:{}},dataFreshness,dateConsistency,sourceDate,isIntradayVolumePending,assessRecommendationVolume,
+const prices=()=>Array.from({length:21},(_,i)=>({bizdate:new Date(Date.UTC(2026,9,14-i)).toISOString().slice(0,10),closePrice:i===0?latestClose:99,highPrice:Math.max(120,latestClose??100),lowPrice:Math.min(90,latestClose??100),volume:i===0?latestVolume:100}));
+const context={...require('../services/kisRecommendationDaily'),
+  fetchKisDailyOHLCV:async()=>require('./helpers/kis-calculators.cjs').fixtureRows(prices(),{receivedAt:'2026-10-14T15:45:00+09:00'}),module:{exports:{}},dataFreshness,dateConsistency,sourceDate,isIntradayVolumePending,assessRecommendationVolume,
   NAVER_HEADERS:{},scheduledSupply:{resolve:()=>observedSupply},Date,console,
   parseNumber:value=>value===null||value===undefined||value===''?null:Number(value),round2:value=>Number.isFinite(value)?Number(value.toFixed(2)):null,
   average:nums=>Math.round(nums.reduce((a,b)=>a+b,0)/nums.length),getLatestDealTrend:data=>data.dealTrendInfos[0],

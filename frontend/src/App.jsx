@@ -11,7 +11,8 @@ import {projectRecommendationData} from './utils/scheduledSupply.js';
 import {reconcileDetailSupply} from './utils/detailSupply.js';
 import PublicInformation,{InvestmentNotice} from './PublicInformation.jsx';
 import {holdingGuidancePost} from './utils/holdingGuidanceAccess.js';
-import CandlestickChart from './CandlestickChart.jsx';
+import KisPeriodChart from './KisPeriodChart.jsx';
+import {createKisChartRequest} from './utils/kisChartRequest.js';
 import {createRecommendationLoader} from './utils/recommendationRun.js';
 import {aiAnalysisError} from './utils/aiAnalysisError.js';
 import { strategyExplanation } from './utils/strategyExplanation.js';
@@ -20,6 +21,8 @@ import './light-theme.css';
 import CurrentAnalysisSummary from './CurrentAnalysisSummary.jsx';
 import QuoteProvenance from './QuoteProvenance.jsx';
 import PricePlanReference from './PricePlanReference.jsx';
+import AiSupplyProvenance from './AiSupplyProvenance.jsx';
+import AnalysisExtensions from './AnalysisExtensions.jsx';
 import {pricePlanState} from './utils/pricePlan.js';
 import PageMeta from './components/PageMeta.jsx';
 import { POPULAR_STOCKS } from './stockCatalog.js';
@@ -46,12 +49,7 @@ import {
 const API_BASE_URL = '/api';
 
 const TIMEFRAMES = [
-  { label: '일봉', code: '1D' },
-  { label: '1주', code: '1W' },
-  { label: '1개월', code: '1M' },
-  { label: '3개월', code: '3M' },
-  { label: '6개월', code: '6M' },
-  { label: '1년', code: '1Y' }
+  {label:'일봉',code:'D'},{label:'주봉',code:'W'},{label:'월봉',code:'M'},{label:'년봉',code:'Y'}
 ];
 
 const formatKRW = (num, missing) => {
@@ -126,18 +124,10 @@ class RealStockBackendService {
     if (!response.ok) throw new Error(`현재가 API 오류 (${response.status})`);
     return response.json();
   }
-  async getStockChart(symbol, timeframe = '1D') {
-    const response = await fetch(
-      `${this.baseUrl}/stock/chart?symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`
-    );
-    if (!response.ok) throw new Error(`차트 API 오류 (${response.status})`);
-
-    const payload = await response.json();
-
-    return {
-      supported: payload?.supported !== false,
-      items: Array.isArray(payload?.chart) ? payload.chart : []
-    };
+  async getStockChart(symbol, period = 'D', {signal} = {}) {
+    const response=await fetch(`${this.baseUrl}/stock/kis-chart?symbol=${encodeURIComponent(symbol)}&period=${encodeURIComponent(period)}`,{signal});
+    if(!response.ok)throw Error(`KIS 차트 조회 오류 (${response.status})`);
+    return response.json();
   }
 
   async getStockNews(query) {
@@ -225,6 +215,7 @@ class RealStockBackendService {
       ?.status;
 
   return {
+    analysisExtensions:payload?.analysisExtensions ?? null,
     newsSnapshotId:payload?.newsSnapshotId ?? null,
     newsReceivedAt:payload?.newsReceivedAt ?? null,
     newsStatus:payload?.newsStatus ?? null,
@@ -511,8 +502,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const [activeName, setActiveName] = useState(routeSymbol || '삼성전자');
 
   const [quoteData, setQuoteData] = useState(null);
-  const [chartData, setChartData] = useState([]);
-  const [chartSupported, setChartSupported] = useState(true);
+  const [chartState,setChartState]=useState({status:'IDLE',symbol:null,period:'D',rows:[],metadata:null,error:null});
   const [newsList, setNewsList] = useState([]);
   const [strategyData, setStrategyData] = useState(null);
 
@@ -546,7 +536,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const [loading, setLoading] = useState(Boolean(routeSymbol));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
-  const [chartTimeframe, setChartTimeframe] = useState('1D');
+  const [chartTimeframe, setChartTimeframe] = useState('D');
   const [activeTab, setActiveTab] = useState('detail');
   const [showDetail, setShowDetail] = useState(Boolean(routeSymbol));
 
@@ -557,6 +547,8 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   }, [showDetail, loading, activeTab]);
 
   const backendService = useMemo(() => new RealStockBackendService(API_BASE_URL), []);
+  const chartLoader=useMemo(()=>createKisChartRequest({fetchImpl:(url,options)=>fetch(url,options),onState:setChartState}),[]);
+  useEffect(()=>()=>chartLoader.cancel(),[chartLoader]);
   const applyScheduledSupply=useCallback(view=>setSupplyView(view),[]);
   useEffect(()=>{
     const base=scheduledBaseRef.current;if(loading||isRefreshing||base?.symbol!==activeSymbol)return;
@@ -576,7 +568,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   },[backendService,isStockRoute]);
 
   const loadRealStockData = useCallback(
-    async (symbol, name, timeframe = '1D', refresh = false) => {
+    async (symbol, name, timeframe = 'D', refresh = false) => {
       if (refresh) setIsRefreshing(true);
       else setLoading(true);
 
@@ -589,7 +581,9 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       setAiError(null);
       setAiAnalysis(null);
       setQuoteData(null);
-      setChartData([]);
+      const period=TIMEFRAMES.some(value=>value.code===timeframe)?timeframe:'D';
+      setChartTimeframe(period);
+      void chartLoader.load({symbol,period}).catch(()=>{}); // Errors stay in the chart panel, independent of daily analysis.
       setNewsList([]);
       setStrategyData(null);
       setErrorMsg(null);
@@ -597,34 +591,32 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       try {
         // StrictMode effect replay subscribes to the same in-flight detail read.
         // No completed-result cache: back/forward and explicit refresh read fresh data.
-        const key=symbol+':'+timeframe;
+        const key=symbol; // Display-period changes never rerun daily analysis.
         let flight=detailFlightsRef.current.get(key);
         if(!flight){
           flight=Promise.all([
             backendService.getStockQuote(symbol),
-            backendService.getStockChart(symbol, timeframe),
             backendService.getStockDetail(symbol)
           ]);
           detailFlightsRef.current.set(key,flight);
           const clear=()=>{if(detailFlightsRef.current.get(key)===flight)detailFlightsRef.current.delete(key);};
           flight.then(clear,clear);
         }
-        const [quote, chartResult, detail] = await flight;
+        const [quote, detail] = await flight;
         if(quote?.symbol!==symbol)throw Error('종목 데이터를 불러오지 못했습니다.');
 
         if(request!==detailRequestRef.current)return;
         detailSnapshotRef.current={symbol,id:detail.newsSnapshotId};
         scheduledBaseRef.current={symbol,quote,strategy:detail.strategy};
         setQuoteData(quote);
-        setChartData(chartResult.items);
-        setChartSupported(chartResult.supported);
-        setChartTimeframe(timeframe);
         setNewsList(detail.news);
         setStrategyData(detail.strategy);
 
         setActiveSymbol(symbol);
-        setActiveName(quote?.stockName || name || symbol);
-        setSearchQuery(quote?.stockName || name || symbol);
+        // Names may come from the existing catalogue; price/metrics remain KIS-only.
+        const displayName=quote?.stockName||POPULAR_STOCKS.find(stock=>stock.code===symbol)?.name||name||symbol;
+        setActiveName(displayName);
+        setSearchQuery(displayName);
       } catch (error) {
         console.error(error);
         if(request===detailRequestRef.current)setErrorMsg(error?.message || '실제 데이터를 불러오지 못했습니다.');
@@ -633,7 +625,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       }
 
     },
-    [backendService]
+    [backendService,chartLoader]
   );
 
   const requestAIAnalysis = async () => {
@@ -655,7 +647,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
   const initialDetailSymbol=routeSymbol || null;
   useEffect(() => {
-    if(initialDetailSymbol)loadRealStockData(initialDetailSymbol,isStockRoute?routeSymbol:'삼성전자','1D');
+    if(initialDetailSymbol)loadRealStockData(initialDetailSymbol,isStockRoute?routeSymbol:'삼성전자','D');
     return()=>{
       // Invalidate late detail, search and manual AI responses on route exit/replay.
       ++detailRequestRef.current;
@@ -712,19 +704,10 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
     onNavigateStock(stock.code);
   };
 
-  const handleTimeframeChange = async (newTimeframe) => {
-    setChartTimeframe(newTimeframe);
-    setErrorMsg(null);
-
-    try {
-      const result = await backendService.getStockChart(activeSymbol, newTimeframe);
-      setChartSupported(result.supported);
-      setChartData(result.items);
-    } catch (error) {
-      setChartData([]);
-      setChartSupported(false);
-      setErrorMsg(error?.message || '차트 데이터를 불러오지 못했습니다.');
-    }
+  const handleTimeframeChange = (period) => {
+    if(!TIMEFRAMES.some(value=>value.code===period))return;
+    setChartTimeframe(period);
+    void chartLoader.load({symbol:activeSymbol,period}).catch(()=>{});
   };
 
   const changeRate = toNullableNumber(quoteData?.changeRate);
@@ -756,7 +739,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
   return (
     <div className={`public-home public-light-theme ${!isStockRoute&&recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
-      <PageMeta path={routeSymbol?'/stocks/'+routeSymbol:'/'} stockName={routeSymbol&&quoteData?.symbol===routeSymbol?quoteData.stockName:null}/>
+      <PageMeta path={routeSymbol?'/stocks/'+routeSymbol:'/'} stockName={routeSymbol&&quoteData?.symbol===routeSymbol?(quoteData.stockName||activeName):null}/>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
         <div className="home-brand flex items-center gap-3">
           <div className="home-brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -1944,11 +1927,9 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                     <BarChart2 className="w-4 h-4 text-emerald-400" />
                     실제 주가 차트
                   </h3>
-                  <p className="text-xs text-slate-400">조회된 일봉 데이터입니다. 최신 여부 확인이 필요합니다.</p>
+                  <p className="text-xs text-slate-400">KIS 원천 일·주·월·년봉 표시 · 기술·패턴·파동 분석 기준은 일봉입니다.</p>
                 </div>
-
-                <p className="text-xs text-slate-400">마지막 일봉 — {describeDataMetadata(chartData.at(-1)?.dataMetadata)}</p>
-                <p className="text-xs text-slate-400">차트의 OHLC·거래량은 Naver 일별 응답 기준입니다. 시장·세션 범위와 조정주가 여부는 미확인입니다. 위 시세 집계 및 KIS 분석의 거래량과 같다고 가정하지 마세요.</p>
+                <p className="text-xs text-slate-400">표시 주기를 바꿔도 일봉 분석·점수·가격 기준은 다시 계산하지 않습니다. 분봉은 제공하지 않습니다.</p>
                 <div className="flex items-center bg-slate-950 rounded-xl p-1 border border-slate-800 text-xs overflow-x-auto">
                   {TIMEFRAMES.map((tf) => (
                     <button
@@ -1967,19 +1948,14 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                 </div>
               </div>
 
-              {!chartSupported ? (
-                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
-                  <Info className="w-5 h-5" />
-                  <span>일봉 차트 자료를 확인하지 못했습니다.</span>
-                </div>
-              ) : chartData.length > 0 ? (
-                <CandlestickChart rows={chartData}/>
-              ) : (
-                <div className="h-72 flex flex-col items-center justify-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500 text-xs space-y-2">
-                  <Info className="w-5 h-5" />
-                  <span>표시할 실제 차트 데이터가 없습니다.</span>
-                </div>
-              )}
+              <KisPeriodChart key={activeSymbol+':'+chartTimeframe}
+                rows={chartState.symbol===activeSymbol&&chartState.period===chartTimeframe?chartState.rows:[]}
+                period={chartTimeframe} metadata={chartState.symbol===activeSymbol&&chartState.period===chartTimeframe?chartState.metadata:null}
+                status={chartState.symbol===activeSymbol&&chartState.period===chartTimeframe?chartState.status:'LOADING'}
+                error={chartState.error}
+                onCancel={()=>chartLoader.cancel()}
+                onRetry={()=>{void chartLoader.load({symbol:activeSymbol,period:chartTimeframe}).catch(()=>{});}}/>
+
             </section><details className="analysis-accordion"><summary>패턴 분석 · KIS 일봉 기준</summary><div className="accordion-content">
 {/* =========================================
       패턴 분석
@@ -2043,7 +2019,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                     }`}
                   >
                     {pattern?.status === 'CONFIRMED'
-                      ? '확정'
+                      ? '종가 확인'
                       : pattern?.status === 'CANDIDATE'
                         ? '후보'
                         : pattern?.status || ''}
@@ -2068,13 +2044,14 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       {/* 엘리엇 파동 */}
       <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
         <span className="text-[11px] text-slate-400 block mb-2">
-          엘리엇 파동
+          기존 엘리엇 5파 외형
         </span>
+        <p className="text-[11px] text-slate-500 mb-2">기존 점수에 사용하는 단순 외형입니다. 아래 확장 파동에서는 추가 규칙·ABC·대안을 별도로 확인합니다.</p>
 
         {strategyData?.elliottWave?.detected === true ? (
           <>
             <span className="text-sm font-semibold text-emerald-400">
-              파동 구조 감지
+              기존 5파 외형 후보
             </span>
 
             <p className="text-[11px] text-slate-500 mt-1">
@@ -2092,6 +2069,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
 
   </div></details>
+<AnalysisExtensions data={strategyData?.analysisExtensions}/>
 <details className="analysis-accordion"><summary>기술조건 상세 집계</summary><div className="accordion-content">
 {/* =========================================
       기술조건 요약
@@ -2188,6 +2166,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
                 </div>
               ) : aiAnalysis ? (
                 <div className="space-y-4 text-xs">
+                  <AiSupplyProvenance context={aiAnalysis.supplyContext} current={supplyView?.assessment}/>
                   {aiAnalysis?.analysis?.summary && (
                     <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 space-y-1">
                       <span className="text-slate-400 font-semibold uppercase tracking-wider block">종합 요약</span>

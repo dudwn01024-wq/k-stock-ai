@@ -11,7 +11,7 @@ const bindings=[...appSource.slice(appSource.indexOf('export default function Ap
 function load(file,react=React){
   const module={exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,
-    {module,exports:module.exports,Intl,Date,URL,console,fetch:()=>assert.fail('TEST_ONLY_EXTERNAL_CALL_FORBIDDEN'),
+    {module,exports:module.exports,Intl,Date,URL,console,...require('./helpers/ui-vm-globals.cjs'),fetch:()=>assert.fail('TEST_ONLY_EXTERNAL_CALL_FORBIDDEN'),
       window:{location:{hostname:'127.0.0.1'}},require:name=>{
         if(name==='react')return react;if(name.endsWith('.css'))return {};
         if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});

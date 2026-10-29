@@ -12,14 +12,17 @@ async function routes({missingQuote=false,priceDay='2026-10-23',metricsDay=price
   const handlers=new Map(),seen=[],held=[];
   const quote={symbol:'000001',stockName:'TEST_ONLY',currentPrice:100,foreignerNet:999,institutionNet:999,
     dataMetadata:{price:m(priceDay),quoteMetrics:m(metricsDay),supply:m(priceDay)}};
-  const assessment={source:'KIS_DAILY_INVESTOR',status:'READY',sourceTradeDate:supplyDay,eligibleForSupplyScore:true,
-    foreignerNet:1,institutionNet:2,netSupplyTotal:3,metadata:{...m(supplyDay),source:'KIS_DAILY_INVESTOR'}};
+  const {normalizeDailyInvestor,assessDailyInvestor}=require('../services/kisDailyInvestor');
+  const assessment=supplyDay?assessDailyInvestor(normalizeDailyInvestor({rt_cd:'0',output:[{stck_bsop_date:supplyDay.replaceAll('-',''),frgn_ntby_qty:'1',orgn_ntby_qty:'2'}]},
+    {symbol:'000001',targetDate:supplyDay,observedAt:supplyDay+'T12:00:00Z'}),{now:Date.parse(supplyDay+'T12:00:00Z'),scoreEnabled:true}):
+    {symbol:'000001',source:'KIS_DAILY_INVESTOR',status:'UNAVAILABLE',sourceTradeDate:null,eligibleForSupplyScore:false,foreignerNet:1,institutionNet:2,netSupplyTotal:3,
+      metadata:{...m(supplyDay),source:'KIS_DAILY_INVESTOR'}};
   if(!kisMetadata)delete assessment.metadata;
   const chart={latestClose:100,latestDate:dailyDay,ma5:100,ma20:99,ma60:98,rsi14:50,
     macd:{macd:2,signal:1,histogram:1},bollingerBands:{position:50},atr14:10,
     supportResistance:{nearestSupport:{price:100},nearestResistance:{price:120}}};
-  const helpers=fs.existsSync(require('node:path').join(__dirname,'../services/analysisProvenance.js'))?require('../services/analysisProvenance'):{};
-  const context={...freshness,...helpers,assessRecommendationVolume,calculateTradingStrategy,
+  const helpers=fs.existsSync(require('node:path').join(__dirname,'../services/analysisProvenance.js'))?{...require('../services/analysisProvenance'),...require('../services/analysisExtensions')}:{};
+  const context={...freshness,...helpers,...require('../services/aiAnalysisInput'),assessRecommendationVolume,calculateTradingStrategy,
     app:{get:(url,fn)=>handlers.set(url,fn)},validateSymbol:()=>true,
     scheduledSupply:{resolve:()=>kis?assessment:null,rememberDetail:()=>{}},
     holdingGuidanceAccess:{rememberStrategy:x=>held.push(x)},
@@ -79,9 +82,14 @@ test('TEST_ONLY KIS values with missing metadata cannot borrow the old Naver sup
   for(const path of ['/api/stock/detail-analysis','/api/stock/ai-analysis']){
     const f=await routes({kisMetadata:false}),r=await f.call(path);
     assert.equal(r.status,200);assert.equal(r.body.marketContext.foreignerNet,1);
-    assert.equal(r.body.dataMetadata.supply.sourceBusinessDate,null);
-    assert.equal(r.body.dataMetadata.supply.source,null);
-    assert.equal(r.body.dataMetadata.dateConsistency,'UNKNOWN');
+    if(path==='/api/stock/ai-analysis'){
+      assert.equal(r.body.dataMetadata.supply.sourceBusinessDate,'2026-10-22');
+      assert.equal(r.body.dataMetadata.supply.source,'KIS_DAILY_INVESTOR');assert.equal(r.body.dataMetadata.dateConsistency,'MISMATCH');
+      assert.equal(r.body.quote.dataMetadata.supply,undefined);
+    }else{
+      assert.equal(r.body.dataMetadata.supply.sourceBusinessDate,null);assert.equal(r.body.dataMetadata.supply.source,null);
+      assert.equal(r.body.dataMetadata.dateConsistency,'UNKNOWN');
+    }
   }
 });
 for(const timestamp of ['2026-10-23T12:00:00','2026-02-30T12:00:00Z','2026-10-23T24:00:00+09:00','2026-10-23T12:00:00+14:01','2026-10-23T12:00:00Z\n'])

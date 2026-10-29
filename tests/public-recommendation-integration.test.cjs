@@ -100,7 +100,7 @@ test('production 50-stock scanner retains concurrency two, scoring, ranking and 
 });
 
 test('existing Gemini validator keeps backend identity/grade and supplied-news evidence only',async()=>{
-  const context=vm.createContext({RECOMMENDATION_AI_LIMIT:3,callGeminiPromptWithRetry:async prompt=>{
+  const context=vm.createContext({...require('../services/aiAnalysisInput'),RECOMMENDATION_AI_LIMIT:3,callGeminiPromptWithRetry:async prompt=>{
     assert.match(prompt,/합성 제공 기사/);return {analysis:{recommendations:[{symbol:'000001',grade:'BUY',currentPrice:999,score:100,summary:'합성 설명',newsEvidence:[{title:'없는 기사'},{title:'합성 제공 기사',url:'https://wrong.invalid'}]},{symbol:'999999',summary:'없는 후보'}]}};
   }});
   vm.runInContext(section('const buildRecommendationGeminiPrompt =','// API - HEALTH CHECK')+'\nthis.analyze=analyzeRecommendationsWithGemini;',context);

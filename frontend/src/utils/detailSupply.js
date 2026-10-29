@@ -129,6 +129,6 @@ export function reconcileDetailSupply(base,view,mapStrategy){
     newsStatus:base.strategy?.newsStatus,supplyAssessment:a,supplyPresentation:presentation,
     dataMetadata:withDataMetadata(base.strategy?.dataMetadata,{supply:metadata})});
   return {strategy,quote:{...base.quote,...values,supplyDate:currentReady?a.sourceTradeDate??null:null,supplyAssessment:a,supplyPresentation:presentation,
-    naverDailySupply:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
+    naverDailySupply:base.quote.dataMetadata?.price?.source==='KIS_CURRENT_QUOTE'?null:base.quote.naverDailySupply??{foreignerNet:base.quote.foreignerNet,institutionNet:base.quote.institutionNet,supplyDate:base.quote.supplyDate},
     dataMetadata:withDataMetadata(base.quote.dataMetadata,{supply:metadata})}};
 }

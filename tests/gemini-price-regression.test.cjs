@@ -7,7 +7,7 @@ const section=(a,b)=>source.slice(source.indexOf(a),source.indexOf(b,source.inde
 const safeMessage='AI 해설 서비스를 일시적으로 이용하기 어렵습니다. 잠시 후 다시 시도해 주세요.';
 function gemini(sequence={},override){
  const calls=[],logs=[],delays=[],timers=[],attempts={};
- const context={process:{env:{GEMINI_API_KEY:'TEST_ONLY_NOT_A_REAL_KEY',...(override?{GEMINI_MODEL:override}:{})}},AbortController,
+ const context={require:name=>{assert.equal(name,'./services/aiAnalysisInput');return require('../services/aiAnalysisInput');},process:{env:{GEMINI_API_KEY:'TEST_ONLY_NOT_A_REAL_KEY',...(override?{GEMINI_MODEL:override}:{})}},AbortController,
   console:{log:(...v)=>logs.push(v),warn:(...v)=>logs.push(v)},sleep:async ms=>delays.push(ms),
   setTimeout:(cb,ms)=>{timers.push(ms);return 1;},clearTimeout:()=>{},fetch:async(url,options)=>{
    const model=decodeURIComponent(new URL(url).pathname.split('/models/')[1].split(':')[0]);calls.push(model);

@@ -53,11 +53,11 @@ test('TEST_ONLY explicit load switches once to the unchanged detail App with exa
  assert.equal(typeof detail.props.onNavigateStock,'function');assert.equal(h.button(),undefined);
  assert.equal(renderToStaticMarkup(detail),'<p>TEST_ONLY_DETAIL_005930</p>');assert.equal(h.appMounts,1);
 });
-test('TEST_ONLY consecutive load clicks are idempotent; StrictMode detail effect replay issues exactly three mock GETs',async()=>{
+test('TEST_ONLY consecutive load clicks are idempotent; StrictMode detail replay keeps two coalesced reads plus the accepted native chart',async()=>{
  const h=gate('000660'),b=h.button();b.props.onClick();b.props.onClick();b.props.onClick();
  const element=h.render();assert.equal(h.requested,true);
  const detail=detailHarness({symbol:element.props.routeSymbol});detail.render();detail.runEffects(true);await tick();
- assert.deepEqual(Array.from(detail.calls,x=>x.pathname),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+ assert.deepEqual(Array.from(detail.calls,x=>x.pathname),['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart']);
  assert.ok(detail.calls.every(url=>url.searchParams.get('symbol')==='000660'));
  assert.equal(detail.state('aiAnalysis'),null);assert.equal(detail.state('quoteData').symbol,'000660');
  assert.equal(detail.state('strategyData').newsSnapshotId,'TEST_ONLY_SNAPSHOT_000660');

@@ -3,6 +3,7 @@
 const {sourceDate,dataFreshness}=require('./dataFreshness');
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
+const KIS_PROVIDER='KIS_DAILY_OHLCV';
 const invalid=()=>Object.assign(new Error('OUTCOME_BASELINE_INVALID'),{code:'OUTCOME_BASELINE_INVALID'});
 const mismatch=()=>Object.assign(new Error('EXPANDED_BASELINE_SOURCE_MISMATCH'),{code:'EXPANDED_BASELINE_SOURCE_MISMATCH'});
 const isoTime=v=>typeof v==='string'&&/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(v)
@@ -15,18 +16,21 @@ function normalizeOutcomeBaseline(value,symbol){
   if(typeof value!=='object'||Array.isArray(value)||!['DAILY_CLOSE','DAILY_CLOSE_PENDING'].includes(value.kind)
     ||!isNaverKrStockItemCode(symbol)||value.symbol!==symbol
     ||typeof value.businessDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value.businessDate)
-    ||sourceDate(value.businessDate)!==value.businessDate||value.provider!==PROVIDER
+    ||sourceDate(value.businessDate)!==value.businessDate||![PROVIDER,KIS_PROVIDER].includes(value.provider)
     ||!isoTime(value.receivedAt)
     ||(value.sourceTimestamp!=null&&(dataFreshness({timestamp:value.sourceTimestamp}).sourceTimestamp!==value.sourceTimestamp
       ||value.sourceTimestamp.slice(0,10)!==value.businessDate)))throw invalid();
+  const kis=value.provider===KIS_PROVIDER;
+  if(kis&&(!/^\d{6}$/.test(symbol)||value.requestMarket!=='J'||value.requestPeriod!=='D'||value.requestAdjustment!=='0'))throw invalid();
   const pending=value.kind==='DAILY_CLOSE_PENDING';
   if(pending?(Object.hasOwn(value,'price')||value.businessDate!==observedKstDate(value.receivedAt)):
     (typeof value.price!=='number'||!Number.isFinite(value.price)||value.price<=0))throw invalid();
   // Do not retroactively apply finality rules to immutable legacy DAILY_CLOSE records.
   return {kind:value.kind,symbol,...(pending?{}:{price:value.price}),businessDate:value.businessDate,
-    provider:PROVIDER,receivedAt:value.receivedAt,sourceTimestamp:value.sourceTimestamp??null};
+    provider:value.provider,receivedAt:value.receivedAt,sourceTimestamp:value.sourceTimestamp??null,
+    ...(kis?{requestMarket:'J',requestPeriod:'D',requestAdjustment:'0'}:{})};
 }
-function baselineFromDailyRow(symbol,row,receivedAt){
+function baselineFromDailyRow(symbol,row,receivedAt,{provider=PROVIDER}={}){
   if(receivedAt==null)return null;
   const observedDate=observedKstDate(receivedAt);
   if(!observedDate||sourceDate(row?.date)!==row?.date||row.date>observedDate
@@ -35,7 +39,8 @@ function baselineFromDailyRow(symbol,row,receivedAt){
   const pending=row.date===observedDate;
   return normalizeOutcomeBaseline({kind:pending?'DAILY_CLOSE_PENDING':'DAILY_CLOSE',symbol,
     ...(pending?{}:{price:row.close}),businessDate:row.date,
-    provider:PROVIDER,receivedAt,sourceTimestamp:row.sourceTimestamp??null},symbol);
+    provider,receivedAt,sourceTimestamp:row.sourceTimestamp??null,
+    ...(provider===KIS_PROVIDER?{requestMarket:'J',requestPeriod:'D',requestAdjustment:'0'}:{})},symbol);
 }
 function fastBaseline(fast){
   const baseline=normalizeOutcomeBaseline(fast?.outcomeBaseline,fast?.symbol);
@@ -56,4 +61,4 @@ function verifyCandidateBaseline(candidate,fast){
   if(JSON.stringify(baseline)!==JSON.stringify(fastBaseline(fast)))throw mismatch();
   return baseline;
 }
-module.exports={PROVIDER,isoTime,observedKstDate,normalizeOutcomeBaseline,baselineFromDailyRow,fastBaseline,attachOutcomeBaseline,verifyCandidateBaseline};
+module.exports={PROVIDER,KIS_PROVIDER,isoTime,observedKstDate,normalizeOutcomeBaseline,baselineFromDailyRow,fastBaseline,attachOutcomeBaseline,verifyCandidateBaseline};

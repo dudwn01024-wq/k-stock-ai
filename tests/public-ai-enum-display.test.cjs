@@ -78,7 +78,7 @@ test('TEST_ONLY saved candidate AI uses same display policy, retaining score/gra
  assert.equal(JSON.stringify(props),before);
 });
 function promptFunction(start,end,name){const source=fs.readFileSync('server.js','utf8'),a=source.indexOf(start),b=source.indexOf(end,a);
- const ctx={};vm.runInNewContext(source.slice(a,b)+'\nthis.build='+name+';',ctx);return ctx.build;}
+ const ctx={...require('../services/aiAnalysisInput')};vm.runInNewContext(source.slice(a,b)+'\nthis.build='+name+';',ctx);return ctx.build;}
 const promptRules=prompt=>{for(const text of ['괄호로 병기하지 않는다.','신선도 UNKNOWN은 최신 여부 미확인','CHASE_CAUTION은 가격 추격 주의',
  'ENTRY_CANDIDATE는 분석 조건 충족','DATA_INSUFFICIENT는 판단 보류','Histogram 계산 구조','확인되지 않은 신호를 긍정적으로 바꾸지 않는다.',
  '구조화된 enum 필드(signal, grade 등)는 기존 계약과 backend 값 그대로 유지한다.'])assert.ok(prompt.includes(text),text);};
@@ -88,7 +88,7 @@ test('TEST_ONLY individual AI prompt changes prose policy only and retains exact
  const data={quote:{testOnly:true,currentPrice:10000,dataMetadata:{freshnessStatus:'UNKNOWN'}},strategy,riskReward:{available:true},news:[]};
  const before=JSON.stringify(data),prompt=build(c.freeze(data));promptRules(prompt);
  const input=JSON.parse(prompt.split('분석 대상 실제 데이터:')[1].split('다음 JSON 형식으로만 답한다.')[0].trim());
- assert.deepEqual(input,JSON.parse(JSON.stringify({quote:data.quote,strategy:data.strategy,riskReward:data.riskReward,suppliedNews:[]})));
+ assert.deepEqual(input,JSON.parse(JSON.stringify(require('../services/aiAnalysisInput').buildSingleSupplyAiInput({quote:data.quote,strategy:data.strategy,riskReward:data.riskReward,suppliedNews:[]}))));
  assert.equal(input.strategy.finalAssessment.status,'CHASE_CAUTION');assert.equal(input.quote.dataMetadata.freshnessStatus,'UNKNOWN');
  const schema=JSON.parse(prompt.split('다음 JSON 형식으로만 답한다.')[1].split('추가 규칙:')[0].trim());
  assert.equal(schema.strategyExplanation.entryPrice,null);assert.equal(schema.strategyExplanation.targetPrice,null);
@@ -102,7 +102,7 @@ test('TEST_ONLY candidate AI prompt retains backend grade, scores, evidence and 
   strategy:c.fixture(),riskReward:{available:true},newsAssessment:{newsPassed:null},news:[]}];
  const before=JSON.stringify(candidates);let supplied;const prompt=build(c.freeze(candidates),value=>{supplied=value;});promptRules(prompt);
  assert.equal(supplied[0].grade,'PRIORITY_CANDIDATE');assert.equal(supplied[0].score,4);
- assert.equal(supplied[0].strategy,candidates[0].strategy);assert.equal(supplied[0].dataMetadata.freshnessStatus,'UNKNOWN');
+ assert.deepEqual(supplied[0].strategy,require('../services/aiAnalysisInput').buildSingleSupplyAiInput({quote:{symbol:candidates[0].symbol},strategy:candidates[0].strategy}).strategy);assert.equal(supplied[0].dataMetadata.freshnessStatus,'UNKNOWN');
  const schema=JSON.parse(prompt.split('각 후보에 대해 다음 형식으로 반환한다.')[1].split('내부 코드와 MACD 설명 표시 규칙')[0].trim());
  assert.equal(schema.recommendations[0].grade,'backend grade 그대로');assert.equal(JSON.stringify(candidates),before);
 });

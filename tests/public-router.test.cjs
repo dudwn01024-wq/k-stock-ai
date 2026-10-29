@@ -1,5 +1,6 @@
 'use strict';
 require('./helpers/local-only.cjs');
+const uiGlobals=require('./helpers/ui-vm-globals.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),{createRequire}=require('node:module'),{execFileSync}=require('node:child_process');
 const front=createRequire(require.resolve('../frontend/package.json')),React=front('react');
@@ -10,7 +11,7 @@ const base='0cf0cb7a5652380c16b6b51794ee1fd885168d2e';
 function routeModule(App=()=>React.createElement('p',null,'TEST_ONLY Existing App'),routerLibrary=front('react-router-dom')){
  const module={exports:{}};
  vm.runInNewContext(transformSync(fs.readFileSync('frontend/src/router.jsx','utf8'),{loader:'jsx',format:'cjs'}).code,{
-  module,exports:module.exports,require:name=>{
+  ...uiGlobals,module,exports:module.exports,require:name=>{
    if(name==='react')return React;if(name==='react-router-dom')return routerLibrary;
    if(name==='./components/PublicPageLayout.jsx')return pageModule(require.resolve('../frontend/src/components/PublicPageLayout.jsx'));
    if(name==='./components/PageMeta.jsx')return pageModule(require.resolve('../frontend/src/components/PageMeta.jsx'));
@@ -22,7 +23,7 @@ function routeModule(App=()=>React.createElement('p',null,'TEST_ONLY Existing Ap
 function pageModule(entry=require.resolve('../frontend/src/pages/PublicPages.jsx'),{App,routerLibrary=front('react-router-dom'),react=React}={}){
  const load=file=>{const module={exports:{}};
   vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,{
-   module,exports:module.exports,fetch:()=>assert.fail('TEST_ONLY_PAGE_FETCH_FORBIDDEN'),require:name=>{
+   ...uiGlobals,module,exports:module.exports,fetch:()=>assert.fail('TEST_ONLY_PAGE_FETCH_FORBIDDEN'),require:name=>{
     if(name==='react')return react;if(name==='react-router-dom')return routerLibrary;if(name.endsWith('.css'))return {};
     if(name==='./App.jsx'&&App)return {__esModule:true,default:App};
     assert.ok(name.startsWith('.'));return load(path.resolve(path.dirname(file),name));
@@ -49,7 +50,7 @@ test('TEST_ONLY browser factory consumes the same small route table without extr
 });
 test('TEST_ONLY / renders existing App unchanged inside router with zero network',()=>{
  const file=require.resolve('./light-theme-ui.test.cjs'),actual=createRequire(file),req=name=>name==='node:test'?{test:()=>{}}:actual(name);req.resolve=actual.resolve;
- const context={require:req,module:{exports:{}},console,URL};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+ const context={...uiGlobals,require:req,module:{exports:{}},console,URL};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
  const App=context.module.exports.loader()(require.resolve('../frontend/src/App.jsx')).default;
  const direct=renderToStaticMarkup(React.createElement(App));
  const router=createMemoryRouter(routeModule(App).publicRoutes,{initialEntries:['/']});
@@ -127,7 +128,7 @@ test('TEST_ONLY explanation navigation, return home and back/forward render only
 test('TEST_ONLY independent policy routes and footer consume one exact policy source',()=>{
  require('./helpers/public-information-boundary.cjs')('2bb9e1cd4933981a4055c11906a7c9b22af6394f');
  const file=require.resolve('./light-theme-ui.test.cjs'),actual=createRequire(file),req=name=>name==='node:test'?{test:()=>{}}:actual(name);req.resolve=actual.resolve;
- const context={require:req,module:{exports:{}},console,URL};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
+ const context={...uiGlobals,require:req,module:{exports:{}},console,URL};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);
  const load=context.module.exports.loader(),policy=load(require.resolve('../frontend/src/components/PublicPolicyContent.jsx'));
  for(const [Component,Page] of [[policy.InvestmentNoticeContent,pageModule().InvestmentNoticePage],[policy.PrivacyContent,pageModule().PrivacyPage]]){
   const body=renderToStaticMarkup(React.createElement(Component,{includeTitle:false}));

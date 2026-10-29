@@ -1,5 +1,6 @@
 'use strict';
 require('./helpers/local-only.cjs');
+const {AbortController,setTimeout,clearTimeout}=require('./helpers/ui-vm-globals.cjs');
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{createRequire}=require('node:module');
 const frontRequire=createRequire(require.resolve('../frontend/package.json'));
@@ -33,13 +34,13 @@ const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'
   news:[{title:'TEST_ONLY '+symbol,summary:'TEST_ONLY',url:null}],strategy:strategy(),chartAnalysis:{},
   newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1},
   marketContext:{newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1}}});
-function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode='expanded500'}={}){
-  let states=[],refs=[],effects=[],cleanups=[];const calls=[],navigations=[],document=require('./helpers/public-meta-dom.cjs')();let stateCursor=0,refCursor=0;
+function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,symbol=null,mode='expanded500'}={}){
+  let states=[],refs=[],memos=[],effects=[],cleanups=[];const calls=[],navigations=[],document=require('./helpers/public-meta-dom.cjs')();let stateCursor=0,refCursor=0,memoCursor=0;
   let props={routeSymbol:symbol,onNavigateStock:next=>navigate(next)};
   const react={...React,useState:initial=>{const store=states,i=stateCursor++;if(!(i in store))store[i]=bindings[i]==='recommendationMode'?mode:initial;
     return [store[i],value=>{store[i]=typeof value==='function'?value(store[i]):value;}];},
     useRef:initial=>{const i=refCursor++;return refs[i]??(refs[i]={current:initial});},
-    useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn};
+    useEffect:fn=>effects.push(fn),useMemo:(fn,deps)=>{const i=memoCursor++,old=memos[i];if(old&&deps?.length===old.deps?.length&&deps.every((v,j)=>v===old.deps[j]))return old.value;const value=fn();memos[i]={deps,value};return value;},useCallback:fn=>fn};
   const fetch=async (value,init={})=>{
     if(init.method&&init.method!=='GET')throw Error('TEST_ONLY_MUTATION_FORBIDDEN');
     const url=new URL(value,'http://127.0.0.1');calls.push(url);
@@ -47,7 +48,11 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode=
     switch(url.pathname){
       case '/api/stock/search':body={symbol:'005930',name:'TEST_ONLY 삼성전자'};break;
       case '/api/stock/quote':body=quoteResponse?await quoteResponse(symbol):{symbol,stockName:'TEST_ONLY '+symbol,currentPrice:100};break;
-      case '/api/stock/chart':body={chart:[],supported:false};break;
+      case '/api/stock/kis-chart':body={symbol,period:url.searchParams.get('period'),source:'KIS_NATIVE_PERIOD_OHLCV',status:'EMPTY',rows:[],
+        metadata:{source:'KIS_NATIVE_PERIOD_OHLCV',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:'2026-10-29T01:00:00Z',
+          requestedMarket:'J',requestedPeriod:url.searchParams.get('period'),requestedAdjustment:'0',responseSymbol:symbol,identityBasis:'RESPONSE_SYMBOL',
+          marketScope:'UNKNOWN',periodStatus:'UNKNOWN',calendarIncomplete:null,maxRows:100,onePage:true,fullHistory:false,sourceFinality:'UNCONFIRMED',
+          priceUnit:'KRW',volumeUnit:'SHARES',sourceBusinessDates:[],requestStartDate:'2026-01-01',requestEndDate:'2026-10-29'}};if(chartResponse)body=await chartResponse({symbol,period:url.searchParams.get('period'),init},body);break;
       case '/api/stock/detail-analysis':body=detailResponse?await detailResponse(symbol):detail(symbol);break;
       case '/api/stock/ai-analysis':body=ai?await ai(url):{symbol,newsSnapshotId:url.searchParams.get('newsSnapshotId'),analysis:{summary:'TEST_ONLY 해설'}};break;
       case '/api/stock/recommendation-mode':body={universeMode:mode,settings:{aiEnabled:false}};break;
@@ -61,7 +66,7 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode=
     if(cache.has(file))return cache.get(file);
     const module={exports:{}};
     vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,
-      {module,exports:module.exports,URL,Intl,Date,Number,Set,Map,document,console:{error(){}},fetch,
+      {module,exports:module.exports,URL,Intl,Date,Number,Set,Map,AbortController,setTimeout,clearTimeout,document,console:{error(){}},fetch,
         window:{location:{hostname:'127.0.0.1'},sessionStorage:{}},require:name=>{
           if(name==='react')return react;if(name.endsWith('.css'))return {};
           if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});
@@ -72,7 +77,7 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode=
     cache.set(file,module.exports);return module.exports;
   };
   const App=load(appFile).default;
-  const render=()=>{stateCursor=0;refCursor=0;effects=[];return App(props);};
+  const render=()=>{stateCursor=0;refCursor=0;memoCursor=0;effects=[];return App(props);};
   const unmount=()=>{cleanups.forEach(fn=>fn?.());cleanups=[];};
   const runEffects=(strict=false)=>{
     const setups=effects.slice();cleanups=setups.map(fn=>fn());
@@ -80,7 +85,7 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,symbol=null,mode=
   };
   const navigate=next=>{
     if(next===props.routeSymbol)return;
-    navigations.push(next===null?'/':'/stocks/'+next);unmount();states=[];refs=[];
+    navigations.push(next===null?'/':'/stocks/'+next);unmount();states=[];refs=[];memos=[];
     props={...props,routeSymbol:next};render();runEffects();
   };
   const state=name=>states[bindings.indexOf(name)];
@@ -99,7 +104,7 @@ test('TEST_ONLY search, render, news view and holder consume one detail response
   const h=harness();h.render();h.effects.forEach(fn=>fn());await tick();
   assert.deepEqual(h.calls.map(x=>x.pathname),['/api/stock/recommendation-mode']);h.calls.length=0;
   await h.select('005930');
-  assert.deepEqual(h.calls.map(x=>x.pathname),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+  assert.deepEqual(h.calls.map(x=>x.pathname),['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart']);
   assert.deepEqual(JSON.parse(JSON.stringify(h.state('newsList'))),detail('005930').news);
   assert.deepEqual(JSON.parse(JSON.stringify(h.state('strategyData').newsAssessment)),detail('005930').marketContext.newsAssessment);
   assert.equal(h.state('strategyData').newsSnapshotId,'TEST_ONLY_SNAPSHOT_005930');
@@ -111,11 +116,11 @@ test('TEST_ONLY search, render, news view and holder consume one detail response
 });
 
 test('TEST_ONLY first detail and changing stock both reset to daily candles with the daily button selected',async()=>{
-  const h=harness();await h.select('005930');assert.equal(h.state('chartTimeframe'),'1D');
-  assert.equal(h.calls.find(x=>x.pathname.endsWith('/chart')).searchParams.get('timeframe'),'1D');
+  const h=harness();await h.select('005930');assert.equal(h.state('chartTimeframe'),'D');
+  assert.equal(h.calls.find(x=>x.pathname.endsWith('/kis-chart')).searchParams.get('period'),'D');
   const daily=visit(h.render(),n=>n.type==='button'&&n.props.children==='일봉');assert.equal(daily.props['aria-pressed'],true);
-  h.states[bindings.indexOf('chartTimeframe')]='6M';await h.select('000660');
-  assert.equal(h.state('chartTimeframe'),'1D');assert.equal(h.calls.filter(x=>x.pathname.endsWith('/chart')).at(-1).searchParams.get('timeframe'),'1D');
+  h.states[bindings.indexOf('chartTimeframe')]='Y';await h.select('000660');
+  assert.equal(h.state('chartTimeframe'),'D');assert.equal(h.calls.filter(x=>x.pathname.endsWith('/kis-chart')).at(-1).searchParams.get('period'),'D');
   assert.equal(h.calls.filter(x=>x.pathname.endsWith('/ai-analysis')).length,0);
 });
 
@@ -126,10 +131,10 @@ test('TEST_ONLY chart range changes read only chart data and preserve the same K
   const h=harness({detailResponse:async symbol=>({...detail(symbol),chartAnalysis,dataPoints:130})});
   await h.select('005930');const before=h.state('strategyData'),tree=h.render();
   assert.ok(visit(tree,n=>n.type==='p'&&n.props.children==='KIS 일봉 기준 · 차트 표시 범위와 별개입니다.'));
-  await visit(tree,n=>n.type==='button'&&n.props.children==='1개월').props.onClick();
+  await visit(tree,n=>n.type==='button'&&n.props.children==='월봉').props.onClick();await tick();
   assert.strictEqual(h.state('strategyData'),before);
   for(const key of ['candlePatterns','chartPatterns','elliottWave'])assert.deepEqual(JSON.parse(JSON.stringify(before[key])),chartAnalysis[key]);
-  assert.equal(h.calls.at(-1).pathname,'/api/stock/chart');assert.equal(h.calls.at(-1).searchParams.get('timeframe'),'1M');
+  assert.equal(h.calls.at(-1).pathname,'/api/stock/kis-chart');assert.equal(h.calls.at(-1).searchParams.get('period'),'M');
   assert.equal(h.calls.length,4);
 });
 
@@ -167,7 +172,7 @@ test('TEST_ONLY invalid detail identity fails without falling back to a second n
   const h=harness({detailResponse:async()=>detail('000660')});await h.select('005930');
   assert.match(h.state('errorMsg'),/종목·뉴스 묶음/);
   assert.equal(h.state('strategyData'),null);assert.equal(h.state('newsList').length,0);
-  assert.deepEqual(h.calls.map(x=>x.pathname),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+  assert.deepEqual(h.calls.map(x=>x.pathname),['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart']);
 });
 
 test('TEST_ONLY UI labels unavailable news distinctly and retains explicit AI request notice',()=>{
@@ -252,6 +257,40 @@ test('TEST_ONLY detail mapper keeps FAVORABLE/CAUTION booleans and PENDING/NEUTR
     const h=harness({detailResponse:async()=>d});await h.select('005930');assert.equal(h.state('strategyData').volumePassed,passed);
     assert.equal(h.state('strategyData').volumeConditionStatus,status);assert.equal(h.calls.length,3);
   }
+});
+
+
+test('TEST_ONLY actual App switches all four native KIS display periods without changing daily analysis or calling AI',async()=>{
+  const h=harness();await h.select('005930');const before=h.state('strategyData'),news=h.state('newsList'),calls=h.calls.length;
+  for(const [label,period]of [['주봉','W'],['월봉','M'],['년봉','Y'],['일봉','D']]){
+    const tree=h.render();await visit(tree,n=>n.type==='button'&&n.props.children===label).props.onClick();await tick();
+    assert.strictEqual(h.state('strategyData'),before);assert.strictEqual(h.state('newsList'),news);
+    assert.equal(h.state('chartTimeframe'),period);assert.equal(h.state('chartState').period,period);
+    assert.equal(h.state('chartState').status,'EMPTY');assert.equal(h.calls.at(-1).pathname,'/api/stock/kis-chart');
+    assert.equal(h.calls.at(-1).searchParams.get('period'),period);
+    const view=visit(h.render(),n=>n.type?.name==='KisPeriodChart');assert.equal(view.props.period,period);
+  }
+  assert.equal(h.calls.length,calls+4);assert.equal(h.calls.filter(x=>x.pathname.endsWith('/detail-analysis')).length,1);
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/quote')).length,1);
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/ai-analysis')||x.pathname==='/api/stock/chart').length,0);h.unmount();
+});
+test('TEST_ONLY actual App keeps daily analysis usable through an independent chart error and retries only the chart explicitly',async()=>{
+  let count=0;const h=harness({chartResponse:async(request,base)=>{if(++count===1)throw Error('TEST_ONLY_CHART_FAILED');return base;}});
+  await h.select('005930');assert.equal(h.state('quoteData').symbol,'005930');assert.ok(h.state('strategyData'));
+  assert.equal(h.state('errorMsg'),null);assert.equal(h.state('chartState').status,'ERROR');const before=h.state('strategyData');
+  h.render();await tick();assert.equal(count,1,'render does not retry');
+  await visit(h.render(),n=>n.type?.name==='KisPeriodChart').props.onRetry();await tick();
+  assert.equal(count,2);assert.equal(h.state('chartState').status,'EMPTY');assert.strictEqual(h.state('strategyData'),before);
+  assert.equal(h.calls.length,4);h.unmount();
+});
+test('TEST_ONLY actual App cancels pending chart and ignores the previous symbol response without blocking new detail',async()=>{
+  let finish,oldPayload;const pending=new Promise(resolve=>{finish=resolve;});
+  const h=harness({chartResponse:async(request,base)=>{if(request.symbol==='005930'){oldPayload=base;return pending;}return base;}});
+  await h.select('005930');assert.ok(h.state('strategyData'));assert.equal(h.state('chartState').status,'LOADING');
+  visit(h.render(),n=>n.type?.name==='KisPeriodChart').props.onCancel();await tick();assert.equal(h.state('chartState').status,'IDLE');
+  await h.select('000660');assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('chartState').symbol,'000660');
+  finish(oldPayload);await tick();assert.equal(h.state('chartState').symbol,'000660');assert.equal(h.state('chartState').status,'EMPTY');
+  assert.equal(h.calls.filter(x=>x.pathname.endsWith('/ai-analysis')).length,0);h.unmount();
 });
 
 module.exports={harness,visit,tick,detail,bindings};

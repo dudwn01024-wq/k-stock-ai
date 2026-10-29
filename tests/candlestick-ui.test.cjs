@@ -58,13 +58,17 @@ test('TEST_ONLY candle selection uses no network/storage and price/volume panels
   const source=fs.readFileSync(component,'utf8');assert.equal((source.match(/<BarChart /g)||[]).length,2);
   assert.doesNotMatch(source,/\bfetch\(|localStorage|<Line\b/);assert.match(source,/candleDomain\(candles\)/);
 });
-test('TEST_ONLY App defaults daily, exposes supported ranges, labels KIS patterns and leaves pattern engine unchanged',()=>{
+test('TEST_ONLY App defaults native KIS daily, exposes D/W/M/Y periods, labels daily patterns and leaves pattern engine unchanged',()=>{
   const source=fs.readFileSync(require.resolve('../frontend/src/App.jsx'),'utf8');
-  assert.match(source,/chartTimeframe, setChartTimeframe\] = useState\('1D'\)/);
-  assert.match(source,/getStockChart\(symbol, timeframe = '1D'\)/);
-  assert.match(source,/symbol, name, timeframe = '1D'/);assert.doesNotMatch(source,/<Line\b|code: '5Y'|label: '1일'/);
-  const codes=[...source.slice(source.indexOf('const TIMEFRAMES'),source.indexOf('const formatKRW')).matchAll(/code: '([^']+)'/g)].map(x=>x[1]);
-  assert.deepEqual(codes,['1D','1W','1M','3M','6M','1Y']);
+  assert.match(source,/chartTimeframe, setChartTimeframe\] = useState\('D'\)/);
+  assert.match(source,/getStockChart\(symbol, period = 'D'/);
+  assert.match(source,/symbol, name, timeframe = 'D'/);assert.doesNotMatch(source,/<Line\b|code: '5Y'|label: '1일'/);
+  const codes=[...source.slice(source.indexOf('const TIMEFRAMES'),source.indexOf('const formatKRW')).matchAll(/code:\s*'([^']+)'/g)].map(x=>x[1]);
+  assert.deepEqual(codes,['D','W','M','Y']);
+  assert.ok(source.includes("<KisPeriodChart key={activeSymbol+':'+chartTimeframe}"));
+  assert.match(source,/createKisChartRequest\(/);
+  assert.match(source,/stock\/kis-chart\?symbol=/);
+  assert.doesNotMatch(source,/<CandlestickChart\b/);
   assert.match(source,/6\. 패턴 분석[\s\S]{0,120}KIS 일봉 기준/);
   for(const field of ['candlePatterns.patterns','chartPatterns.patterns','elliottWave'])assert.match(source,new RegExp(field.replace('.', '\\.')));
   const {execFileSync}=require('node:child_process');

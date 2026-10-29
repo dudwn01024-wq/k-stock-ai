@@ -100,7 +100,7 @@ test('list pages contain at most 20 and repeated reads do not duplicate storage'
   const f=setup(t);for(let i=0;i<21;i++)await f.store.candidates();const a=f.history.list(),b=f.history.list({page:2});assert.equal(a.items.length,20);assert.equal(b.items.length,1);assert.equal(a.total,21);assert.deepEqual(f.history.list(),a);
 });
 test('actual Gemini prompt builder callback binds exact first-five article input without changing prompt',async()=>{
-  let supplied,promptUsed;const context=vm.createContext({RECOMMENDATION_AI_LIMIT:3,callGeminiPromptWithRetry:async prompt=>{promptUsed=prompt;return {analysis:{recommendations:[{symbol:'000001',summary:'합성'}]}};}});
+  let supplied,promptUsed;const context=vm.createContext({...require('../services/aiAnalysisInput'),RECOMMENDATION_AI_LIMIT:3,callGeminiPromptWithRetry:async prompt=>{promptUsed=prompt;return {analysis:{recommendations:[{symbol:'000001',summary:'합성'}]}};}});
   vm.runInContext(source.slice(source.indexOf('const buildRecommendationGeminiPrompt ='),source.indexOf('// API - HEALTH CHECK'))+'\nthis.analyze=analyzeRecommendationsWithGemini;',context);
   await context.analyze([item()],{onInput:x=>{supplied=x;}});assert.equal(supplied.prompt,promptUsed);assert.equal(supplied.input[0].suppliedNews.length,5);assert.equal(supplied.promptVersion,PROMPT_VERSION);assert.doesNotMatch(promptUsed,/합성 기사 5/);
 });

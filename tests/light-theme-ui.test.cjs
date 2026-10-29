@@ -26,7 +26,7 @@ const syntheticCandidate=()=>({testOnly:true,symbol:'000001',stockName:'TEST_ONL
  dataMetadata:{price:{sourceBusinessDate:'2026-10-08',source:'TEST_ONLY Naver'}},riskReward:{available:false}});
 function loader(react=React,expanded){
  const load=(file,specialReact=react)=>{const module={exports:{}};
-  vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,{module,exports:module.exports,Intl,Date,URL,Set,Number,console,
+  vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,{module,exports:module.exports,Intl,Date,URL,Set,Number,console,...require('./helpers/ui-vm-globals.cjs'),
    fetch:()=>assert.fail('TEST_ONLY_NO_NETWORK'),window:{location:{hostname:'127.0.0.1'},sessionStorage:{getItem:()=>null}},require:name=>{
     if(name==='react')return specialReact;if(name.endsWith('.css'))return {};
     if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});

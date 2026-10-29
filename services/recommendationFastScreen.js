@@ -2,7 +2,7 @@
 const {isNaverKrStockItemCode}=require('./naverKrStockItemCode');
 
 const {sourceDate,dataFreshness}=require('./dataFreshness');
-const {baselineFromDailyRow}=require('./recommendationOutcomeBaseline');
+const {baselineFromDailyRow,KIS_PROVIDER}=require('./recommendationOutcomeBaseline');
 const {assessRecommendationVolume,isIntradayVolumePending}=require('./recommendationVolumePolicy');
 
 const PROVIDER='NAVER_MOBILE_DAILY_PRICE';
@@ -24,35 +24,40 @@ function date(value){
   if(typeof value!=='string')return null;
   return sourceDate(value)??dataFreshness({timestamp:value}).sourceTimestamp?.slice(0,10)??null;
 }
-function empty(symbol,reason,receivedAt=null){
-  return {symbol,status:'INSUFFICIENT_DATA',reason,provider:PROVIDER,receivedAt,
+function empty(symbol,reason,receivedAt=null,provider=PROVIDER){
+  return {symbol,status:'INSUFFICIENT_DATA',reason,provider,receivedAt,
     sourceBusinessDate:null,currentPrice:null,ma5:null,ma20:null,currentVolume:null,
     previous20AverageVolume:null,averageVolume20:null,volumeRatio:null,recentHigh20:null,
     recentLow20:null,trendPassed:null,volumePassed:null,preScreenScore:null,dataPoints:0,outcomeBaseline:null,
     volumeAssessment:assessRecommendationVolume({observedAt:receivedAt})};
 }
 
-function calculateFastScreen(stock,rawRows,{receivedAt=null,observedAt=receivedAt??new Date().toISOString()}={}){
+function calculateFastScreen(stock,rawRows,{receivedAt=null,observedAt=receivedAt??new Date().toISOString(),inputFormat='NAVER'}={}){
+  const kis=inputFormat==='KIS',provider=kis?KIS_PROVIDER:PROVIDER;
   const symbol=stock?.symbol;
   if(!isNaverKrStockItemCode(symbol))throw failure('FAST_SCREEN_SYMBOL_INVALID');
-  if(!Array.isArray(rawRows)||rawRows.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt);
+  if(!['KIS','NAVER'].includes(inputFormat))throw failure('FAST_SCREEN_FORMAT_INVALID');
+  if(kis&&rawRows?.latestSourceIntegrity?.complete!==true)return empty(symbol,'KIS_SOURCE_INTEGRITY_UNCONFIRMED',receivedAt,provider);
+  if(!Array.isArray(rawRows)||rawRows.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt,provider);
   const rows=[];
   const seen=new Set();
   for(const item of rawRows){
-    const local=date(item?.localTradedAt),business=date(item?.bizdate);
+    const local=kis?sourceDate(item?.date):date(item?.localTradedAt),business=kis?sourceDate(item?.dataMetadata?.sourceBusinessDate):date(item?.bizdate);
     const businessDate=local&&business&&local!==business?null:local??business;
-    const close=number(item?.closePrice),high=number(item?.highPrice),low=number(item?.lowPrice);
-    const volume=number(item?.accumulatedTradingVolume??item?.volume);
+    const close=number(kis?item?.close:item?.closePrice),high=number(kis?item?.high:item?.highPrice),low=number(kis?item?.low:item?.lowPrice);
+    const volume=number(kis?item?.volume:item?.accumulatedTradingVolume??item?.volume);
+    const open=kis?number(item?.open):null;
     if(!businessDate||seen.has(businessDate)||close===null||high===null||low===null||
-      volume===null||close<=0||low<=0||high<low||close<low||close>high||volume<0||!Number.isSafeInteger(volume))
-      return empty(symbol,'INVALID_DAILY_HISTORY',receivedAt);
+      volume===null||close<=0||low<=0||high<low||close<low||close>high||volume<0||!Number.isSafeInteger(volume)||
+      (kis&&(open===null||open<=0||open<low||open>high)))
+      return empty(symbol,'INVALID_DAILY_HISTORY',receivedAt,provider);
     seen.add(businessDate);
     rows.push({date:businessDate,close,high,low,volume,
-      sourceTimestamp:dataFreshness({timestamp:item?.localTradedAt}).sourceTimestamp});
+      sourceTimestamp:dataFreshness({timestamp:kis?item?.dataMetadata?.sourceTimestamp:item?.localTradedAt}).sourceTimestamp});
   }
   rows.sort((a,b)=>b.date.localeCompare(a.date));
   const selected=rows.slice(0,21);
-  if(selected.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt);
+  if(selected.length<21)return empty(symbol,'INSUFFICIENT_HISTORY',receivedAt,provider);
   const mean=items=>items.reduce((sum,value)=>sum+value,0)/items.length;
   const currentPrice=selected[0].close,currentVolume=selected[0].volume;
   const ma5=mean(selected.slice(0,5).map(row=>row.close));
@@ -64,9 +69,9 @@ function calculateFastScreen(stock,rawRows,{receivedAt=null,observedAt=receivedA
   const volumeAssessment=assessRecommendationVolume({sourceBusinessDate:selected[0].date,observedAt,
     currentVolume,averageVolume20:previous20AverageVolume});
   const {volumePassed}=volumeAssessment;
-  return {symbol,status:'READY',reason:null,provider:PROVIDER,receivedAt,
+  return {symbol,status:'READY',reason:null,provider,receivedAt,
     sourceBusinessDate:selected[0].date,sourceTimestamp:selected[0].sourceTimestamp,
-    outcomeBaseline:baselineFromDailyRow(symbol,selected[0],receivedAt),currentPrice,ma5,ma20,currentVolume,
+    outcomeBaseline:baselineFromDailyRow(symbol,selected[0],receivedAt,{provider}),currentPrice,ma5,ma20,currentVolume,
     previous20AverageVolume,averageVolume20:previous20AverageVolume,volumeRatio,
     recentHigh20:Math.max(...selected.slice(0,20).map(row=>row.high)),
     recentLow20:Math.min(...selected.slice(0,20).map(row=>row.low)),

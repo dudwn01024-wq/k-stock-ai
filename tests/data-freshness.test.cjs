@@ -64,7 +64,7 @@ test('actual quote path does not assume today when basic response has no date', 
 test('actual AI prompt preserves unknown provenance and explicitly forbids today assumptions', () => {
   const start = server.indexOf('const buildGeminiPrompt =');
   const end = server.indexOf('\n// ========================================',start);
-  const ctx = vm.createContext({});
+  const ctx = vm.createContext({...require('../services/aiAnalysisInput')});
   vm.runInContext(server.slice(start,end)+'\nthis.prompt=buildGeminiPrompt;',ctx);
   const prompt = ctx.prompt({quote:{dataMetadata:{price:dataFreshness()}},strategy:{},news:[]});
   assert.match(prompt,/오늘·현재·실시간 데이터라고 가정하지 마라/);
@@ -73,14 +73,14 @@ test('actual AI prompt preserves unknown provenance and explicitly forbids today
 test('recommendation AI retains metadata and same date safety instruction', () => {
   const start = server.indexOf('const buildRecommendationGeminiPrompt =');
   const end = server.indexOf('\n// ========================================', start);
-  const ctx = vm.createContext({});
+  const ctx = vm.createContext({...require('../services/aiAnalysisInput')});
   vm.runInContext(server.slice(start,end)+'\nthis.prompt=buildRecommendationGeminiPrompt;',ctx);
   const prompt = ctx.prompt([{symbol:'005930',dataMetadata:{price:dataFreshness()},strategy:{},news:[]}]);
   assert.match(prompt,/오늘·현재·실시간 데이터라고 가정하지 마라/);
   assert.match(prompt,/"sourceBusinessDate": null/);
 });
 test('actual UI formatter reports UNKNOWN and formats receipt explicitly in Korea time', () => {
-  const ctx = vm.createContext({});
+  const ctx = vm.createContext({...require('../services/aiAnalysisInput')});
   vm.runInContext(app.slice(app.indexOf('const describeDataMetadata ='),app.indexOf('export default function App'))+
     '\nthis.describe=describeDataMetadata;',ctx);
   const text = ctx.describe(dataFreshness({date:'20260918',receivedAt,source:'KIS'}));
@@ -103,7 +103,9 @@ test('news path preserves article fields and never treats publication time as a 
 test('actual recommendation preserves price metadata and KIS lookup without inventing a source business date', async () => {
   const kis={status:'PENDING',foreignerNet:null,institutionNet:null,screeningPassed:null,
     metadata:{source:'KIS_INTRADAY_ESTIMATE',sourceBusinessDate:null,sourceTimestamp:null,receivedAt}};
-  const ctx=vm.createContext({scheduledSupply:{resolve:()=>kis},dataFreshness,dateConsistency,sourceDate,NAVER_HEADERS:{},console,
+  const ctx=vm.createContext({...require('../services/kisRecommendationDaily'),
+    fetchKisDailyOHLCV:async(symbol,options)=>{assert.equal(options.maxBars,30);assert.equal(options.screeningSnapshot,true);return require('./helpers/kis-calculators.cjs').fixtureRows([{bizdate:'20260918',closePrice:70000,highPrice:71000,lowPrice:69000,volume:1000}],{receivedAt});},
+    scheduledSupply:{resolve:()=>kis},dataFreshness,dateConsistency,sourceDate,NAVER_HEADERS:{},console,
     getLatestDealTrend:data=>data.dealTrendInfos[0],
     average:values=>values.reduce((a,b)=>a+b,0)/values.length,
     round2:value=>Number(value.toFixed(2)),

@@ -20,6 +20,8 @@ async function collectRecommendationOutcomes({history,outcomes,execute=false,max
   const plans=[],counts={},count=status=>{counts[status]=(counts[status]??0)+1;};
   for(const record of records){
     for(const source of sourceCandidates(record)){
+      // The legacy collector remains Naver-only; no silent cross-provider returns or extra scope.
+      if(source.baselineProvider==='KIS_DAILY_OHLCV'){count('TRACKING_BLOCKED_PROVIDER_MISMATCH');continue;}
       const horizons=[];let resolvedBaseline=null;
       for(const horizon of Object.keys(HORIZONS)){
         try{

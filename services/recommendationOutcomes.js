@@ -32,6 +32,8 @@ function sourceCandidates(record){
 function calculateOutcomes(source,rawRows,{collectedAt=new Date().toISOString(),resolvedBaseline=null}={}){
   const pending=(status,reason)=>Object.keys(HORIZONS).map(horizon=>({...source,horizon,status,reason,
     targetBusinessDate:null,closePrice:null,returnPct:null,provider:null,collectedAt:null}));
+  // Never evaluate a KIS baseline against the legacy Naver outcome window.
+  if(source.baselineProvider==='KIS_DAILY_OHLCV')return pending('TRACKING_BLOCKED_PROVIDER_MISMATCH','KIS_BASELINE_REQUIRES_KIS_OUTCOME_WINDOW');
   const awaitingBaseline=source.baselineStatus==='PENDING_FINAL_CLOSE';
   if(!source.baselineReady&&!awaitingBaseline)return pending('TRACKING_BLOCKED_NO_BASELINE','SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE');
   if(!isoTime(collectedAt)||!Array.isArray(rawRows)||!rawRows.length||rawRows.length>30)
@@ -81,7 +83,7 @@ function summarize(candidates){
     const values=candidates.filter(x=>x.originalGrade===grade).map(x=>x.horizons.find(y=>y.horizon===horizon));
     const ready=values.filter(x=>x?.status==='READY').map(x=>x.returnPct).sort((a,b)=>a-b),n=ready.length;
     return {grade,horizon,observedCount:n,pendingCount:values.filter(x=>['PENDING','NOT_COLLECTED','BASELINE_PENDING_FINAL_CLOSE'].includes(x?.status)).length,
-      blockedCount:values.filter(x=>x?.status==='TRACKING_BLOCKED_NO_BASELINE').length,
+      blockedCount:values.filter(x=>['TRACKING_BLOCKED_NO_BASELINE','TRACKING_BLOCKED_PROVIDER_MISMATCH'].includes(x?.status)).length,
       unavailableCount:values.filter(x=>['LOOKUP_RETRY_REQUIRED','BACKFILL_WINDOW_UNAVAILABLE'].includes(x?.status)).length,
       averageReturnPct:n?ready.reduce((a,b)=>a+b,0)/n:null,
       medianReturnPct:n?(n%2?ready[(n-1)/2]:(ready[n/2-1]+ready[n/2])/2):null,
@@ -136,6 +138,7 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
     return candidate;
   }
   function normalize(value,current){
+    if(current.baselineProvider==='KIS_DAILY_OHLCV')throw error('OUTCOME_PROVIDER_MISMATCH',400);
     const pending=current.baselineStatus==='PENDING_FINAL_CLOSE';
     if((!current.baselineReady&&!pending)||value?.status!=='READY'||!HORIZONS[value.horizon])throw error('OUTCOME_RECORD_INVALID');
     for(const key of ['scanId','symbol','stockName','originalGrade','baselineBusinessDate','baselineProvider','baselineReceivedAt','baselineSourceTimestamp','currentPrice','sourceRecordFingerprint',...(pending?[]:['baselinePrice'])])
@@ -234,16 +237,16 @@ function createRecommendationOutcomes({history,root=null,storageKind='NOT_CONFIG
         baselineProvider:current.baselineProvider,baselineReceivedAt:current.baselineReceivedAt,baselineStatus,
         ...(resolved?.baselineResolvedAt?{baselineResolvedAt:resolved.baselineResolvedAt,baselineFinality:resolved.baselineFinality}:{}),
         horizons:saved.map(({horizon,value,reason})=>value??{
-          horizon,status:reason?'LOOKUP_RETRY_REQUIRED':baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_PENDING_FINAL_CLOSE':
+          horizon,status:current.baselineProvider==='KIS_DAILY_OHLCV'?'TRACKING_BLOCKED_PROVIDER_MISMATCH':reason?'LOOKUP_RETRY_REQUIRED':baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_PENDING_FINAL_CLOSE':
             baselineStatus==='FINALIZED'?'NOT_COLLECTED':'TRACKING_BLOCKED_NO_BASELINE',
-          reason:reason??(baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_DAY_NOT_FINALIZED':
+          reason:current.baselineProvider==='KIS_DAILY_OHLCV'?'KIS_BASELINE_REQUIRES_KIS_OUTCOME_WINDOW':reason??(baselineStatus==='PENDING_FINAL_CLOSE'?'BASELINE_DAY_NOT_FINALIZED':
             baselineStatus==='FINALIZED'?'COLLECTOR_NOT_EXECUTED':'SAVED_PRICE_OR_PRICE_DATE_UNAVAILABLE'),
           targetBusinessDate:null,closePrice:null,returnPct:null,provider:null,collectedAt:null})};
     });
     const states=candidates.flatMap(x=>x.horizons.map(x=>x.status));
     return {schemaVersion:VERSION,scanId,testOnly:record.testOnly===true,
       trackingStatus:!states.length?'NO_CANDIDATES':states.every(x=>x==='READY')?'READY':states.some(x=>x==='READY')?'PARTIAL':
-        states.every(x=>x==='TRACKING_BLOCKED_NO_BASELINE')?'TRACKING_BLOCKED_NO_BASELINE':'PENDING',
+        states.every(x=>x==='TRACKING_BLOCKED_NO_BASELINE')?'TRACKING_BLOCKED_NO_BASELINE':states.every(x=>x==='TRACKING_BLOCKED_PROVIDER_MISMATCH')?'TRACKING_BLOCKED_PROVIDER_MISMATCH':'PENDING',
       candidates,summary:summarize(candidates),storage:status(),measurement:'SIMPLE_PRICE_CHANGE_NOT_TRADING_RETURN'};
   }
   return {status,detail,read,save};

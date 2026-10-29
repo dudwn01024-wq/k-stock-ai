@@ -23,7 +23,7 @@ async function fixture(t,{fetchNews,now=Date.now,ttlMs,currentVolume=150,average
   const app=express();
   const holdingGuidanceAccess=require('../services/holdingGuidanceAccess').createHoldingGuidanceAccess({
     env:{HOLDING_GUIDANCE_ACCESS_SECRET:'TEST_ONLY_ACCESS',HOLDING_GUIDANCE_TOKEN_SECRET:'TEST_ONLY_'.repeat(4)}});
-  const context={app,...require('../services/analysisProvenance'),scheduledSupply:{resolve:()=>null,rememberDetail:()=>false},holdingGuidanceAccess,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
+  const context={app,...require('../services/analysisExtensions'),...require('../services/analysisProvenance'),...require('../services/aiAnalysisInput'),scheduledSupply:{resolve:()=>null,rememberDetail:()=>false},holdingGuidanceAccess,stockDetailNews,fetchStockNewsBySymbol,assessLatestNews,dateConsistency,sourceDate,assessRecommendationVolume,Date:FixedDate,
     fetchStockQuoteData:async symbol=>{calls.quote++;return {symbol,stockName:'TEST_ONLY',currentPrice:100,foreignerNet:1,institutionNet:1};},
     fetchKisDailyOHLCV:async()=>{calls.daily++;return Array.from({length:30},(_,i)=>({testOnly:true,high:120,low:90,close:100,
       date:i===29?sourceBusinessDate:'2026-10-01',volume:i===29?currentVolume:averageVolume20,
@@ -148,14 +148,17 @@ for(const [label,settings,condition,policy] of [
   const {body:ai,status:aiStatus}=await f.get('/api/stock/ai-analysis?symbol=005930&newsSnapshotId='+detail.newsSnapshotId);
   assert.equal(aiStatus,200);assert.equal(detail.marketContext.volumeAssessment.status,policy);
   assert.deepEqual(ai.marketContext.volumeAssessment,detail.marketContext.volumeAssessment);
-  assert.deepEqual(ai.strategy.marketAssessment,detail.strategy.marketAssessment);
+  assert.deepEqual(ai.strategy.marketAssessment.conditions.volume,detail.strategy.marketAssessment.conditions.volume);
+  assert.deepEqual(ai.strategy.marketAssessment.conditions.news,detail.strategy.marketAssessment.conditions.news);
+  assert.equal(ai.strategy.marketAssessment.conditions.supply.status,'UNAVAILABLE','missing KIS cannot borrow Naver supply');
   assert.equal(detail.strategy.marketAssessment.conditions.volume.status,condition);
   assert.equal(f.seen[0].strategy.marketContext.volumeAssessment.status,policy);
   assert.equal(f.seen[0].strategy.marketAssessment.conditions.volume.status,condition);
   assert.equal(f.seen[0].strategy.volumePassed,condition==='FAVORABLE'?true:condition==='CAUTION'?false:null);
   assert.deepEqual(f.calls,{news:1,quote:2,daily:2,ai:1},'only the pre-existing explicit AI requests occur');
   if(condition==='PENDING'){
-    assert.equal(ai.strategy.finalAssessment.status,'WAIT');assert.equal(detail.strategy.finalAssessment.label,'장중 거래량 확인 중');
+    assert.equal(ai.strategy.finalAssessment.status,'DATA_INSUFFICIENT');
+    assert.ok(ai.strategy.finalAssessment.missingRequired.includes('supply'));assert.equal(detail.strategy.finalAssessment.label,'장중 거래량 확인 중');
     assert.deepEqual(detail.strategy.marketAssessment.pendingRequired,['volume']);assert.deepEqual(detail.strategy.marketAssessment.missingRequired,[]);
   }
 });

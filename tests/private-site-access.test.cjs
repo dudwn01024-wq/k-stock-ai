@@ -102,7 +102,7 @@ test('TEST_ONLY complete production server installs the gate before every real d
     AbortController,AbortSignal,setTimeout,clearTimeout,fetch:async()=>{providerCalls++;throw Error('TEST_ONLY_NO_PROVIDER');},
     require:name=>{
       if(name==='express')return expression;if(name==='dotenv')return {config(){}};
-      if(name==='./services/kisMarketData')return {fetchKisDailyOHLCV:async()=>{providerCalls++;throw Error('TEST_ONLY_NO_KIS');}};
+      if(name==='./services/kisMarketData')return {fetchKisDailyOHLCV:async()=>{providerCalls++;throw Error('TEST_ONLY_NO_KIS');},fetchKisChartOHLCV:async()=>{providerCalls++;throw Error('TEST_ONLY_NO_KIS_CHART');},fetchKisQuoteData:async()=>{providerCalls++;throw Error('TEST_ONLY_NO_KIS_QUOTE');}};
       if(name.startsWith('./services/'))return require('../'+name.slice(2));
       if(['node:async_hooks','node:crypto','cors'].includes(name))return require(name);
       throw Error('TEST_ONLY_UNEXPECTED_DEPENDENCY');
@@ -111,6 +111,7 @@ test('TEST_ONLY complete production server installs the gate before every real d
   t.after(()=>new Promise(r=>{server.closeAllConnections();server.close(r);}));
   const base='http://127.0.0.1:'+server.address().port;
   for(const url of ['/api/health','/api/stock/search?query=TEST_ONLY','/api/stock/quote?symbol=005930','/api/stock/chart?symbol=005930',
+    ...['D','W','M','Y'].map(period=>'/api/stock/kis-chart?symbol=005930&period='+period),
     '/api/stock/news?symbol=005930','/api/stock/strategy?symbol=005930','/api/stock/ai-analysis?symbol=005930',
     '/api/stock/detail-analysis?symbol=005930','/api/kis/ohlcv-test?symbol=005930','/api/kis/chart-analysis-test?symbol=005930',
     '/api/kis/trading-strategy-test?symbol=005930','/api/stock/recommendations','/api/stock/recommendations-ai',

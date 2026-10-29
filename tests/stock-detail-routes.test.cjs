@@ -6,7 +6,7 @@ function testExports(name){const file=require.resolve(name),actual=createRequire
  const context={require:req,module:{exports:{}},console,URL,setImmediate};vm.runInNewContext(fs.readFileSync(file,'utf8'),context);return context.module.exports;}
 const {routeModule,settled}=testExports('./public-router.test.cjs');
 const {harness,visit,tick,bindings}=testExports('./shared-detail-news-ui.test.cjs');
-const paths=h=>Array.from(h.calls,x=>x.pathname),details=h=>Array.from(h.calls).filter(x=>['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis'].includes(x.pathname));
+const paths=h=>Array.from(h.calls,x=>x.pathname),details=h=>Array.from(h.calls).filter(x=>['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart'].includes(x.pathname));
 const makeReady=async symbol=>{const h=harness({symbol});h.render();h.runEffects();await tick();return h;};
 
 for(const symbol of ['005930','000660','035420'])test('TEST_ONLY stock URL starts at guide without mounting data-reading App: '+symbol,async()=>{
@@ -32,17 +32,25 @@ for(const symbol of ['abc','123','1234567','005930abc','-005930','%30%30%35%39%3
  }finally{router.dispose();}
 });
 for(const symbol of ['005930','000660'])test('TEST_ONLY explicitly mounted stock detail uses URL symbol once per existing endpoint, never auto AI/news/expanded/private reads: '+symbol,async()=>{
- const h=await makeReady(symbol);assert.deepEqual(paths(h),['/api/stock/quote','/api/stock/chart','/api/stock/detail-analysis']);
+ const h=await makeReady(symbol);assert.deepEqual(paths(h),['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart']);
  assert.ok(h.calls.every(x=>x.searchParams.get('symbol')===symbol));assert.equal(h.state('activeSymbol'),symbol);assert.equal(h.state('showDetail'),true);
  assert.equal(h.state('activeName'),'TEST_ONLY '+symbol);assert.equal(h.state('searchQuery'),'TEST_ONLY '+symbol);
- assert.equal(h.calls.find(x=>x.pathname.endsWith('/chart')).searchParams.get('timeframe'),'1D');
+ assert.equal(h.calls.find(x=>x.pathname.endsWith('/kis-chart')).searchParams.get('period'),'D');
  assert.equal(h.state('aiAnalysis'),null);assert.equal(h.state('newsList')[0].title,'TEST_ONLY '+symbol);
  assert.equal(visit(h.render(),n=>n.type?.name==='ExpandedRecommendation'),undefined);
 });
-test('TEST_ONLY StrictMode setup/cleanup/setup coalesces the three detail requests and commits only current response',async()=>{
- const h=harness({symbol:'005930'});h.render();h.runEffects(true);await tick();
- assert.equal(details(h).length,3);assert.equal(h.state('strategyData').newsSnapshotId,'TEST_ONLY_SNAPSHOT_005930');assert.equal(h.state('loading'),false);
+test('TEST_ONLY StrictMode cancels abandoned chart work and coalesces quote/detail without late overwrite',async()=>{
+ const seen=[];const h=harness({symbol:'005930',chartResponse:async(input,body)=>{seen.push(input);return body;}});
+ h.render();h.runEffects(true);await tick();
+ assert.equal(details(h).length,3);
+ for(const pathname of ['/api/stock/quote','/api/stock/detail-analysis','/api/stock/kis-chart'])
+  assert.equal(h.calls.filter(x=>x.pathname===pathname).length,1,pathname);
+ assert.equal(seen.length,1,'the abandoned StrictMode stream is cancelled before its lazy transport starts');
+ assert.equal(seen[0].init.signal.aborted,false);
+ assert.equal(h.state('chartState').symbol,'005930');assert.equal(h.state('chartState').status,'EMPTY');
+ assert.equal(h.state('strategyData').newsSnapshotId,'TEST_ONLY_SNAPSHOT_005930');assert.equal(h.state('loading'),false);
  assert.equal(h.state('quoteData').symbol,'005930');assert.equal(h.state('aiAnalysis'),null);
+ h.unmount();assert.equal(h.state('chartState').status,'IDLE');
 });
 test('TEST_ONLY company-name search resolves symbol then navigates; handler itself does not double-load',async()=>{
  const h=harness();h.render();h.states[bindings.indexOf('searchQuery')]='삼성전자';
@@ -58,11 +66,11 @@ test('TEST_ONLY six-digit search skips name lookup, retaining only existing deta
 test('TEST_ONLY popular stock and candidate callbacks share URL-only selection contract',async()=>{
  const h=harness();await h.select('005930');assert.deepEqual(Array.from(h.navigations),['/stocks/005930']);assert.equal(details(h).length,3);
  await h.select('000660');assert.deepEqual(Array.from(h.navigations),['/stocks/005930','/stocks/000660']);assert.equal(details(h).length,6);
- assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('chartTimeframe'),'1D');
+ assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('chartTimeframe'),'D');
 });
 test('TEST_ONLY same-symbol popular selection preserves timeframe and snapshot with no route push or new requests',async()=>{
- const h=await makeReady('005930'),snapshot=h.state('strategyData');h.states[bindings.indexOf('chartTimeframe')]='3M';
- await h.select('005930');assert.deepEqual(Array.from(h.navigations),[]);assert.equal(h.calls.length,3);assert.strictEqual(h.state('strategyData'),snapshot);assert.equal(h.state('chartTimeframe'),'3M');
+ const h=await makeReady('005930'),snapshot=h.state('strategyData');h.states[bindings.indexOf('chartTimeframe')]='M';
+ await h.select('005930');assert.deepEqual(Array.from(h.navigations),[]);assert.equal(h.calls.length,3);assert.strictEqual(h.state('strategyData'),snapshot);assert.equal(h.state('chartTimeframe'),'M');
 });
 test('TEST_ONLY same-symbol selection while detail is pending preserves loading and the single request',async()=>{
  let release;const pending=new Promise(resolve=>release=resolve);
@@ -99,6 +107,19 @@ test('TEST_ONLY late quote/detail from previous stock cannot overwrite the next 
  h.render();h.runEffects();await h.select('000660');assert.equal(h.state('quoteData').symbol,'000660');resolve();await tick();
  assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('newsList')[0].title,'TEST_ONLY 000660');assert.equal(h.state('aiAnalysis'),null);
 });
+test('TEST_ONLY changing stock aborts pending native chart and ignores a late response even if transport ignores abort',async()=>{
+ let release,oldSignal;const pending=new Promise(resolve=>release=resolve);
+ const h=harness({symbol:'005930',chartResponse:async({symbol,init},body)=>{
+  if(symbol==='005930'){oldSignal=init.signal;await pending;}return body;
+ }});
+ h.render();h.runEffects();await tick();assert.equal(oldSignal.aborted,false);
+ await h.select('000660');assert.equal(oldSignal.aborted,true);
+ assert.equal(h.state('chartState').symbol,'000660');assert.equal(h.state('chartState').status,'EMPTY');
+ const accepted=h.state('chartState');release();await tick();assert.equal(h.state('chartState'),accepted);
+ assert.equal(h.state('quoteData').symbol,'000660');assert.equal(h.state('strategyData').newsSnapshotId,'TEST_ONLY_SNAPSHOT_000660');
+ assert.equal(paths(h).some(path=>path.endsWith('/ai-analysis')),false);
+});
+
 test('TEST_ONLY failed valid-format symbol is not replaced with another stock or fake data',async()=>{
  const h=harness({symbol:'999999',quoteResponse:async()=>{throw Error('종목 데이터를 불러오지 못했습니다.');}});h.render();h.runEffects();await tick();
  assert.equal(h.state('activeSymbol'),'999999');assert.equal(h.state('quoteData'),null);assert.equal(h.state('strategyData'),null);assert.equal(h.state('loading'),false);

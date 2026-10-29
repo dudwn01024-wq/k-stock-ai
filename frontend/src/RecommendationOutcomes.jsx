@@ -21,7 +21,7 @@ export function OutcomeResults({data}){
         {value.status==='READY'?<>
           <p>실제 거래일 {value.targetBusinessDate}</p><p>종가 {formatKRWNumber(value.closePrice,'자료 없음')}</p>
           <p className="outcome-return">{outcomePercent(value.returnPct)}</p><small>수집 {clock(value.collectedAt)} KST · 제공처 일봉</small>
-        </>:<p>{value.status==='TRACKING_BLOCKED_NO_BASELINE'?'저장된 가격·가격 기준일을 확정할 수 없습니다.':value.status==='BACKFILL_WINDOW_UNAVAILABLE'?'30행 일봉 범위에서 기준일을 확인할 수 없습니다.':'가격은 추정하지 않으며, 이 화면은 수집을 실행하지 않습니다.'}</p>}
+        </>:<p>{value.status==='TRACKING_BLOCKED_PROVIDER_MISMATCH'?'KIS 기준가격은 Naver 후속 가격과 섞어 수익률을 계산하지 않습니다. KIS 전용 성과 수집이 연결되기 전까지 보류합니다.':value.status==='TRACKING_BLOCKED_NO_BASELINE'?'저장된 가격·가격 기준일을 확정할 수 없습니다.':value.status==='BACKFILL_WINDOW_UNAVAILABLE'?'30행 일봉 범위에서 기준일을 확인할 수 없습니다.':'가격은 추정하지 않으며, 이 화면은 수집을 실행하지 않습니다.'}</p>}
       </article>)}</div>
     </li>)}</ul>
     {!data.candidates.length&&<p>이 실행에 추적 대상 최종 후보가 없습니다. 후보가 아닌 종목을 0%로 표시하지 않습니다.</p>}
