@@ -34,7 +34,7 @@ const detail=symbol=>({testOnly:true,symbol,newsSnapshotId:'TEST_ONLY_SNAPSHOT_'
   news:[{title:'TEST_ONLY '+symbol,summary:'TEST_ONLY',url:null}],strategy:strategy(),chartAnalysis:{},
   newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1},
   marketContext:{newsAssessment:{newsPassed:false,sentiment:'CAUTION',newsCount:1,negativeCount:1}}});
-function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,symbol=null,mode='expanded500'}={}){
+function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,searchResponse,storage={},symbol=null,mode='expanded500'}={}){
   let states=[],refs=[],memos=[],effects=[],cleanups=[];const calls=[],navigations=[],document=require('./helpers/public-meta-dom.cjs')();let stateCursor=0,refCursor=0,memoCursor=0;
   let props={routeSymbol:symbol,onNavigateStock:next=>navigate(next)};
   const react={...React,useState:initial=>{const store=states,i=stateCursor++;if(!(i in store))store[i]=bindings[i]==='recommendationMode'?mode:initial;
@@ -46,7 +46,7 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,sym
     const url=new URL(value,'http://127.0.0.1');calls.push(url);
     const symbol=url.searchParams.get('symbol');let body;
     switch(url.pathname){
-      case '/api/stock/search':body={symbol:'005930',name:'TEST_ONLY 삼성전자'};break;
+      case '/api/stock/search':body=searchResponse?await searchResponse(url.searchParams.get('query')):{symbol:'005930',name:'TEST_ONLY 삼성전자'};break;
       case '/api/stock/quote':body=quoteResponse?await quoteResponse(symbol):{symbol,stockName:'TEST_ONLY '+symbol,currentPrice:100};break;
       case '/api/stock/kis-chart':body={symbol,period:url.searchParams.get('period'),source:'KIS_NATIVE_PERIOD_OHLCV',status:'EMPTY',rows:[],
         metadata:{source:'KIS_NATIVE_PERIOD_OHLCV',sourceBusinessDate:null,sourceTimestamp:null,receivedAt:'2026-10-29T01:00:00Z',
@@ -67,7 +67,7 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,sym
     const module={exports:{}};
     vm.runInNewContext(transformSync(fs.readFileSync(file,'utf8'),{loader:file.endsWith('.jsx')?'jsx':'js',format:'cjs'}).code,
       {module,exports:module.exports,URL,Intl,Date,Number,Set,Map,AbortController,setTimeout,clearTimeout,document,console:{error(){}},fetch,
-        window:{location:{hostname:'127.0.0.1'},sessionStorage:{}},require:name=>{
+        window:{location:{hostname:'127.0.0.1'},sessionStorage:storage},require:name=>{
           if(name==='react')return react;if(name.endsWith('.css'))return {};
           if(['lucide-react','recharts'].includes(name))return new Proxy({},{get:()=>()=>null});
           if(/\/(?:PaperPanel|PaperAccess|ObservationPanel|CandidateOverview|RecommendationHistory)\.jsx$/.test(name))return {default:()=>null};
@@ -89,9 +89,9 @@ function harness({ai,aiStatus=200,detailResponse,quoteResponse,chartResponse,sym
     props={...props,routeSymbol:next};render();runEffects();
   };
   const state=name=>states[bindings.indexOf(name)];
-  const select=async symbol=>{
+  const select=async (symbol,name='TEST_ONLY')=>{
     const tree=render(),candidate=visit(tree,n=>n.type?.name==='ExpandedRecommendation');
-    if(candidate)candidate.props.onSelect({code:symbol,name:'TEST_ONLY'});
+    if(candidate)candidate.props.onSelect({code:symbol,name});
     else visit(tree,n=>n.type==='button'&&String(n.key).endsWith(symbol)).props.onClick();
     await tick();
   };

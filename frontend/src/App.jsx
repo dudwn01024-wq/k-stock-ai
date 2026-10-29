@@ -26,6 +26,7 @@ import AnalysisExtensions from './AnalysisExtensions.jsx';
 import {pricePlanState} from './utils/pricePlan.js';
 import PageMeta from './components/PageMeta.jsx';
 import { POPULAR_STOCKS } from './stockCatalog.js';
+import {resolveStockIdentity,rememberStockIdentity,STOCK_NAME_SOURCES} from './utils/stockIdentity.js';
 import { toNullableNumber, hasNumber, formatKRW as formatKRWDisplay } from './utils/numbers.js';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -499,7 +500,8 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
   const isStockRoute=routeSymbol!==null;
   const [searchQuery, setSearchQuery] = useState(routeSymbol || '삼성전자');
   const [activeSymbol, setActiveSymbol] = useState(routeSymbol || '005930');
-  const [activeName, setActiveName] = useState(routeSymbol || '삼성전자');
+  const [activeName, setActiveName] = useState(resolveStockIdentity(routeSymbol || '005930').name || '종목명 미확인');
+  const [activeIdentity,setActiveIdentity]=useState(resolveStockIdentity(routeSymbol || '005930'));
 
   const [quoteData, setQuoteData] = useState(null);
   const [chartState,setChartState]=useState({status:'IDLE',symbol:null,period:'D',rows:[],metadata:null,error:null});
@@ -581,6 +583,10 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
       setAiError(null);
       setAiAnalysis(null);
       setQuoteData(null);
+      const pendingIdentity=resolveStockIdentity(symbol);
+      setActiveSymbol(symbol);
+      setActiveName(pendingIdentity.name || '종목명 미확인');
+      setActiveIdentity(pendingIdentity);
       const period=TIMEFRAMES.some(value=>value.code===timeframe)?timeframe:'D';
       setChartTimeframe(period);
       void chartLoader.load({symbol,period}).catch(()=>{}); // Errors stay in the chart panel, independent of daily analysis.
@@ -613,10 +619,12 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
         setStrategyData(detail.strategy);
 
         setActiveSymbol(symbol);
-        // Names may come from the existing catalogue; price/metrics remain KIS-only.
-        const displayName=quote?.stockName||POPULAR_STOCKS.find(stock=>stock.code===symbol)?.name||name||symbol;
+        // Exact-symbol display metadata survives routing/refresh; quote metrics remain unchanged.
+        const identity=resolveStockIdentity(symbol,{quote});
+        const displayName=identity.name || '종목명 미확인';
+        setActiveIdentity(identity);
         setActiveName(displayName);
-        setSearchQuery(displayName);
+        setSearchQuery(identity.name || symbol);
       } catch (error) {
         console.error(error);
         if(request===detailRequestRef.current)setErrorMsg(error?.message || '실제 데이터를 불러오지 못했습니다.');
@@ -680,13 +688,15 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
           throw new Error('종목을 찾을 수 없습니다.');
         }
         targetSymbol = searchResult.symbol;
+        if(request===searchRequestRef.current)rememberStockIdentity({symbol:targetSymbol,
+          name:searchResult.stockName || searchResult.name,source:'SEARCH'});
       }
 
       if(request!==searchRequestRef.current)return;
       if(!/^\d{6}$/.test(targetSymbol))throw Error('올바른 6자리 종목코드가 아닙니다.');
       setLoading(detailFlightsRef.current.size>0);
       if(targetSymbol!==routeSymbol)onNavigateStock(targetSymbol);
-      else setSearchQuery(activeName);
+      else setSearchQuery(activeIdentity.name || activeSymbol);
     } catch (error) {
       console.error(error);
       if(request===searchRequestRef.current){
@@ -698,6 +708,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
   const handlePopularStock = (stock) => {
     if(!/^\d{6}$/.test(stock?.code))return;
+    rememberStockIdentity({symbol:stock.code,name:stock.name,source:'RECOMMENDATION'});
     if(stock.code===routeSymbol)return;
     ++searchRequestRef.current;
     setLoading(false);
@@ -739,7 +750,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
 
   return (
     <div className={`public-home public-light-theme ${!isStockRoute&&recommendationMode==='expanded500'&&!historyOpen&&activeTab!=='paper'?'expanded-home-theme ':''}min-h-screen bg-slate-950 text-slate-100 font-sans antialiased flex flex-col selection:bg-emerald-500 selection:text-slate-950`}>
-      <PageMeta path={routeSymbol?'/stocks/'+routeSymbol:'/'} stockName={routeSymbol&&quoteData?.symbol===routeSymbol?(quoteData.stockName||activeName):null}/>
+      <PageMeta path={routeSymbol?'/stocks/'+routeSymbol:'/'} stockName={routeSymbol&&quoteData?.symbol===routeSymbol?activeIdentity.name:null}/>
       <header className="home-header sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
         <div className="home-brand flex items-center gap-3">
           <div className="home-brand-mark w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
@@ -1260,14 +1271,17 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
             <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-2xl lg:text-3xl font-bold text-white">
-                      {quoteData.stockName || activeName}
+                  <div className="flex flex-wrap items-center gap-3 min-w-0" data-testid="stock-detail-identity">
+                    <h2 className="text-2xl lg:text-3xl font-bold text-white break-words min-w-0" style={{overflowWrap:'anywhere'}}>
+                      {activeIdentity.name || '종목명 미확인'}
                     </h2>
                     <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
                       {quoteData.symbol || activeSymbol}
                     </span>
                   </div>
+                  <p className="mt-1 text-xs text-slate-500" data-testid="stock-name-source">
+                    {activeIdentity.name?`종목명 정보: ${STOCK_NAME_SOURCES[activeIdentity.source]}`:'확인된 종목명이 없습니다. 종목코드로 분석을 표시합니다.'}
+                  </p>
 
                   <div className="mt-3 flex items-baseline gap-3 flex-wrap">
                     <span className="text-3xl lg:text-4xl font-extrabold font-mono text-white">
@@ -2327,7 +2341,7 @@ export default function App({routeSymbol=null,onNavigateStock=()=>{}}={}) {
               <div>
                 <h3 className="text-base font-semibold text-white flex items-center gap-2">
                   <Newspaper className="w-4 h-4 text-emerald-400" />
-                  {quoteData?.stockName || activeName} 최신 뉴스
+                  {activeIdentity.name || activeSymbol} 최신 뉴스
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">현재 상세 분석 시 조회한 뉴스입니다. 제공처 표기 시각과 최신성·완전성은 구분합니다.</p>
               </div>
